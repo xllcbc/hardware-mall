@@ -1,0 +1,83 @@
+/**
+ * 五金商城 - CSS 变量规范
+ * 品牌旗舰风：香槟金 + 米白底
+ */
+
+:root {
+  /* 主色调 - 香槟金 */
+  --color-primary: #C9A86C;
+  --color-primary-dark: #B8956A;
+  --color-primary-light: #E5D4B8;
+
+  /* 强调色 - 经典蓝 */
+  --color-accent: #1E3A5F;
+  --color-accent-light: #4A6B8A;
+
+  /* 背景色 */
+  --color-bg: #FAFAFA;
+  --color-bg-card: #FFFFFF;
+  --color-bg-dark: #F5F3EF;
+
+  /* 文字色 */
+  --color-text-primary: #2C2C2C;
+  --color-text-secondary: #666666;
+  --color-text-placeholder: #999999;
+  --color-text-light: #FFFFFF;
+
+  /* 功能色 */
+  --color-success: #4CAF50;
+  --color-warning: #FF9800;
+  --color-error: #E53935;
+  --color-info: #2196F3;
+
+  /* 边框色 */
+  --color-border: #E8E8E8;
+  --color-border-light: #F0F0F0;
+
+  /* TabBar 颜色 */
+  --color-tabbar-bg: #FFFFFF;
+  --color-tabbar-color: #999999;
+  --color-tabbar-selected: #C9A86C;
+
+  /* 字体 */
+  --font-family-heading: 'Cormorant Garamond', 'Georgia', serif;
+  --font-family-body: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* 字号 */
+  --font-size-xxl: 48rpx;
+  --font-size-xl: 40rpx;
+  --font-size-lg: 32rpx;
+  --font-size-md: 28rpx;
+  --font-size-sm: 24rpx;
+  --font-size-xs: 20rpx;
+
+  /* 圆角 */
+  --radius-sm: 8rpx;
+  --radius-md: 16rpx;
+  --radius-lg: 24rpx;
+  --radius-xl: 32rpx;
+  --radius-full: 9999rpx;
+
+  /* 渐变 */
+  --gradient-primary: linear-gradient(135deg, #C9A86C 0%, #E5D4B8 100%);
+  --gradient-primary-dark: linear-gradient(135deg, #C9A86C 0%, #B8956A 100%);
+  --gradient-accent: linear-gradient(135deg, #1E3A5F 0%, #4A6B8A 100%);
+  --gradient-light: linear-gradient(135deg, #E5D4B8 0%, #F5E6D3 100%);
+
+  /* 阴影 */
+  --shadow-sm: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4rpx 16rpx rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8rpx 32rpx rgba(0, 0, 0, 0.08);
+  --shadow-card: 0 4rpx 20rpx rgba(201, 168, 108, 0.08);
+
+  /* 间距 */
+  --spacing-xs: 8rpx;
+  --spacing-sm: 16rpx;
+  --spacing-md: 24rpx;
+  --spacing-lg: 32rpx;
+  --spacing-xl: 48rpx;
+  --spacing-xxl: 64rpx;
+
+  /* 安全区域 */
+  --safe-area-inset-bottom: env(safe-area-inset-bottom);
+}

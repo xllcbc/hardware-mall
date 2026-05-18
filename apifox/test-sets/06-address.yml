@@ -1,0 +1,143 @@
+name: "06-地址模块测试"
+description: "测试收货地址的CRUD及设置默认地址接口"
+baseUrl: "http://localhost:8080"
+
+testCases:
+
+  - name: "TC-601: 获取地址列表"
+    request:
+      method: GET
+      url: "/api/user/address/list"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          "@isArray()"
+
+  - name: "TC-602: 获取地址详情"
+    request:
+      method: GET
+      url: "/api/user/address/2"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          id: 2
+          consignee: "@isNotEmpty()"
+
+  - name: "TC-603: 创建新地址"
+    request:
+      method: POST
+      url: "/api/user/address"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        consignee: "测试收货人"
+        phone: "13900000000"
+        province: "广东省"
+        city: "广州市"
+        district: "天河区"
+        detail: "测试街道123号"
+        postalCode: "510000"
+        isDefault: 0
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+        data:
+          consignee: "测试收货人"
+    extract:
+      newAddressId: "body.data.id"
+
+  - name: "TC-604: 更新地址"
+    request:
+      method: PUT
+      url: "/api/user/address/{{newAddressId}}"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        consignee: "测试收货人-已更新"
+        phone: "13900000001"
+        province: "广东省"
+        city: "广州市"
+        district: "越秀区"
+        detail: "更新后的地址456号"
+        postalCode: "510100"
+        isDefault: 0
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-605: 验证地址已更新"
+    request:
+      method: GET
+      url: "/api/user/address/{{newAddressId}}"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          consignee: "测试收货人-已更新"
+          district: "越秀区"
+
+  - name: "TC-606: 设置该地址为默认"
+    request:
+      method: PUT
+      url: "/api/user/address/{{newAddressId}}/default"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-607: 验证该地址已是默认"
+    request:
+      method: GET
+      url: "/api/user/address/{{newAddressId}}"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          isDefault: 1
+
+  - name: "TC-608: 删除地址"
+    request:
+      method: DELETE
+      url: "/api/user/address/{{newAddressId}}"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-609: 获取不存在的地址详情"
+    request:
+      method: GET
+      url: "/api/user/address/99999"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 404
+        message: "@contains(地址不存在)"

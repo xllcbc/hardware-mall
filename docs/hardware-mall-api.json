@@ -1,0 +1,1713 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "五金商城系统API",
+    "version": "1.0.0",
+    "description": "五金商城系统接口规范文档，包含用户端和管理端所有接口",
+    "contact": {
+      "name": "五金商城开发团队"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "开发环境"
+    }
+  ],
+  "paths": {
+    "/api/admin/login": {
+      "post": {
+        "tags": ["管理端-认证模块"],
+        "summary": "管理员登录",
+        "description": "通过用户名密码登录，获取管理员Token",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "description": "管理员用户名"
+                  },
+                  "password": {
+                    "type": "string",
+                    "description": "管理员密码"
+                  }
+                },
+                "required": ["username", "password"]
+              },
+              "example": {
+                "username": "admin",
+                "password": "123456"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/refresh": {
+      "post": {
+        "tags": ["管理端-认证模块"],
+        "summary": "刷新管理员Token",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/user/list": {
+      "get": {
+        "tags": ["管理端-用户管理"],
+        "summary": "用户列表",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "province", "in": "query", "schema": { "type": "string" } },
+          { "name": "city", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/user/{id}/status": {
+      "put": {
+        "tags": ["管理端-用户管理"],
+        "summary": "更新用户状态",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": { "type": "integer", "description": "1-正常，0-禁用" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/admin/category/list": {
+      "get": {
+        "tags": ["管理端-商品管理"],
+        "summary": "分类列表",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Category"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/category": {
+      "post": {
+        "tags": ["管理端-商品管理"],
+        "summary": "创建分类",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Category"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/category/{id}": {
+      "get": {
+        "tags": ["管理端-商品管理"],
+        "summary": "分类详情",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["管理端-商品管理"],
+        "summary": "更新分类",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Category"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["管理端-商品管理"],
+        "summary": "删除分类",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/admin/product/list": {
+      "get": {
+        "tags": ["管理端-商品管理"],
+        "summary": "商品列表",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "categoryId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "keyword", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/product/{id}": {
+      "get": {
+        "tags": ["管理端-商品管理"],
+        "summary": "商品详情",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/product": {
+      "post": {
+        "tags": ["管理端-商品管理"],
+        "summary": "创建商品",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/product/{id}": {
+      "put": {
+        "tags": ["管理端-商品管理"],
+        "summary": "更新商品",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["管理端-商品管理"],
+        "summary": "删除商品",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/admin/product/{id}/status": {
+      "put": {
+        "tags": ["管理端-商品管理"],
+        "summary": "更新商品状态",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": { "type": "integer", "description": "1-上架，0-下架" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/admin/product/upload": {
+      "post": {
+        "tags": ["管理端-商品管理"],
+        "summary": "商品图片上传",
+        "description": "上传商品图片到阿里云OSS，返回图片访问URL",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "图片文件，支持jpg、png、gif、webp，不超过10MB"
+                  },
+                  "productId": {
+                    "type": "integer",
+                    "description": "商品ID（可选）"
+                  }
+                },
+                "required": ["file"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": { "type": "integer" },
+                    "message": { "type": "string" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "url": { "type": "string", "description": "图片访问URL" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/order/list": {
+      "get": {
+        "tags": ["管理端-订单管理"],
+        "summary": "订单列表",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "userId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "status", "in": "query", "schema": { "type": "integer" } },
+          { "name": "orderNo", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/order/{id}": {
+      "get": {
+        "tags": ["管理端-订单管理"],
+        "summary": "订单详情",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/order/stats": {
+      "get": {
+        "tags": ["管理端-订单管理"],
+        "summary": "订单统计数据",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/order/{id}/ship": {
+      "put": {
+        "tags": ["管理端-订单管理"],
+        "summary": "订单发货",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "logisticsId": { "type": "integer", "description": "物流ID" },
+                  "logisticsNo": { "type": "string", "description": "物流单号" }
+                },
+                "required": ["logisticsId", "logisticsNo"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/admin/order/{id}/refund": {
+      "put": {
+        "tags": ["管理端-订单管理"],
+        "summary": "订单退款",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": { "type": "string", "description": "退款原因" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/admin/logistics/list": {
+      "get": {
+        "tags": ["管理端-物流管理"],
+        "summary": "物流列表",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "city", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/logistics/{id}": {
+      "get": {
+        "tags": ["管理端-物流管理"],
+        "summary": "物流详情",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Logistics"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/logistics": {
+      "post": {
+        "tags": ["管理端-物流管理"],
+        "summary": "创建物流",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogisticsCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Logistics"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/logistics/{id}": {
+      "put": {
+        "tags": ["管理端-物流管理"],
+        "summary": "更新物流",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogisticsCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Logistics"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["管理端-物流管理"],
+        "summary": "删除物流",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/admin/logistics/{id}/status": {
+      "put": {
+        "tags": ["管理端-物流管理"],
+        "summary": "更新物流状态",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": { "type": "integer", "description": "1-启用，0-禁用" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/admin/dashboard/stats": {
+      "get": {
+        "tags": ["管理端-数据统计"],
+        "summary": "仪表盘统计数据",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": { "type": "integer" },
+                    "message": { "type": "string" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "todayOrders": { "type": "integer", "description": "今日订单数" },
+                        "todaySales": { "type": "integer", "description": "今日销售额(分)" },
+                        "pendingShip": { "type": "integer", "description": "待发货数" },
+                        "totalProducts": { "type": "integer", "description": "商品总数" },
+                        "trend": {
+                          "type": "object",
+                          "properties": {
+                            "ordersTrend": { "type": "number" },
+                            "salesTrend": { "type": "number" },
+                            "shipTrend": { "type": "number" },
+                            "productTrend": { "type": "number" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/dashboard/recent-orders": {
+      "get": {
+        "tags": ["管理端-数据统计"],
+        "summary": "最新订单列表",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 5 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Order"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/login": {
+      "post": {
+        "tags": ["用户端-认证模块"],
+        "summary": "用户登录",
+        "description": "通过微信授权code获取token和用户信息",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "description": "微信授权code"
+                  }
+                },
+                "required": ["code"]
+              },
+              "example": {
+                "code": "061xxx"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/info": {
+      "get": {
+        "tags": ["用户端-认证模块"],
+        "summary": "获取用户信息",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["用户端-认证模块"],
+        "summary": "更新用户信息",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/User"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/refresh": {
+      "post": {
+        "tags": ["用户端-认证模块"],
+        "summary": "刷新Token",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": { "type": "integer" },
+                    "message": { "type": "string" },
+                    "data": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/category/list": {
+      "get": {
+        "tags": ["用户端-商品"],
+        "summary": "分类列表",
+        "description": "获取商品分类树形结构",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Category"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/category/{id}": {
+      "get": {
+        "tags": ["用户端-商品"],
+        "summary": "分类详情",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/product/list": {
+      "get": {
+        "tags": ["用户端-商品"],
+        "summary": "商品列表",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "categoryId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "keyword", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/product/recommend": {
+      "get": {
+        "tags": ["用户端-商品"],
+        "summary": "推荐商品",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Product"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/product/{id}": {
+      "get": {
+        "tags": ["用户端-商品"],
+        "summary": "商品详情",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/cart/list": {
+      "get": {
+        "tags": ["用户端-购物车"],
+        "summary": "购物车列表",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CartItem"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/cart/add": {
+      "post": {
+        "tags": ["用户端-购物车"],
+        "summary": "添加购物车",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "productId": { "type": "integer", "description": "商品ID" },
+                  "quantity": { "type": "integer", "description": "数量" }
+                },
+                "required": ["productId", "quantity"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/user/cart/{id}/quantity": {
+      "put": {
+        "tags": ["用户端-购物车"],
+        "summary": "更新购物车数量",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "quantity": { "type": "integer", "description": "数量" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/user/cart/{id}": {
+      "delete": {
+        "tags": ["用户端-购物车"],
+        "summary": "删除购物车商品",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/user/cart/clear": {
+      "delete": {
+        "tags": ["用户端-购物车"],
+        "summary": "清空购物车",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/user/order/create": {
+      "post": {
+        "tags": ["用户端-订单"],
+        "summary": "创建订单",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/order/list": {
+      "get": {
+        "tags": ["用户端-订单"],
+        "summary": "订单列表",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "status", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/order/{id}": {
+      "get": {
+        "tags": ["用户端-订单"],
+        "summary": "订单详情",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/order/{id}/cancel": {
+      "put": {
+        "tags": ["用户端-订单"],
+        "summary": "取消订单",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": { "type": "string", "description": "取消原因" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/user/order/{id}/receive": {
+      "put": {
+        "tags": ["用户端-订单"],
+        "summary": "确认收货",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/user/address/list": {
+      "get": {
+        "tags": ["用户端-地址"],
+        "summary": "地址列表",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Address"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/address/{id}": {
+      "get": {
+        "tags": ["用户端-地址"],
+        "summary": "地址详情",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Address"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/address": {
+      "post": {
+        "tags": ["用户端-地址"],
+        "summary": "创建地址",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Address"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/address/{id}": {
+      "put": {
+        "tags": ["用户端-地址"],
+        "summary": "更新地址",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Address"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["用户端-地址"],
+        "summary": "删除地址",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/user/address/{id}/default": {
+      "put": {
+        "tags": ["用户端-地址"],
+        "summary": "设置默认地址",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/user/logistics/list": {
+      "get": {
+        "tags": ["用户端-物流"],
+        "summary": "物流列表",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Logistics"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/region/provinces": {
+      "get": {
+        "tags": ["公共-省市数据"],
+        "summary": "获取省份列表",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "value": { "type": "string" },
+                      "label": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/region/cities": {
+      "get": {
+        "tags": ["公共-省市数据"],
+        "summary": "获取城市列表",
+        "parameters": [
+          { "name": "province", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "value": { "type": "string" },
+                      "label": { "type": "string" },
+                      "province": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT Token认证"
+      }
+    },
+    "schemas": {
+      "Result": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "message": { "type": "string", "example": "success" },
+          "data": { "type": "object" }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer" },
+          "message": { "type": "string" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "token": { "type": "string" },
+              "userInfo": { "$ref": "#/components/schemas/User" }
+            }
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "openid": { "type": "string" },
+          "unionid": { "type": "string" },
+          "nickname": { "type": "string" },
+          "avatarUrl": { "type": "string" },
+          "phone": { "type": "string" },
+          "province": { "type": "string" },
+          "city": { "type": "string" },
+          "role": { "type": "integer", "description": "1-普通用户，2-管理员" },
+          "status": { "type": "integer", "description": "1-正常，0-禁用" },
+          "lastLoginTime": { "type": "string" },
+          "lastLoginIp": { "type": "string" },
+          "createTime": { "type": "string" }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "categoryId": { "type": "integer" },
+          "name": { "type": "string" },
+          "subtitle": { "type": "string" },
+          "spec": { "type": "string" },
+          "description": { "type": "string" },
+          "images": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "price": { "type": "integer", "description": "单价，单位：分" },
+          "originalPrice": { "type": "integer", "description": "原价，单位：分" },
+          "stock": { "type": "integer" },
+          "salesCount": { "type": "integer" },
+          "status": { "type": "integer", "description": "1-上架，0-下架" },
+          "isRecommend": { "type": "integer", "description": "1-推荐，0-非推荐" },
+          "categoryName": { "type": "string" },
+          "createTime": { "type": "string" }
+        }
+      },
+      "ProductCreate": {
+        "type": "object",
+        "properties": {
+          "categoryId": { "type": "integer" },
+          "name": { "type": "string" },
+          "subtitle": { "type": "string" },
+          "spec": { "type": "string" },
+          "description": { "type": "string" },
+          "images": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "price": { "type": "integer" },
+          "originalPrice": { "type": "integer" },
+          "stock": { "type": "integer" },
+          "status": { "type": "integer" },
+          "isRecommend": { "type": "integer" }
+        },
+        "required": ["categoryId", "name", "price", "stock"]
+      },
+      "Category": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "parentId": { "type": "integer" },
+          "name": { "type": "string" },
+          "icon": { "type": "string" },
+          "sortOrder": { "type": "integer" },
+          "status": { "type": "integer" },
+          "children": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "name": { "type": "string" },
+                "sortOrder": { "type": "integer" }
+              }
+            }
+          }
+        }
+      },
+      "Logistics": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "code": { "type": "string" },
+          "description": { "type": "string" },
+          "contact": { "type": "string" },
+          "phones": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "city": { "type": "string" },
+          "address": { "type": "string" },
+          "sortOrder": { "type": "integer" },
+          "status": { "type": "integer" }
+        }
+      },
+      "LogisticsCreate": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "code": { "type": "string" },
+          "description": { "type": "string" },
+          "contact": { "type": "string" },
+          "phones": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "city": { "type": "string" },
+          "sortOrder": { "type": "integer" },
+          "status": { "type": "integer" }
+        },
+        "required": ["name", "code"]
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "orderNo": { "type": "string" },
+          "userId": { "type": "integer" },
+          "receiverName": { "type": "string" },
+          "receiverPhone": { "type": "string" },
+          "receiverAddress": { "type": "string" },
+          "totalAmount": { "type": "integer", "description": "订单总金额，单位：分" },
+          "freightAmount": { "type": "integer", "description": "运费，单位：分" },
+          "payAmount": { "type": "integer", "description": "实付金额，单位：分" },
+          "status": { "type": "integer" },
+          "statusText": { "type": "string" },
+          "logisticsName": { "type": "string" },
+          "logisticsNo": { "type": "string" },
+          "payTime": { "type": "string" },
+          "shipTime": { "type": "string" },
+          "receiveTime": { "type": "string" },
+          "cancelTime": { "type": "string" },
+          "cancelReason": { "type": "string" },
+          "buyerRemark": { "type": "string" },
+          "createTime": { "type": "string" },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/OrderItem" }
+          }
+        }
+      },
+      "OrderItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "orderId": { "type": "integer" },
+          "productId": { "type": "integer" },
+          "productName": { "type": "string" },
+          "productSpec": { "type": "string" },
+          "productImage": { "type": "string" },
+          "price": { "type": "integer" },
+          "quantity": { "type": "integer" },
+          "subtotal": { "type": "integer" }
+        }
+      },
+      "OrderCreate": {
+        "type": "object",
+        "properties": {
+          "addressId": { "type": "integer" },
+          "logisticsId": { "type": "integer" },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "productId": { "type": "integer" },
+                "quantity": { "type": "integer" }
+              }
+            }
+          },
+          "buyerRemark": { "type": "string" }
+        },
+        "required": ["addressId", "logisticsId", "items"]
+      },
+      "Address": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "userId": { "type": "integer" },
+          "consignee": { "type": "string" },
+          "phone": { "type": "string" },
+          "province": { "type": "string" },
+          "city": { "type": "string" },
+          "district": { "type": "string" },
+          "detail": { "type": "string" },
+          "postalCode": { "type": "string" },
+          "isDefault": { "type": "integer", "description": "1-默认，0-非默认" }
+        }
+      },
+      "AddressCreate": {
+        "type": "object",
+        "properties": {
+          "consignee": { "type": "string" },
+          "phone": { "type": "string" },
+          "province": { "type": "string" },
+          "city": { "type": "string" },
+          "district": { "type": "string" },
+          "detail": { "type": "string" },
+          "postalCode": { "type": "string" },
+          "isDefault": { "type": "integer" }
+        },
+        "required": ["consignee", "phone", "province", "city", "district", "detail"]
+      },
+      "CartItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "userId": { "type": "integer" },
+          "productId": { "type": "integer" },
+          "quantity": { "type": "integer" },
+          "product": { "$ref": "#/components/schemas/Product" }
+        }
+      },
+      "PageResult": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer" },
+          "message": { "type": "string" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "list": {
+                "type": "array",
+                "items": {}
+              },
+              "total": { "type": "integer" },
+              "page": { "type": "integer" },
+              "limit": { "type": "integer" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "projectId": "8029650",
+  "token": "afxp_ae7a7aPo1XSDtjPBVwZ9wkISKvdUzEVcmpcz",
+  "server": "https://api.apifox.com",
+  "outputDir": "./apifox/reports",
+  "reportFormat": ["html"]
+}

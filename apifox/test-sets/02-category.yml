@@ -1,0 +1,115 @@
+name: "02-分类模块测试"
+description: "测试商品分类的列表和详情接口"
+baseUrl: "http://localhost:8080"
+
+testCases:
+
+  - name: "TC-201: 用户端-获取分类列表"
+    request:
+      method: GET
+      url: "/api/user/category/list"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+        data:
+          "@isArray()"
+
+  - name: "TC-202: 用户端-获取分类详情"
+    request:
+      method: GET
+      url: "/api/user/category/1"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          id: 1
+          name: "锁具"
+
+  - name: "TC-203: 管理端-获取分类列表"
+    request:
+      method: GET
+      url: "/api/admin/category/list"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          "@isArray()"
+
+  - name: "TC-204: 管理端-获取分类详情"
+    request:
+      method: GET
+      url: "/api/admin/category/1"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          id: 1
+          name: "锁具"
+
+  - name: "TC-205: 管理端-创建新分类"
+    request:
+      method: POST
+      url: "/api/admin/category"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+        Content-Type: "application/json"
+      body:
+        name: "测试分类-临时"
+        sortOrder: 50
+        status: 1
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          name: "测试分类-临时"
+    extract:
+      newCategoryId: "body.data.id"
+
+  - name: "TC-206: 管理端-更新分类"
+    request:
+      method: PUT
+      url: "/api/admin/category/{{newCategoryId}}"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+        Content-Type: "application/json"
+      body:
+        name: "测试分类-已更新"
+        sortOrder: 60
+        status: 1
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-207: 管理端-删除分类"
+    request:
+      method: DELETE
+      url: "/api/admin/category/{{newCategoryId}}"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-208: 获取不存在的分类详情"
+    request:
+      method: GET
+      url: "/api/user/category/99999"
+    expect:
+      statusCode: 200
+      body:
+        code: 404
+        message: "@contains(分类不存在)"

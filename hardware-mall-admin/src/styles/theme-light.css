@@ -1,0 +1,26 @@
+[data-theme="light"] {
+  --bg-page: #F3F4F6;
+  --bg-card: #FFFFFF;
+  --bg-sidebar: #1F2937;
+  --bg-sidebar-hover: #374151;
+  --bg-sidebar-active: #2563EB;
+  --bg-header: #FFFFFF;
+  --bg-input: #FFFFFF;
+  
+  --text-primary: #111827;
+  --text-secondary: #6B7280;
+  --text-tertiary: #9CA3AF;
+  --text-sidebar: #D1D5DB;
+  --text-sidebar-active: #FFFFFF;
+  
+  --border-color: #E5E7EB;
+  --border-light: #F3F4F6;
+  
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 10px 20px rgba(0, 0, 0, 0.08), 0 3px 6px rgba(0, 0, 0, 0.04);
+  
+  --stat-icon-bg-1: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+  --stat-icon-bg-2: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  --stat-icon-bg-3: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+  --stat-icon-bg-4: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+}

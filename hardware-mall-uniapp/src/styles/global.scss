@@ -1,0 +1,160 @@
+/**
+ * 五金商城 - 全局样式
+ */
+
+@import './variables.scss';
+@import './mixins.scss';
+
+/* 重置样式 */
+page {
+  background-color: #FAFAFA;
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+view, text, image, navigator, button, input, textarea {
+  box-sizing: border-box;
+}
+
+/* 去除默认点击高亮 */
+view {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 通用标题 */
+.h1 {
+  font-family: var(--font-family-heading);
+  font-size: var(--font-size-xxl);
+  font-weight: 700;
+}
+
+.h2 {
+  font-family: var(--font-family-heading);
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+}
+
+.h3 {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+/* 通用文本 */
+.text-primary {
+  color: var(--color-text-primary);
+}
+
+.text-secondary {
+  color: var(--color-text-secondary);
+}
+
+.text-placeholder {
+  color: var(--color-text-placeholder);
+}
+
+.text-primary-color {
+  color: var(--color-primary);
+}
+
+/* 通用价格 */
+.price {
+  @include price;
+}
+
+.price-original {
+  @include price-original;
+  font-size: var(--font-size-sm);
+}
+
+/* 通用间距 */
+.mt-sm { margin-top: var(--spacing-sm); }
+.mt-md { margin-top: var(--spacing-md); }
+.mt-lg { margin-top: var(--spacing-lg); }
+
+.mb-sm { margin-bottom: var(--spacing-sm); }
+.mb-md { margin-bottom: var(--spacing-md); }
+.mb-lg { margin-bottom: var(--spacing-lg); }
+
+.p-sm { padding: var(--spacing-sm); }
+.p-md { padding: var(--spacing-md); }
+.p-lg { padding: var(--spacing-lg); }
+
+/* 通用布局 */
+.flex {
+  display: flex;
+}
+
+.flex-center {
+  @include flex-center;
+}
+
+.flex-between {
+  @include flex-between;
+}
+
+.flex-column {
+  @include flex-column;
+}
+
+/* 通用卡片 */
+.card {
+  @include card;
+  padding: var(--spacing-md);
+}
+
+/* 按钮 */
+.btn {
+  height: 80rpx;
+  padding: 0 var(--spacing-lg);
+  font-size: var(--font-size-md);
+  @include flex-center;
+  @include card-pressed;
+}
+
+.btn-primary {
+  @include btn-primary;
+}
+
+.btn-outline {
+  @include btn-outline;
+}
+
+/* 空状态 */
+.empty-state {
+  @include flex-column;
+  align-items: center;
+  padding: var(--spacing-xxl) 0;
+
+  &-icon {
+    font-size: 120rpx;
+    opacity: 0.5;
+    margin-bottom: var(--spacing-md);
+  }
+
+  &-text {
+    color: var(--color-text-placeholder);
+    font-size: var(--font-size-md);
+  }
+}
+
+/* 加载状态 */
+.loading-state {
+  @include flex-center;
+  padding: var(--spacing-xl) 0;
+  color: var(--color-text-placeholder);
+}
+
+/* 分割线 */
+.divider {
+  height: 1rpx;
+  background-color: var(--color-border-light);
+  margin: var(--spacing-md) 0;
+}
+
+/* 安全区域底部间距 */
+.safe-bottom {
+  @include safe-area-bottom;
+}

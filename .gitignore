@@ -1,0 +1,34 @@
+# 环境变量文件 (含密钥)
+.env
+.env.local
+.env.*.local
+
+# 生产环境配置 (含密钥)
+application-prod.yml
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+target/
+dist/
+node_modules/
+*.log
+
+# AI 开发工具
+.opencode/
+.sisyphus/
+
+# 个人文件
+markdown-resume-*.json
+简历-*.md
+*.xlsx
+
+# 真实数据文件
+seed_real_products.sql

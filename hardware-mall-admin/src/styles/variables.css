@@ -1,0 +1,156 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ═══════════════════════════════════════════════════════════
+     Industrial Refined Theme - Hardware Mall Admin
+     Aesthetic: Slate Steel + Copper Accents
+     ═══════════════════════════════════════════════════════════ */
+
+  /* Primary Colors - Copper/Bronze Tones */
+  --primary-color: #C9956C;
+  --primary-light: #DDB892;
+  --primary-dark: #A67B5B;
+  --primary-bg: rgba(201, 149, 108, 0.08);
+  --primary-glow: rgba(201, 149, 108, 0.3);
+
+  /* Secondary - Steel Blue Accents */
+  --accent-color: #5B7C99;
+  --accent-light: #7A9BBA;
+  --accent-dark: #3D5A73;
+
+  /* Text Colors - Warm Neutrals */
+  --text-primary: #1A1A1A;
+  --text-secondary: #5C5C5C;
+  --text-tertiary: #8A8A8A;
+  --text-inverse: #FAFAFA;
+
+  /* Neutral Colors - Slate Palette */
+  --bg-page: #F0EDE8;
+  --bg-card: #FFFFFF;
+  --bg-sidebar: #1E2429;
+  --bg-header: #FFFFFF;
+  --border-color: #D9D5CF;
+  --border-light: #EAE7E2;
+  --border-accent: rgba(201, 149, 108, 0.3);
+
+  /* Functional Colors */
+  --success: #5D9E6A;
+  --success-light: #E8F5EC;
+  --warning: #D4A84B;
+  --warning-light: #FDF6E3;
+  --danger: #C75D5D;
+  --danger-light: #FCECEC;
+  --info: #5B7C99;
+  --info-light: #EDF2F7;
+
+  /* Shadows - Layered Depth */
+  --shadow-xs: 0 1px 2px rgba(26, 26, 26, 0.04);
+  --shadow-sm: 0 2px 8px rgba(26, 26, 26, 0.06), 0 1px 2px rgba(26, 26, 26, 0.04);
+  --shadow-md: 0 8px 24px rgba(26, 26, 26, 0.08), 0 2px 8px rgba(26, 26, 26, 0.04);
+  --shadow-lg: 0 20px 40px rgba(26, 26, 26, 0.1), 0 8px 16px rgba(26, 26, 26, 0.06);
+  --shadow-xl: 0 32px 64px rgba(26, 26, 26, 0.12), 0 16px 32px rgba(26, 26, 26, 0.08);
+  --shadow-glow: 0 0 20px var(--primary-glow);
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  /* Typography - Distinctive Font Pairing */
+  --font-display: 'Cormorant Garamond', 'Noto Serif SC', Georgia, serif;
+  --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+  --font-size-xs: 13px;
+  --font-size-sm: 14px;
+  --font-size-base: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 26px;
+  --font-size-3xl: 32px;
+  --font-size-4xl: 42px;
+
+  /* Line Heights */
+  --leading-tight: 1.2;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.75;
+
+  /* Transitions */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-bounce: 600ms cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* Z-Index Scale */
+  --z-dropdown: 100;
+  --z-sticky: 110;
+  --z-modal: 200;
+  --z-tooltip: 300;
+  --z-toast: 400;
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 72px;
+  --header-height: 64px;
+
+  /* Gradient Presets */
+  --gradient-primary: linear-gradient(135deg, var(--primary-color), var(--primary-light));
+  --gradient-dark: linear-gradient(135deg, #1E2429, #2D363D);
+  --gradient-surface: linear-gradient(180deg, var(--bg-card), var(--bg-page));
+  --gradient-glow: radial-gradient(ellipse at center, var(--primary-glow), transparent 70%);
+
+  /* Noise Texture */
+  --noise-opacity: 0.03;
+}
+
+/* Dark Theme - Industrial Night */
+[data-theme="dark"] {
+  --primary-color: #DDB892;
+  --primary-light: #E8C9A8;
+  --primary-dark: #C9956C;
+  --primary-bg: rgba(221, 184, 146, 0.1);
+  --primary-glow: rgba(221, 184, 146, 0.25);
+
+  --accent-color: #7A9BBA;
+  --accent-light: #9BB5CA;
+  --accent-dark: #5B7C99;
+
+  --text-primary: #F0EDE8;
+  --text-secondary: #B8B4AE;
+  --text-tertiary: #7A7672;
+  --text-inverse: #1A1A1A;
+
+  --bg-page: #141819;
+  --bg-card: #1E2429;
+  --bg-sidebar: #0F1214;
+  --bg-header: #1E2429;
+  --border-color: #2D3439;
+  --border-light: #252A2E;
+  --border-accent: rgba(201, 149, 108, 0.2);
+
+  --success-light: #1A3D2A;
+  --warning-light: #3D3520;
+  --danger-light: #3D2020;
+  --info-light: #1E2D3D;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.5), 0 8px 16px rgba(0, 0, 0, 0.35);
+  --shadow-xl: 0 32px 64px rgba(0, 0, 0, 0.6), 0 16px 32px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 30px var(--primary-glow);
+
+  --gradient-primary: linear-gradient(135deg, var(--primary-light), var(--primary-color));
+  --gradient-dark: linear-gradient(135deg, #0F1214, #1E2429);
+}

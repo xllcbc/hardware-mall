@@ -1,0 +1,260 @@
+name: "05-订单模块测试"
+description: "测试订单的创建、查询、取消、收货及管理端发货退款接口"
+baseUrl: "http://localhost:8080"
+
+testCases:
+
+  - name: "TC-501: 先添加商品到购物车准备下单"
+    request:
+      method: POST
+      url: "/api/user/cart/add"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        productId: 1
+        quantity: 2
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+
+  - name: "TC-502: 创建订单"
+    request:
+      method: POST
+      url: "/api/user/order/create"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        addressId: 2
+        logisticsId: 1
+        items:
+          - productId: 1
+            quantity: 2
+        buyerRemark: "测试订单备注"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+        data:
+          orderNo: "@isNotEmpty()"
+          status: 1
+    extract:
+      orderId: "body.data.id"
+      orderNo: "body.data.orderNo"
+
+  - name: "TC-503: 获取订单列表"
+    request:
+      method: GET
+      url: "/api/user/order/list"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+      query:
+        page: 1
+        limit: 10
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          list:
+            "@isArray()"
+
+  - name: "TC-504: 获取订单详情"
+    request:
+      method: GET
+      url: "/api/user/order/{{orderId}}"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          id: "{{orderId}}"
+          orderNo: "{{orderNo}}"
+          status: 1
+          items:
+            "@isArray()"
+
+  - name: "TC-505: 取消订单"
+    request:
+      method: PUT
+      url: "/api/user/order/{{orderId}}/cancel"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        reason: "测试取消原因"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-506: 验证订单已取消"
+    request:
+      method: GET
+      url: "/api/user/order/{{orderId}}"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          status: 5
+
+  - name: "TC-507: 创建新订单准备测试其他流程"
+    request:
+      method: POST
+      url: "/api/user/order/create"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        addressId: 2
+        logisticsId: 1
+        items:
+          - productId: 2
+            quantity: 1
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+    extract:
+      orderId2: "body.data.id"
+
+  - name: "TC-508: 确认收货"
+    request:
+      method: PUT
+      url: "/api/user/order/{{orderId2}}/receive"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-509: 验证订单已收货"
+    request:
+      method: GET
+      url: "/api/user/order/{{orderId2}}"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          status: 4
+
+  - name: "TC-510: 管理端-获取订单列表"
+    request:
+      method: GET
+      url: "/api/admin/order/list"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+      query:
+        page: 1
+        limit: 10
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          list:
+            "@isArray()"
+
+  - name: "TC-511: 管理端-获取订单详情"
+    request:
+      method: GET
+      url: "/api/admin/order/{{orderId}}"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          id: "{{orderId}}"
+
+  - name: "TC-512: 管理端-获取订单统计数据"
+    request:
+      method: GET
+      url: "/api/admin/order/stats"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+
+  - name: "TC-513: 管理端-创建待发货订单用于测试发货"
+    request:
+      method: POST
+      url: "/api/user/order/create"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        addressId: 2
+        logisticsId: 1
+        items:
+          - productId: 3
+            quantity: 1
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+    extract:
+      orderId3: "body.data.id"
+
+  - name: "TC-514: 管理端-订单发货"
+    request:
+      method: PUT
+      url: "/api/admin/order/{{orderId3}}/ship"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+        Content-Type: "application/json"
+      body:
+        logisticsId: 1
+        logisticsNo: "SF1234567890"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-515: 管理端-订单退款"
+    request:
+      method: PUT
+      url: "/api/admin/order/{{orderId}}/refund"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+        Content-Type: "application/json"
+      body:
+        reason: "测试退款原因"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-516: 管理端-获取最新订单列表"
+    request:
+      method: GET
+      url: "/api/admin/dashboard/recent-orders"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+      query:
+        limit: 5
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          "@isArray()"

@@ -1,0 +1,115 @@
+/**
+ * 五金商城 - SCSS 混入
+ */
+
+/* flex 布局 */
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@mixin flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+@mixin flex-column {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 文字省略 */
+@mixin text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@mixin text-ellipsis-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 卡片样式 */
+@mixin card {
+  background-color: var(--color-bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+@mixin card-pressed {
+  &:active {
+    opacity: 0.9;
+    transform: scale(0.98);
+  }
+}
+
+/* 按钮样式 */
+@mixin btn-primary {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+  color: var(--color-text-light);
+  border-radius: var(--radius-lg);
+  @include flex-center;
+  @include card-pressed;
+}
+
+@mixin btn-outline {
+  background-color: transparent;
+  border: 2rpx solid var(--color-primary);
+  color: var(--color-primary);
+  border-radius: var(--radius-lg);
+  @include flex-center;
+  @include card-pressed;
+}
+
+/* 价格样式 */
+@mixin price {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+@mixin price-original {
+  color: var(--color-text-placeholder);
+  text-decoration: line-through;
+}
+
+/* 页面容器 */
+@mixin page-container {
+  min-height: 100vh;
+  background-color: var(--color-bg);
+  padding: var(--spacing-md);
+}
+
+/* 安全区域底部 */
+@mixin safe-area-bottom {
+  padding-bottom: calc(var(--spacing-md) + var(--safe-area-inset-bottom));
+}
+
+/* 标题样式 */
+@mixin section-title {
+  font-family: var(--font-family-heading);
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: var(--spacing-md);
+}
+
+/* 图片 1:1 比例 */
+@mixin image-square {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+}
+
+/* 动画 */
+@mixin transition-fast {
+  transition: all 0.2s ease;
+}
+
+@mixin transition-normal {
+  transition: all 0.3s ease;
+}

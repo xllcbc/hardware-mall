@@ -1,0 +1,180 @@
+-- H2 兼容的测试数据库 schema
+-- 用于 JUnit 集成测试
+
+CREATE TABLE IF NOT EXISTS `user` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `openid` VARCHAR(64) NOT NULL,
+    `unionid` VARCHAR(64) DEFAULT NULL,
+    `nickname` VARCHAR(50) DEFAULT NULL,
+    `avatar_url` VARCHAR(255) DEFAULT NULL,
+    `phone` VARCHAR(20) DEFAULT NULL,
+    `province` VARCHAR(50) DEFAULT NULL,
+    `city` VARCHAR(50) DEFAULT NULL,
+    `role` TINYINT NOT NULL DEFAULT 1,
+    `status` TINYINT NOT NULL DEFAULT 1,
+    `last_login_time` DATETIME DEFAULT NULL,
+    `last_login_ip` VARCHAR(50) DEFAULT NULL,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `delete_time` BIGINT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS `address` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `user_id` BIGINT NOT NULL,
+    `consignee` VARCHAR(50) NOT NULL,
+    `phone` VARCHAR(20) NOT NULL,
+    `province` VARCHAR(50) NOT NULL,
+    `city` VARCHAR(50) NOT NULL,
+    `district` VARCHAR(50) NOT NULL,
+    `detail` VARCHAR(255) NOT NULL,
+    `postal_code` VARCHAR(10) DEFAULT NULL,
+    `is_default` TINYINT NOT NULL DEFAULT 0,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `delete_time` BIGINT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS `category` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `parent_id` BIGINT NOT NULL DEFAULT 0,
+    `name` VARCHAR(50) NOT NULL,
+    `icon` VARCHAR(255) DEFAULT NULL,
+    `sort_order` INT NOT NULL DEFAULT 0,
+    `status` TINYINT NOT NULL DEFAULT 1,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `delete_time` BIGINT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS `spu` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `category_id` BIGINT NOT NULL,
+    `name` VARCHAR(100) NOT NULL,
+    `subtitle` VARCHAR(200) DEFAULT NULL,
+    `description` TEXT DEFAULT NULL,
+    `images` TEXT DEFAULT NULL,
+    `original_price` DECIMAL(10,2) DEFAULT NULL,
+    `weight` DECIMAL(10,2) DEFAULT NULL,
+    `sales_count` INT NOT NULL DEFAULT 0,
+    `status` TINYINT NOT NULL DEFAULT 1,
+    `is_recommend` TINYINT NOT NULL DEFAULT 0,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `delete_time` BIGINT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS `sku` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `spu_id` BIGINT NOT NULL,
+    `specs` TEXT NOT NULL,
+    `price` DECIMAL(10,2) NOT NULL DEFAULT 0,
+    `stock` INT NOT NULL DEFAULT 0,
+    `image` VARCHAR(255) DEFAULT NULL,
+    `status` TINYINT NOT NULL DEFAULT 1,
+    `spec_hash` VARCHAR(64) NOT NULL,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `delete_time` BIGINT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS `spec_template` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `category_id` BIGINT NOT NULL,
+    `name` VARCHAR(50) NOT NULL,
+    `spec_type` TINYINT NOT NULL DEFAULT 1,
+    `is_required` TINYINT NOT NULL DEFAULT 1,
+    `sort_order` INT NOT NULL DEFAULT 0,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `delete_time` BIGINT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS `spec_item` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `template_id` BIGINT NOT NULL,
+    `value` VARCHAR(50) NOT NULL,
+    `sort_order` INT NOT NULL DEFAULT 0,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `delete_time` BIGINT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS `cart` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `user_id` BIGINT NOT NULL,
+    `sku_id` BIGINT NOT NULL,
+    `quantity` INT NOT NULL DEFAULT 1,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `delete_time` BIGINT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS `logistics` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(50) NOT NULL,
+    `code` VARCHAR(50) NOT NULL,
+    `description` VARCHAR(255) DEFAULT NULL,
+    `contact` VARCHAR(50) DEFAULT NULL,
+    `phones` TEXT DEFAULT NULL,
+    `city` VARCHAR(50) DEFAULT NULL,
+    `address` VARCHAR(255) DEFAULT NULL,
+    `sort_order` INT NOT NULL DEFAULT 0,
+    `status` TINYINT NOT NULL DEFAULT 1,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `delete_time` BIGINT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS `shop_order` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `order_no` VARCHAR(32) NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `address_id` BIGINT NOT NULL,
+    `logistics_id` BIGINT NOT NULL,
+    `status` TINYINT NOT NULL DEFAULT 1,
+    `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `freight_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `pay_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `logistics_no` VARCHAR(50) DEFAULT NULL,
+    `pay_time` DATETIME DEFAULT NULL,
+    `ship_time` DATETIME DEFAULT NULL,
+    `receive_time` DATETIME DEFAULT NULL,
+    `cancel_time` DATETIME DEFAULT NULL,
+    `cancel_reason` VARCHAR(255) DEFAULT NULL,
+    `buyer_remark` VARCHAR(500) DEFAULT NULL,
+    `admin_remark` VARCHAR(500) DEFAULT NULL,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `admin_delete_time` BIGINT DEFAULT NULL,
+    `user_delete_time` BIGINT DEFAULT NULL
+);
+
+CREATE TABLE IF NOT EXISTS `order_item` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `order_id` BIGINT NOT NULL,
+    `sku_id` BIGINT NOT NULL,
+    `spu_id` BIGINT NOT NULL,
+    `product_name` VARCHAR(100) NOT NULL,
+    `product_spec` VARCHAR(500) DEFAULT NULL,
+    `product_image` VARCHAR(255) DEFAULT NULL,
+    `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `quantity` INT NOT NULL DEFAULT 1,
+    `subtotal` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS `mq_message` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `business_type` VARCHAR(50) NOT NULL,
+    `business_id` VARCHAR(64) NOT NULL,
+    `exchange` VARCHAR(100) DEFAULT NULL,
+    `routing_key` VARCHAR(100) DEFAULT NULL,
+    `message_body` TEXT DEFAULT NULL,
+    `status` INT NOT NULL DEFAULT 0,
+    `retry_count` INT NOT NULL DEFAULT 0,
+    `error_msg` VARCHAR(500) DEFAULT NULL,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `send_time` DATETIME DEFAULT NULL,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

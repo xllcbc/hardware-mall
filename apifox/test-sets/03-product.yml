@@ -1,0 +1,199 @@
+name: "03-商品模块测试"
+description: "测试商品的列表、详情、推荐及管理端CRUD接口"
+baseUrl: "http://localhost:8080"
+
+testCases:
+
+  - name: "TC-301: 用户端-获取商品列表(分页)"
+    request:
+      method: GET
+      url: "/api/user/product/list"
+      query:
+        page: 1
+        limit: 10
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          list:
+            "@isArray()"
+          total: "@isNumber()"
+          page: 1
+          limit: 10
+
+  - name: "TC-302: 用户端-按分类获取商品"
+    request:
+      method: GET
+      url: "/api/user/product/list"
+      query:
+        categoryId: 1
+        page: 1
+        limit: 10
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          list:
+            "@isArray()"
+
+  - name: "TC-303: 用户端-搜索商品"
+    request:
+      method: GET
+      url: "/api/user/product/list"
+      query:
+        keyword: "锁"
+        page: 1
+        limit: 10
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          list:
+            "@isArray()"
+
+  - name: "TC-304: 用户端-获取推荐商品"
+    request:
+      method: GET
+      url: "/api/user/product/recommend"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          "@isArray()"
+
+  - name: "TC-305: 用户端-获取商品详情"
+    request:
+      method: GET
+      url: "/api/user/product/1"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          id: 1
+          name: "@isNotEmpty()"
+          price: "@isNumber()"
+
+  - name: "TC-306: 用户端-获取不存在的商品"
+    request:
+      method: GET
+      url: "/api/user/product/99999"
+    expect:
+      statusCode: 200
+      body:
+        code: 404
+        message: "@contains(商品不存在)"
+
+  - name: "TC-307: 管理端-获取商品列表"
+    request:
+      method: GET
+      url: "/api/admin/product/list"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+      query:
+        page: 1
+        limit: 10
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          list:
+            "@isArray()"
+
+  - name: "TC-308: 管理端-获取商品详情"
+    request:
+      method: GET
+      url: "/api/admin/product/1"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          id: 1
+
+  - name: "TC-309: 管理端-创建商品"
+    request:
+      method: POST
+      url: "/api/admin/product"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+        Content-Type: "application/json"
+      body:
+        categoryId: 1
+        name: "测试商品-临时"
+        subtitle: "测试副标题"
+        spec: "测试规格"
+        description: "测试描述"
+        images: ["https://example.com/test.jpg"]
+        price: 9999
+        originalPrice: 12999
+        stock: 100
+        status: 1
+        isRecommend: 0
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          name: "测试商品-临时"
+    extract:
+      newProductId: "body.data.id"
+
+  - name: "TC-310: 管理端-更新商品"
+    request:
+      method: PUT
+      url: "/api/admin/product/{{newProductId}}"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+        Content-Type: "application/json"
+      body:
+        categoryId: 1
+        name: "测试商品-已更新"
+        subtitle: "测试副标题-已更新"
+        spec: "测试规格-已更新"
+        description: "测试描述-已更新"
+        images: ["https://example.com/test-updated.jpg"]
+        price: 19999
+        originalPrice: 25999
+        stock: 200
+        status: 1
+        isRecommend: 1
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-311: 管理端-更新商品状态"
+    request:
+      method: PUT
+      url: "/api/admin/product/{{newProductId}}/status"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+        Content-Type: "application/json"
+      body:
+        status: 0
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-312: 管理端-删除商品"
+    request:
+      method: DELETE
+      url: "/api/admin/product/{{newProductId}}"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"

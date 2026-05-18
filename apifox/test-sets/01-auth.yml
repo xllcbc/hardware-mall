@@ -1,0 +1,125 @@
+name: "01-认证模块测试"
+description: "测试管理员登录、用户登录、Token刷新、用户信息接口"
+baseUrl: "http://localhost:8080"
+
+testCases:
+
+  - name: "TC-001: 管理员登录成功"
+    request:
+      method: POST
+      url: "/api/admin/login"
+      headers:
+        Content-Type: "application/json"
+      body:
+        username: "admin"
+        password: "123456"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+        data:
+          token: "@isNotEmpty()"
+          userInfo:
+            role: 2
+    extract:
+      adminToken: "body.data.token"
+
+  - name: "TC-002: 管理员登录失败-密码错误"
+    request:
+      method: POST
+      url: "/api/admin/login"
+      headers:
+        Content-Type: "application/json"
+      body:
+        username: "admin"
+        password: "wrongpassword"
+    expect:
+      statusCode: 200
+      body:
+        code: 401
+        message: "@contains(密码错误)"
+
+  - name: "TC-003: 用户登录成功-模拟微信授权"
+    request:
+      method: POST
+      url: "/api/user/login"
+      headers:
+        Content-Type: "application/json"
+      body:
+        code: "test_code_001"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+        data:
+          token: "@isNotEmpty()"
+          userInfo:
+            openid: "test_user_001"
+    extract:
+      userToken: "body.data.token"
+      userId: "body.data.userInfo.id"
+
+  - name: "TC-004: 获取用户信息"
+    request:
+      method: GET
+      url: "/api/user/info"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          openid: "test_user_001"
+          nickname: "测试用户张三"
+
+  - name: "TC-005: 更新用户信息"
+    request:
+      method: PUT
+      url: "/api/user/info"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        nickname: "测试用户张三-已更新"
+        province: "广东省"
+        city: "深圳市"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-006: 刷新Token"
+    request:
+      method: POST
+      url: "/api/user/refresh"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data: "@isNotEmpty()"
+
+  - name: "TC-007: 未携带Token访问受保护接口-应返回401"
+    request:
+      method: GET
+      url: "/api/user/info"
+    expect:
+      statusCode: 200
+      body:
+        code: 401
+
+  - name: "TC-008: 管理端刷新Token"
+    request:
+      method: POST
+      url: "/api/admin/refresh"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200

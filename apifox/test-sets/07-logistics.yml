@@ -1,0 +1,136 @@
+name: "07-物流模块测试"
+description: "测试物流方式的列表、详情及管理端CRUD接口"
+baseUrl: "http://localhost:8080"
+
+testCases:
+
+  - name: "TC-701: 用户端-获取物流列表"
+    request:
+      method: GET
+      url: "/api/user/logistics/list"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          "@isArray()"
+
+  - name: "TC-702: 管理端-获取物流列表(分页)"
+    request:
+      method: GET
+      url: "/api/admin/logistics/list"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+      query:
+        page: 1
+        limit: 10
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          list:
+            "@isArray()"
+
+  - name: "TC-703: 管理端-获取物流详情"
+    request:
+      method: GET
+      url: "/api/admin/logistics/1"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          id: 1
+          name: "@isNotEmpty()"
+
+  - name: "TC-704: 管理端-创建物流"
+    request:
+      method: POST
+      url: "/api/admin/logistics"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+        Content-Type: "application/json"
+      body:
+        name: "测试物流-临时"
+        code: "TEST_LOGISTICS"
+        description: "测试物流描述"
+        contact: "测试联系人"
+        phones: ["400-888-8888"]
+        city: "深圳市"
+        address: "测试地址123号"
+        sortOrder: 50
+        status: 1
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          name: "测试物流-临时"
+          code: "TEST_LOGISTICS"
+    extract:
+      newLogisticsId: "body.data.id"
+
+  - name: "TC-705: 管理端-更新物流"
+    request:
+      method: PUT
+      url: "/api/admin/logistics/{{newLogisticsId}}"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+        Content-Type: "application/json"
+      body:
+        name: "测试物流-已更新"
+        code: "TEST_LOGISTICS_UPDATED"
+        description: "测试物流描述-已更新"
+        contact: "测试联系人-已更新"
+        phones: ["400-999-9999"]
+        city: "广州市"
+        address: "更新后地址456号"
+        sortOrder: 60
+        status: 1
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-706: 管理端-更新物流状态"
+    request:
+      method: PUT
+      url: "/api/admin/logistics/{{newLogisticsId}}/status"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+        Content-Type: "application/json"
+      body:
+        status: 0
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-707: 管理端-删除物流"
+    request:
+      method: DELETE
+      url: "/api/admin/logistics/{{newLogisticsId}}"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-708: 管理端-获取不存在的物流详情"
+    request:
+      method: GET
+      url: "/api/admin/logistics/99999"
+      headers:
+        Authorization: "Bearer {{adminToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 404
+        message: "@contains(物流不存在)"

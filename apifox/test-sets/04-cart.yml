@@ -1,0 +1,135 @@
+name: "04-购物车模块测试"
+description: "测试购物车的添加、查询、修改数量、删除、清空接口"
+baseUrl: "http://localhost:8080"
+
+testCases:
+
+  - name: "TC-401: 添加商品到购物车"
+    request:
+      method: POST
+      url: "/api/user/cart/add"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        productId: 1
+        quantity: 2
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+    extract:
+      cartItemId: "body.data.id"
+
+  - name: "TC-402: 再添加另一个商品到购物车"
+    request:
+      method: POST
+      url: "/api/user/cart/add"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        productId: 2
+        quantity: 1
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-403: 获取购物车列表"
+    request:
+      method: GET
+      url: "/api/user/cart/list"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          "@isArray()"
+          "@length(2)"
+
+  - name: "TC-404: 更新购物车商品数量"
+    request:
+      method: PUT
+      url: "/api/user/cart/{{cartItemId}}/quantity"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        quantity: 5
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-405: 再次获取购物车列表验证数量已更新"
+    request:
+      method: GET
+      url: "/api/user/cart/list"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          "@isArray()"
+
+  - name: "TC-406: 删除购物车中的单个商品"
+    request:
+      method: DELETE
+      url: "/api/user/cart/{{cartItemId}}"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-407: 清空购物车"
+    request:
+      method: DELETE
+      url: "/api/user/cart/clear"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        message: "success"
+
+  - name: "TC-408: 清空后再获取购物车应为空"
+    request:
+      method: GET
+      url: "/api/user/cart/list"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+    expect:
+      statusCode: 200
+      body:
+        code: 200
+        data:
+          "@isArray()"
+          "@length(0)"
+
+  - name: "TC-409: 添加不存在的商品到购物车"
+    request:
+      method: POST
+      url: "/api/user/cart/add"
+      headers:
+        Authorization: "Bearer {{userToken}}"
+        Content-Type: "application/json"
+      body:
+        productId: 99999
+        quantity: 1
+    expect:
+      statusCode: 200
+      body:
+        code: 404
+        message: "@contains(商品不存在)"
