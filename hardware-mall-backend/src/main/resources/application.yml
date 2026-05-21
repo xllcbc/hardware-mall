@@ -68,6 +68,12 @@ admin:
 wechat:
   appid: ${WECHAT_APPID}
   secret: ${WECHAT_SECRET}
+  pay:
+    mch-id: ${WECHAT_MCH_ID:}
+    api-v3-key: ${WECHAT_API_V3_KEY:}
+    private-key-path: ${WECHAT_PRIVATE_KEY_PATH:}
+    mch-serial-no: ${WECHAT_MCH_SERIAL_NO:}
+    notify-url: ${WECHAT_PAY_NOTIFY_URL:}
 
 aliyun:
   oss:

@@ -2,13 +2,16 @@ package com.example.mystore.controller.usesr;
 
 import com.example.mystore.annotation.RateLimit;
 import com.example.mystore.common.result.Result;
+import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.service.PayService;
 import com.example.mystore.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/user/pay")
 @RequiredArgsConstructor
@@ -17,15 +20,34 @@ public class PayController {
     private final PayService payService;
     private final JwtUtil jwtUtil;
 
-    @PostMapping("/mock")
+    @PostMapping("/prepay")
     @RateLimit(key = "pay", count = 10, time = 60)
-    public Result<Void> mockPay(
+    public Result<Map<String, String>> prepay(
             @RequestHeader("Authorization") String authHeader,
             @RequestBody Map<String, Long> params) {
         Long userId = extractUserId(authHeader);
         Long orderId = params.get("orderId");
-        payService.mockPay(userId, orderId);
-        return Result.success();
+        Map<String, String> payParams = payService.prepay(userId, orderId);
+        return Result.success(payParams);
+    }
+
+    @PostMapping("/callback")
+    public String callback(
+            @RequestBody String body,
+            @RequestHeader(value = "Wechatpay-Signature", required = false) String signature,
+            @RequestHeader(value = "Wechatpay-Nonce", required = false) String nonce,
+            @RequestHeader(value = "Wechatpay-Timestamp", required = false) String timestamp,
+            @RequestHeader(value = "Wechatpay-Serial", required = false) String serial) {
+        log.info("收到微信支付回调通知");
+        return payService.callback(body, signature, nonce, timestamp, serial);
+    }
+
+    @GetMapping("/query/{orderId}")
+    public Result<PaymentRecord> queryPayStatus(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable Long orderId) {
+        PaymentRecord record = payService.queryByOrderId(orderId);
+        return Result.success(record);
     }
 
     private Long extractUserId(String authHeader) {

@@ -22,6 +22,7 @@ import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.MqMessageService;
 import com.example.mystore.service.OrderService;
+import com.example.mystore.service.PayService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
@@ -53,6 +54,7 @@ public class OrderServiceImpl implements OrderService {
     private final CartMapper cartMapper;
     private final CartService cartService;
     private final SkuService skuService;
+    private final PayService payService;
     private final RedisLockUtil redisLockUtil;
     private final RedisUtil redisUtil;
     private final MqMessageService mqMessageService;
@@ -428,6 +430,8 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("该订单状态不支持退款");
         }
 
+        payService.refund(orderId, reason);
+
         LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
         itemWrapper.eq(OrderItem::getOrderId, orderId);
         List<OrderItem> items = orderItemMapper.selectList(itemWrapper);
@@ -441,7 +445,6 @@ public class OrderServiceImpl implements OrderService {
         order.setUpdateTime(LocalDateTime.now());
         orderMapper.updateById(order);
 
-        // 发布库存同步事件，事务提交后由监听器异步执行
         List<Long> skuIds = items.stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());

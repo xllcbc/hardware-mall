@@ -102,7 +102,7 @@
 import { ref, onMounted } from 'vue'
 import type { Order } from '@/types'
 import { cancelOrder as cancelOrderApi, confirmReceive as confirmReceiveApi, deleteOrder as deleteOrderApi, getOrderDetail } from '@/api/order'
-import { mockPay } from '@/api/pay'
+import { prepayOrder } from '@/api/pay'
 
 const order = ref<Partial<Order>>({})
 
@@ -193,11 +193,26 @@ const cancelOrder = async () => {
 const payOrder = async () => {
   try {
     uni.showLoading({ title: '支付中...' })
-    await mockPay(order.value.id!)
+    const res = await prepayOrder(order.value.id!)
     uni.hideLoading()
-    uni.showToast({ title: '支付成功', icon: 'success' })
-    order.value.status = 2
-    order.value.statusText = '待发货'
+    uni.requestPayment({
+      timeStamp: res.timeStamp,
+      nonceStr: res.nonceStr,
+      package: res.packageValue,
+      signType: 'RSA',
+      paySign: res.paySign,
+      success: () => {
+        uni.showToast({ title: '支付成功', icon: 'success' })
+        loadOrder()
+      },
+      fail: (err: any) => {
+        if (err.errMsg?.includes('cancel')) {
+          uni.showToast({ title: '已取消支付', icon: 'none' })
+          return
+        }
+        uni.showToast({ title: '支付失败', icon: 'none' })
+      }
+    })
   } catch (e: any) {
     uni.hideLoading()
     uni.showToast({ title: e.message || '支付失败', icon: 'none' })
