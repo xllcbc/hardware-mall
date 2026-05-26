@@ -23,17 +23,18 @@ import com.wechat.pay.java.service.refund.model.AmountReq;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.*;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@ConditionalOnBean(RSAAutoCertificateConfig.class)
 public class PayServiceImpl implements PayService {
 
     private final PaymentRecordMapper paymentRecordMapper;

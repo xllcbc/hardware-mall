@@ -28,6 +28,7 @@ import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,7 +55,8 @@ public class OrderServiceImpl implements OrderService {
     private final CartMapper cartMapper;
     private final CartService cartService;
     private final SkuService skuService;
-    private final PayService payService;
+    @Autowired(required = false)
+    private PayService payService;
     private final RedisLockUtil redisLockUtil;
     private final RedisUtil redisUtil;
     private final MqMessageService mqMessageService;
@@ -430,7 +432,9 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("该订单状态不支持退款");
         }
 
-        payService.refund(orderId, reason);
+        if (payService != null) {
+            payService.refund(orderId, reason);
+        }
 
         LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
         itemWrapper.eq(OrderItem::getOrderId, orderId);
