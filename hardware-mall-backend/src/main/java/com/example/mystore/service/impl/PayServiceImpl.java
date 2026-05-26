@@ -2,7 +2,6 @@ package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.constant.StatusConstants;
-import com.example.mystore.config.WechatPayConfig;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.mapper.OrderMapper;
@@ -19,7 +18,7 @@ import com.wechat.pay.java.service.payments.jsapi.model.PrepayResponse;
 import com.wechat.pay.java.service.payments.model.Transaction;
 import com.wechat.pay.java.service.refund.RefundService;
 import com.wechat.pay.java.service.refund.model.CreateRequest;
-import com.wechat.pay.java.service.refund.model.RefundAmount;
+import com.wechat.pay.java.service.refund.model.AmountReq;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -181,11 +180,11 @@ public class PayServiceImpl implements PayService {
             refundRequest.setOutTradeNo(record.getOutTradeNo());
             refundRequest.setOutRefundNo(outRefundNo);
             refundRequest.setReason(reason);
-            RefundAmount refundAmount = new RefundAmount();
-            refundAmount.setRefund(record.getAmount().multiply(new BigDecimal("100")).longValue());
-            refundAmount.setTotal(record.getAmount().multiply(new BigDecimal("100")).longValue());
-            refundAmount.setCurrency("CNY");
-            refundRequest.setAmount(refundAmount);
+            AmountReq amountReq = new AmountReq();
+            amountReq.setRefund(record.getAmount().multiply(new BigDecimal("100")).longValue());
+            amountReq.setTotal(record.getAmount().multiply(new BigDecimal("100")).longValue());
+            amountReq.setCurrency("CNY");
+            refundRequest.setAmount(amountReq);
 
             RefundService refundService = new RefundService.Builder()
                     .config(rsaAutoCertificateConfig)
