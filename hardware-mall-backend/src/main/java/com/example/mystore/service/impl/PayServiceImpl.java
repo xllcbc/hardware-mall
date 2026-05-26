@@ -8,6 +8,7 @@ import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.mapper.PaymentRecordMapper;
 import com.example.mystore.service.PayService;
 import com.wechat.pay.java.core.RSAAutoCertificateConfig;
+import com.wechat.pay.java.core.cipher.Signer;
 import com.wechat.pay.java.core.notification.NotificationParser;
 import com.wechat.pay.java.core.notification.RequestParam;
 import com.wechat.pay.java.service.payments.jsapi.JsapiService;
@@ -105,7 +106,7 @@ public class PayServiceImpl implements PayService {
                     .body(body)
                     .build();
 
-            Transaction transaction = notificationParser.parse(requestParam);
+            Transaction transaction = notificationParser.parse(requestParam, Transaction.class);
 
             String outTradeNo = transaction.getOutTradeNo();
             String transactionId = transaction.getTransactionId();
@@ -217,7 +218,7 @@ public class PayServiceImpl implements PayService {
         prepayRequest.setNotifyUrl(notifyUrl);
 
         Amount reqAmount = new Amount();
-        reqAmount.setTotal(amount.multiply(new BigDecimal("100")).longValue());
+        reqAmount.setTotal(amount.multiply(new BigDecimal("100")).intValueExact());
         reqAmount.setCurrency("CNY");
         prepayRequest.setAmount(reqAmount);
 
@@ -241,10 +242,8 @@ public class PayServiceImpl implements PayService {
 
         try {
             String message = appId + "\n" + timeStamp + "\n" + nonceStr + "\n" + "prepay_id=" + prepayId + "\n";
-            java.security.Signature signature = java.security.Signature.getInstance("SHA256withRSA");
-            signature.initSign(rsaAutoCertificateConfig.getPrivateKey());
-            signature.update(message.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            String paySign = java.util.Base64.getEncoder().encodeToString(signature.sign());
+            Signer signer = rsaAutoCertificateConfig.createSigner();
+            String paySign = signer.sign(message).getSign();
             params.put("paySign", paySign);
         } catch (Exception e) {
             log.error("签名失败", e);

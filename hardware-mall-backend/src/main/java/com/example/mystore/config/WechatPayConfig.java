@@ -37,7 +37,6 @@ public class WechatPayConfig {
 
     @Bean
     public NotificationParser notificationParser(RSAAutoCertificateConfig config) {
-        NotificationConfig notificationConfig = config.createNotificationConfig();
-        return new NotificationParser(notificationConfig);
+        return new NotificationParser(config);
     }
 }
