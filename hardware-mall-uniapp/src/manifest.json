@@ -1,38 +1,38 @@
 {
-  "name": "hardware-mall",
-  "appid": "wxea074cd649f1fbff",
-  "description": "五金商城小程序",
-  "versionName": "1.0.0",
-  "versionCode": "100",
-  "transformPx": false,
-  "app-plus": {
-    "usingComponents": true
-  },
-  "h5": {
-    "devServer": {
-      "port": 8080,
-      "proxy": {
-        "/api": {
-          "target": "http://192.168.42.188:8080",
-          "changeOrigin": true
-        }
-      }
-    }
-  },
-  "mp-weixin": {
-    "appid": "wxea074cd649f1fbff",
-    "setting": {
-      "urlCheck": false,
-      "es6": true,
-      "postcss": true,
-      "minified": true,
-      "codeProtect": false,
-      "autoPrefixWXSS": true
+    "name" : "hardware-mall",
+    "appid" : "wxea074cd649f1fbff",
+    "description" : "五金商城小程序",
+    "versionName" : "1.0.0",
+    "versionCode" : "100",
+    "transformPx" : false,
+    "app-plus" : {
+        "usingComponents" : true
     },
-    "usingComponents": true,
-    "lazyCodeLoad": true
-  },
-  "uniStatistics": {
-    "enable": false
-  }
+    "h5" : {
+        "devServer" : {
+            "port" : 8080,
+            "proxy" : {
+                "/api" : {
+                    "target" : "http://192.168.42.188:8080",
+                    "changeOrigin" : true
+                }
+            }
+        }
+    },
+    "mp-weixin" : {
+        "appid" : "wxeb55766859d7063b",
+        "setting" : {
+            "urlCheck" : false,
+            "es6" : true,
+            "postcss" : true,
+            "minified" : true,
+            "codeProtect" : false,
+            "autoPrefixWXSS" : true
+        },
+        "usingComponents" : true,
+        "lazyCodeLoad" : true
+    },
+    "uniStatistics" : {
+        "enable" : false
+    }
 }

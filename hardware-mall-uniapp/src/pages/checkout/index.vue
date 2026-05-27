@@ -85,6 +85,7 @@ import { useCartStore } from '@/stores/cart'
 import { usePreOrderStore } from '@/stores/preOrder'
 import { getAddressList } from '@/api/address'
 import { createOrder } from '@/api/order'
+import { prepayOrder } from '@/api/pay'
 import type { Address } from '@/types'
 
 const cartStore = useCartStore()
@@ -172,19 +173,53 @@ const submitOrder = async () => {
       buyerRemark: buyerRemark.value
     }
 
-    await createOrder(orderData)
+    const order = await createOrder(orderData)
     submitted.value = true
 
     if (isDirectBuy.value) {
       preOrderStore.clearItem()
     }
 
-    uni.redirectTo({ url: '/pages/order/list' })
-
     if (!isDirectBuy.value) {
       cartStore.clearSelected()
     }
-  } catch (e) {
+
+    try {
+      uni.showLoading({ title: '支付中...' })
+      const payParams = await prepayOrder(order.id)
+      uni.hideLoading()
+
+      uni.requestPayment({
+        timeStamp: payParams.timeStamp,
+        nonceStr: payParams.nonceStr,
+        package: payParams.packageValue,
+        signType: 'RSA',
+        paySign: payParams.paySign,
+        success: () => {
+          uni.showToast({ title: '支付成功', icon: 'success' })
+          setTimeout(() => {
+            uni.redirectTo({ url: `/pages/order/detail?id=${order.id}` })
+          }, 1500)
+        },
+        fail: (err: any) => {
+          if (err.errMsg?.includes('cancel')) {
+            uni.showToast({ title: '已取消支付', icon: 'none' })
+          } else {
+            uni.showToast({ title: '支付失败', icon: 'none' })
+          }
+          setTimeout(() => {
+            uni.redirectTo({ url: `/pages/order/detail?id=${order.id}` })
+          }, 1500)
+        }
+      })
+    } catch (payErr: any) {
+      uni.hideLoading()
+      uni.showToast({ title: payErr.message || '调起支付失败', icon: 'none' })
+      setTimeout(() => {
+        uni.redirectTo({ url: `/pages/order/detail?id=${order.id}` })
+      }, 1500)
+    }
+  } catch (e: any) {
     uni.showToast({ title: e.message || '提交失败', icon: 'none' })
   }
 }

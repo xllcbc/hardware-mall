@@ -31,7 +31,7 @@ public class UserServiceImpl implements UserService {
     private final RedisUtil redisUtil;
 
     @Override
-    public User login(String code, String nickname, String avatarUrl) {
+    public User login(String code) {
         Map<String, String> sessionData = wechatUtil.getSessionKey(code);
         String openid = sessionData.get("openid");
         String sessionKey = sessionData.get("session_key");
@@ -43,19 +43,11 @@ public class UserServiceImpl implements UserService {
         if (user == null) {
             user = new User();
             user.setOpenid(openid);
-            user.setNickname(nickname);
-            user.setAvatarUrl(avatarUrl);
             user.setRole(StatusConstants.USER_ROLE_REGULAR);
             user.setStatus(StatusConstants.USER_STATUS_NORMAL);
             user.setCreateTime(LocalDateTime.now());
             userMapper.insert(user);
         } else {
-            if (StringUtils.hasText(nickname)) {
-                user.setNickname(nickname);
-            }
-            if (avatarUrl != null) {
-                user.setAvatarUrl(avatarUrl);
-            }
             user.setLastLoginTime(LocalDateTime.now());
             userMapper.updateById(user);
         }
@@ -81,19 +73,33 @@ public class UserServiceImpl implements UserService {
         if (existUser == null) {
             throw new RuntimeException("用户不存在");
         }
-        
+
         if (user.getNickname() != null) {
             existUser.setNickname(user.getNickname());
         }
         if (user.getAvatarUrl() != null) {
             existUser.setAvatarUrl(user.getAvatarUrl());
         }
-        if (user.getPhone() != null) {
-            existUser.setPhone(user.getPhone());
-        }
-        
+
         userMapper.updateById(existUser);
         return existUser;
+    }
+
+    @Override
+    public User updatePhone(Long userId, String phoneCode) {
+        String phone = wechatUtil.getPhoneNumber(phoneCode);
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new RuntimeException("用户不存在");
+        }
+        user.setPhone(phone);
+        user.setUpdateTime(LocalDateTime.now());
+        userMapper.updateById(user);
+
+        if (user.getOpenid() != null) {
+            user.setOpenid(null);
+        }
+        return user;
     }
 
     @Override

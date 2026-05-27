@@ -29,7 +29,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .addPathPatterns("/api/**")
                 .excludePathPatterns(
                     "/api/user/login", "/api/admin/login",
-                    "/api/user/category/**", "/api/user/product/**", "/api/user/logistics/**"
+                    "/api/user/category/**", "/api/user/product/**", "/api/user/logistics/**",
+                    "/api/user/pay/callback"
                 );
         registry.addInterceptor(adminRoleInterceptor)
                 .addPathPatterns("/api/**")

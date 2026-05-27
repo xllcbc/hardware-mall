@@ -8,6 +8,8 @@ public class RedisConstants {
     public static final String PREFIX_TOKEN_BLACKLIST = "token:blacklist:";
     public static final String PREFIX_USER_TOKENS = "user:tokens:";
     public static final String PREFIX_WECHAT_SESSION = "wechat:session:";
+    public static final String PREFIX_WECHAT_ACCESS_TOKEN = "wechat:access_token";
+    public static final long WECHAT_ACCESS_TOKEN_TTL = 7000L;
     public static final String PREFIX_CATEGORY_LIST = "category:list";
     public static final String PREFIX_LOGISTICS_ENABLED = "logistics:enabled";
     public static final String PREFIX_PRODUCT_DETAIL = "product:detail:";

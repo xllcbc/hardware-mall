@@ -21,11 +21,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import com.example.mystore.entity.vo.SpecVO;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -284,6 +288,32 @@ public class SpuServiceImpl implements SpuService {
         List<SpecTemplate> specTemplates = specTemplateService.getTemplatesByCategory(spu.getCategoryId());
         List<Long> templateIds = specTemplates.stream().map(SpecTemplate::getId).collect(Collectors.toList());
         Map<Long, List<SpecItem>> specItemsMap = specItemService.getItemsGroupedByTemplateIds(templateIds);
+
+        if (skus != null && !skus.isEmpty()) {
+            Set<Long> usedItemIds = skus.stream()
+                    .flatMap(sku -> sku.getSpecs().stream())
+                    .map(SpecVO::getItemId)
+                    .collect(Collectors.toSet());
+
+            Map<Long, List<SpecItem>> filteredMap = new HashMap<>();
+            for (Map.Entry<Long, List<SpecItem>> entry : specItemsMap.entrySet()) {
+                List<SpecItem> filtered = entry.getValue().stream()
+                        .filter(item -> usedItemIds.contains(item.getId()))
+                        .collect(Collectors.toList());
+                if (!filtered.isEmpty()) {
+                    filteredMap.put(entry.getKey(), filtered);
+                }
+            }
+            specItemsMap = filteredMap;
+
+            Set<Long> usedTemplateIds = specItemsMap.keySet();
+            specTemplates = specTemplates.stream()
+                    .filter(t -> usedTemplateIds.contains(t.getId()))
+                    .collect(Collectors.toList());
+        } else {
+            specTemplates = Collections.emptyList();
+            specItemsMap = Collections.emptyMap();
+        }
 
         BigDecimal minPrice = null;
         BigDecimal maxPrice = null;
