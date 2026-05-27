@@ -8,8 +8,6 @@ interface LoginResult {
 
 interface LoginParams {
   code: string
-  nickname?: string
-  avatarUrl?: string
 }
 
 export const login = (params: LoginParams) => {
@@ -22,4 +20,8 @@ export const getUserInfo = () => {
 
 export const updateUserInfo = (data: Partial<UserInfo>) => {
   return request.put<UserInfo>('/user/info', data)
+}
+
+export const bindPhone = (code: string) => {
+  return request.post<UserInfo>('/user/phone', { code })
 }

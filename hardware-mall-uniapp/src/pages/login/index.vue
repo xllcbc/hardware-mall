@@ -7,9 +7,40 @@
     </view>
 
     <view class="login-content">
-      <button class="login-btn" type="primary" @tap="handleWechatLogin" :loading="loading">
+      <button class="login-btn" open-type="chooseAvatar" @chooseavatar="onChooseAvatar" v-if="!avatarUrl">
+        <text class="btn-icon">📷</text>
+        <text class="btn-text">选择头像</text>
+      </button>
+
+      <view class="avatar-preview" v-if="avatarUrl" @tap="changeAvatar">
+        <image class="avatar-img" :src="avatarUrl" mode="aspectFill" />
+        <text class="avatar-tip">点击更换头像</text>
+      </view>
+
+      <view class="nickname-input-wrap" v-if="avatarUrl">
+        <input
+          class="nickname-input"
+          type="nickname"
+          v-model="nickname"
+          placeholder="请输入昵称"
+          :maxlength="20"
+          @blur="onNicknameBlur"
+        />
+      </view>
+
+      <button
+        class="login-btn main-btn"
+        :disabled="!canLogin || loading"
+        @tap="handleLogin"
+        v-if="avatarUrl"
+      >
         <text class="btn-icon">📱</text>
         <text class="btn-text">{{ loading ? '登录中...' : '微信一键登录' }}</text>
+      </button>
+
+      <button class="login-btn main-btn" open-type="getPhoneNumber" @getphonenumber="onGetPhoneNumber" v-if="!avatarUrl" :disabled="loginLoading">
+        <text class="btn-icon">📱</text>
+        <text class="btn-text">{{ loginLoading ? '登录中...' : '微信一键登录' }}</text>
       </button>
 
       <view class="login-tip">
@@ -27,75 +58,133 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { login } from '@/api/user'
-import { useUserStore } from '@/stores/user'
+import { ref, computed } from 'vue'
+import { login, bindPhone } from '@/api/user'
 
-const userStore = useUserStore()
 const loading = ref(false)
+const loginLoading = ref(false)
+const avatarUrl = ref('')
+const nickname = ref('')
+const tempToken = ref('')
+const tempUserInfo = ref<any>(null)
 
-const handleWechatLogin = async () => {
-  if (loading.value) return
-  loading.value = true
+const canLogin = computed(() => {
+  return avatarUrl.value && nickname.value.trim().length > 0
+})
 
+const onChooseAvatar = (e: any) => {
+  avatarUrl.value = e.detail.avatarUrl
+}
+
+const changeAvatar = () => {
+  uni.chooseImage({
+    count: 1,
+    sizeType: ['compressed'],
+    sourceType: ['album', 'camera'],
+    success: (res) => {
+      avatarUrl.value = res.tempFilePaths[0]
+    }
+  })
+}
+
+const onNicknameBlur = () => {
+  nickname.value = nickname.value.trim()
+}
+
+const onGetPhoneNumber = async (e: any) => {
+  if (e.detail.errMsg !== 'getPhoneNumber:ok') {
+    if (!e.detail.errMsg?.includes('cancel')) {
+      uni.showToast({ title: '获取手机号失败', icon: 'none' })
+    }
+    return
+  }
+
+  loginLoading.value = true
   try {
-    // Step 1: wx.getUserProfile() 直接获取用户信息（必须在点击上下文中立即调用）
-    const profileRes = await new Promise<UniApp.GetUserProfileRes>((resolve, reject) => {
-      uni.getUserProfile({
-        desc: '用于完善用户资料',
-        success: resolve,
-        fail: reject
-      })
-    })
-
-    const nickname = profileRes.userInfo?.nickName || profileRes.userInfo?.nickname || ''
-    const avatarUrl = profileRes.userInfo?.avatarUrl || ''
-
-    // Step 2: wx.login() 获取 code
     const loginRes = await new Promise<UniApp.LoginRes>((resolve, reject) => {
-      uni.login({
-        provider: 'weixin',
-        success: resolve,
-        fail: reject
-      })
+      uni.login({ provider: 'weixin', success: resolve, fail: reject })
     })
 
     const code = loginRes.code
-    if (!code) {
-      throw new Error('获取登录凭证失败')
+    if (!code) throw new Error('获取登录凭证失败')
+
+    const result = await login({ code })
+    tempToken.value = result.token
+    tempUserInfo.value = result.userInfo
+
+    let finalUserInfo = { ...result.userInfo }
+    const phoneCode = e.detail.code
+    if (phoneCode) {
+      try {
+        const updatedUser = await bindPhone(phoneCode)
+        finalUserInfo = { ...finalUserInfo, ...updatedUser }
+      } catch (err) {
+        console.error('绑定手机号失败:', err)
+      }
     }
 
-    // Step 3: 发送到后端
-    const result = await login({
-      code,
-      nickname,
-      avatarUrl
+    uni.setStorageSync('LOGIN_RESULT', JSON.stringify({
+      token: result.token,
+      userInfo: finalUserInfo
+    }))
+    navigateBack()
+  } catch (err: any) {
+    console.error('Login failed:', err)
+    uni.showToast({ title: err.message || '登录失败，请重试', icon: 'none' })
+    loginLoading.value = false
+  }
+}
+
+const handleLogin = async () => {
+  if (!canLogin.value || loading.value) return
+  loading.value = true
+
+  try {
+    const loginRes = await new Promise<UniApp.LoginRes>((resolve, reject) => {
+      uni.login({ provider: 'weixin', success: resolve, fail: reject })
     })
 
-    // Step 4: 保存登录状态
-    userStore.setToken(result.token)
-    userStore.setUserInfo({
-      ...result.userInfo,
-      nickname: nickname || result.userInfo.nickname,
-      avatarUrl: avatarUrl || result.userInfo.avatarUrl
+    const code = loginRes.code
+    if (!code) throw new Error('获取登录凭证失败')
+
+    if (tempToken.value) {
+      const { updateUserInfo } = await import('@/api/user')
+      await updateUserInfo({
+        nickname: nickname.value,
+        avatarUrl: avatarUrl.value
+      })
+      uni.setStorageSync('LOGIN_RESULT', JSON.stringify({
+        token: tempToken.value,
+        userInfo: { ...tempUserInfo.value, nickname: nickname.value, avatarUrl: avatarUrl.value }
+      }))
+      navigateBack()
+      return
+    }
+
+    const result = await login({ code })
+    const { updateUserInfo } = await import('@/api/user')
+    await updateUserInfo({
+      nickname: nickname.value,
+      avatarUrl: avatarUrl.value
     })
-
-    uni.showToast({ title: '登录成功', icon: 'success' })
-
-    setTimeout(() => {
-      const pages = getCurrentPages()
-      const prevPage = pages[pages.length - 2]
-      if (prevPage) {
-        uni.navigateBack()
-      } else {
-        uni.switchTab({ url: '/pages/user/index' })
-      }
-    }, 1500)
+    uni.setStorageSync('LOGIN_RESULT', JSON.stringify({
+      token: result.token,
+      userInfo: { ...result.userInfo, nickname: nickname.value, avatarUrl: avatarUrl.value }
+    }))
+    navigateBack()
   } catch (e: any) {
     console.error('Login failed:', e)
     uni.showToast({ title: e.message || '登录失败，请重试', icon: 'none' })
-  } finally {
     loading.value = false
+  }
+}
+
+const navigateBack = () => {
+  const pages = getCurrentPages()
+  if (pages.length > 1) {
+    uni.navigateBack()
+  } else {
+    uni.switchTab({ url: '/pages/user/index' })
   }
 }
 </script>
@@ -147,6 +236,39 @@ const handleWechatLogin = async () => {
   align-items: center;
 }
 
+.avatar-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 32rpx;
+}
+
+.avatar-img {
+  width: 160rpx;
+  height: 160rpx;
+  border-radius: 50%;
+  border: 4rpx solid #C9A86C;
+}
+
+.avatar-tip {
+  font-size: 24rpx;
+  color: #999999;
+  margin-top: 12rpx;
+}
+
+.nickname-input-wrap {
+  width: 100%;
+  margin-bottom: 32rpx;
+  background: #FFFFFF;
+  border-radius: 16rpx;
+  padding: 24rpx;
+}
+
+.nickname-input {
+  font-size: 30rpx;
+  color: #333333;
+}
+
 .login-btn {
   width: 100%;
   height: 96rpx;
@@ -158,6 +280,7 @@ const handleWechatLogin = async () => {
   gap: 16rpx;
   border: none;
   box-shadow: 0 8rpx 24rpx rgba(7, 193, 96, 0.3);
+  margin-bottom: 24rpx;
 
   &::after {
     border: none;
@@ -166,6 +289,11 @@ const handleWechatLogin = async () => {
   &:active {
     opacity: 0.9;
     transform: scale(0.98);
+  }
+
+  &[disabled] {
+    opacity: 0.5;
+    box-shadow: none;
   }
 
   .btn-icon {
@@ -179,8 +307,13 @@ const handleWechatLogin = async () => {
   }
 }
 
+.main-btn {
+  background: linear-gradient(135deg, #C9A86C 0%, #B8956A 100%);
+  box-shadow: 0 8rpx 24rpx rgba(201, 168, 108, 0.3);
+}
+
 .login-tip {
-  margin-top: 32rpx;
+  margin-top: 16rpx;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;

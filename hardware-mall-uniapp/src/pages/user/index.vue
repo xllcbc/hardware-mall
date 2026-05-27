@@ -78,11 +78,27 @@
 </template>
 
 <script setup lang="ts">
+import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 
 const userStore = useUserStore()
 const appStore = useAppStore()
+
+onShow(() => {
+  const raw = uni.getStorageSync('LOGIN_RESULT')
+  if (raw) {
+    try {
+      const data = JSON.parse(raw)
+      if (data.token) userStore.setToken(data.token)
+      if (data.userInfo) userStore.setUserInfo(data.userInfo)
+      uni.showToast({ title: '登录成功', icon: 'success' })
+      uni.removeStorageSync('LOGIN_RESULT')
+    } catch (e) {
+      console.error('处理登录结果失败:', e)
+    }
+  }
+})
 
 const handleUserTap = () => {
   if (!userStore.isLoggedIn) {
@@ -96,10 +112,7 @@ const goEdit = () => {
 
 const goPage = (url: string) => {
   if (!userStore.isLoggedIn) {
-    uni.showToast({ title: '请先登录', icon: 'none' })
-    setTimeout(() => {
-      uni.navigateTo({ url: '/pages/login/index' })
-    }, 1000)
+    uni.navigateTo({ url: '/pages/login/index' })
     return
   }
   uni.navigateTo({ url })

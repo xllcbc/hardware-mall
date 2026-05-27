@@ -4,18 +4,19 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.PaymentRecord;
+import com.example.mystore.entity.db.User;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.mapper.PaymentRecordMapper;
+import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.PayService;
-import com.wechat.pay.java.core.RSAAutoCertificateConfig;
-import com.wechat.pay.java.core.cipher.Signer;
+import com.wechat.pay.java.core.Config;
 import com.wechat.pay.java.core.notification.NotificationParser;
 import com.wechat.pay.java.core.notification.RequestParam;
-import com.wechat.pay.java.service.payments.jsapi.JsapiService;
+import com.wechat.pay.java.service.payments.jsapi.JsapiServiceExtension;
 import com.wechat.pay.java.service.payments.jsapi.model.Amount;
 import com.wechat.pay.java.service.payments.jsapi.model.Payer;
 import com.wechat.pay.java.service.payments.jsapi.model.PrepayRequest;
-import com.wechat.pay.java.service.payments.jsapi.model.PrepayResponse;
+import com.wechat.pay.java.service.payments.jsapi.model.PrepayWithRequestPaymentResponse;
 import com.wechat.pay.java.service.payments.model.Transaction;
 import com.wechat.pay.java.service.refund.RefundService;
 import com.wechat.pay.java.service.refund.model.CreateRequest;
@@ -23,7 +24,7 @@ import com.wechat.pay.java.service.refund.model.AmountReq;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,12 +35,13 @@ import java.util.*;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnBean(RSAAutoCertificateConfig.class)
+@ConditionalOnProperty(name = "wechat.pay.mch-id")
 public class PayServiceImpl implements PayService {
 
     private final PaymentRecordMapper paymentRecordMapper;
     private final OrderMapper orderMapper;
-    private final RSAAutoCertificateConfig rsaAutoCertificateConfig;
+    private final UserMapper userMapper;
+    private final Config wechatPayConfig;
     private final NotificationParser notificationParser;
 
     @Value("${wechat.appid}")
@@ -65,32 +67,52 @@ public class PayServiceImpl implements PayService {
             throw new RuntimeException("订单状态不允许支付");
         }
 
+        User user = userMapper.selectById(userId);
+        if (user == null || user.getOpenid() == null) {
+            throw new RuntimeException("用户信息异常，请重新登录");
+        }
+
         LambdaQueryWrapper<PaymentRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(PaymentRecord::getOrderId, orderId)
                .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_PENDING);
         PaymentRecord existingRecord = paymentRecordMapper.selectOne(wrapper);
+
+        String outTradeNo;
         if (existingRecord != null) {
-            return buildJsapiPayParams(existingRecord.getOutTradeNo());
+            outTradeNo = existingRecord.getOutTradeNo();
+        } else {
+            outTradeNo = generateOutTradeNo(orderId);
+            PaymentRecord record = new PaymentRecord();
+            record.setOrderId(orderId);
+            record.setOutTradeNo(outTradeNo);
+            record.setAmount(order.getPayAmount());
+            record.setStatus(PaymentRecord.STATUS_PENDING);
+            record.setCreateTime(LocalDateTime.now());
+            record.setUpdateTime(LocalDateTime.now());
+            paymentRecordMapper.insert(record);
         }
 
-        String outTradeNo = generateOutTradeNo(orderId);
-        PaymentRecord record = new PaymentRecord();
-        record.setOrderId(orderId);
-        record.setOutTradeNo(outTradeNo);
-        record.setAmount(order.getPayAmount());
-        record.setStatus(PaymentRecord.STATUS_PENDING);
-        record.setCreateTime(LocalDateTime.now());
-        record.setUpdateTime(LocalDateTime.now());
-        paymentRecordMapper.insert(record);
-
         try {
-            PrepayResponse prepayResponse = callWechatPrepay(outTradeNo, order.getPayAmount(), order.getUserId().toString());
-            return buildJsapiPayParams(prepayResponse.getPrepayId());
+            PrepayWithRequestPaymentResponse response = callWechatPrepay(outTradeNo, order.getPayAmount(), user.getOpenid());
+            Map<String, String> params = new HashMap<>();
+            params.put("appId", response.getAppId());
+            params.put("timeStamp", response.getTimeStamp());
+            params.put("nonceStr", response.getNonceStr());
+            params.put("packageValue", response.getPackageVal());
+            params.put("signType", response.getSignType());
+            params.put("paySign", response.getPaySign());
+            return params;
         } catch (Exception e) {
             log.error("微信统一下单失败, orderId={}, outTradeNo={}", orderId, outTradeNo, e);
-            record.setStatus(PaymentRecord.STATUS_CLOSED);
-            record.setUpdateTime(LocalDateTime.now());
-            paymentRecordMapper.updateById(record);
+            if (existingRecord == null) {
+                PaymentRecord record = paymentRecordMapper.selectOne(
+                        new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOutTradeNo, outTradeNo));
+                if (record != null) {
+                    record.setStatus(PaymentRecord.STATUS_CLOSED);
+                    record.setUpdateTime(LocalDateTime.now());
+                    paymentRecordMapper.updateById(record);
+                }
+            }
             throw new RuntimeException("创建支付订单失败，请重试");
         }
     }
@@ -189,7 +211,7 @@ public class PayServiceImpl implements PayService {
             refundRequest.setAmount(amountReq);
 
             RefundService refundService = new RefundService.Builder()
-                    .config(rsaAutoCertificateConfig)
+                    .config(wechatPayConfig)
                     .build();
             refundService.create(refundRequest);
 
@@ -206,9 +228,9 @@ public class PayServiceImpl implements PayService {
         }
     }
 
-    private PrepayResponse callWechatPrepay(String outTradeNo, BigDecimal amount, String openid) {
-        JsapiService jsapiService = new JsapiService.Builder()
-                .config(rsaAutoCertificateConfig)
+    private PrepayWithRequestPaymentResponse callWechatPrepay(String outTradeNo, BigDecimal amount, String openid) {
+        JsapiServiceExtension jsapiService = new JsapiServiceExtension.Builder()
+                .config(wechatPayConfig)
                 .build();
 
         PrepayRequest prepayRequest = new PrepayRequest();
@@ -227,31 +249,7 @@ public class PayServiceImpl implements PayService {
         payer.setOpenid(openid);
         prepayRequest.setPayer(payer);
 
-        return jsapiService.prepay(prepayRequest);
-    }
-
-    private Map<String, String> buildJsapiPayParams(String prepayId) {
-        String nonceStr = UUID.randomUUID().toString().replace("-", "");
-        String timeStamp = String.valueOf(System.currentTimeMillis() / 1000);
-
-        Map<String, String> params = new HashMap<>();
-        params.put("appId", appId);
-        params.put("timeStamp", timeStamp);
-        params.put("nonceStr", nonceStr);
-        params.put("packageValue", "prepay_id=" + prepayId);
-        params.put("signType", "RSA");
-
-        try {
-            String message = appId + "\n" + timeStamp + "\n" + nonceStr + "\n" + "prepay_id=" + prepayId + "\n";
-            Signer signer = rsaAutoCertificateConfig.createSigner();
-            String paySign = signer.sign(message).getSign();
-            params.put("paySign", paySign);
-        } catch (Exception e) {
-            log.error("签名失败", e);
-            throw new RuntimeException("支付签名失败");
-        }
-
-        return params;
+        return jsapiService.prepayWithRequestPayment(prepayRequest);
     }
 
     private String generateOutTradeNo(Long orderId) {

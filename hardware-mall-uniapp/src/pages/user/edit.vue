@@ -11,16 +11,14 @@
       <view class="avatar-section">
         <view class="section-label">头像</view>
         <view class="avatar-wrapper">
-          <image
-            class="avatar-preview"
-            :src="formData.avatarUrl || '/static/images/face.jpg'"
-            mode="aspectFill"
-          />
+          <button class="avatar-choose-btn" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
+            <image
+              class="avatar-preview"
+              :src="formData.avatarUrl || '/static/images/face.jpg'"
+              mode="aspectFill"
+            />
+          </button>
           <view class="avatar-actions">
-            <view class="action-btn" @tap="handleChooseWechatAvatar">
-              <text class="action-icon">📱</text>
-              <text class="action-text">微信头像</text>
-            </view>
             <view class="action-btn" @tap="handleChooseImage">
               <text class="action-icon">🖼️</text>
               <text class="action-text">自定义上传</text>
@@ -33,10 +31,26 @@
         <view class="section-label">昵称</view>
         <input
           class="nickname-input"
+          type="nickname"
           v-model="formData.nickname"
           placeholder="请输入昵称"
-          maxlength="20"
+          :maxlength="20"
+          @blur="onNicknameBlur"
         />
+      </view>
+
+      <view class="phone-section" v-if="userStore.userInfo">
+        <view class="section-label">手机号</view>
+        <view class="phone-row">
+          <text class="phone-value" v-if="userStore.userInfo.phone">{{ maskPhone(userStore.userInfo.phone) }}</text>
+          <text class="phone-value phone-unbind" v-else>未绑定</text>
+          <button class="phone-btn" open-type="getPhoneNumber" @getphonenumber="onGetPhoneNumber" v-if="!userStore.userInfo.phone">
+            <text class="phone-btn-text">绑定手机号</text>
+          </button>
+          <view class="phone-btn phone-btn-plain" v-else @tap="onChangePhone">
+            <text class="phone-btn-text">更换</text>
+          </view>
+        </view>
       </view>
     </view>
 
@@ -51,7 +65,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { updateUserInfo } from '@/api/user'
+import { updateUserInfo, bindPhone } from '@/api/user'
+
+const BASE_URL = 'http://localhost:8080/api'
 
 const userStore = useUserStore()
 const saving = ref(false)
@@ -72,25 +88,12 @@ const handleClose = () => {
   uni.navigateBack()
 }
 
-const handleChooseWechatAvatar = async () => {
-  try {
-    uni.showLoading({ title: '获取中...' })
-    const profileRes = await new Promise<UniApp.GetUserProfileRes>((resolve, reject) => {
-      uni.getUserProfile({
-        desc: '用于设置头像',
-        success: resolve,
-        fail: reject
-      })
-    })
-    
-    formData.value.avatarUrl = profileRes.userInfo?.avatarUrl || ''
-    uni.hideLoading()
-    uni.showToast({ title: '已获取微信头像', icon: 'success' })
-  } catch (e: any) {
-    uni.hideLoading()
-    console.error('获取微信头像失败:', e)
-    uni.showToast({ title: '获取失败，请重试', icon: 'none' })
-  }
+const onChooseAvatar = (e: any) => {
+  formData.value.avatarUrl = e.detail.avatarUrl || ''
+}
+
+const onNicknameBlur = () => {
+  formData.value.nickname = formData.value.nickname.trim()
 }
 
 const handleChooseImage = async () => {
@@ -104,14 +107,14 @@ const handleChooseImage = async () => {
         fail: reject
       })
     })
-    
+
     if (res.tempFilePaths && res.tempFilePaths.length > 0) {
       uni.showLoading({ title: '上传中...' })
-      
+
       const token = uni.getStorageSync('token')
-      
+
       uni.uploadFile({
-        url: 'http://192.168.42.188:8080/api/admin/upload/avatar',
+        url: `${BASE_URL}/user/upload/avatar`,
         filePath: res.tempFilePaths[0],
         name: 'file',
         header: {
@@ -139,24 +142,64 @@ const handleChooseImage = async () => {
   }
 }
 
+const onGetPhoneNumber = async (e: any) => {
+  if (e.detail.errMsg !== 'getPhoneNumber:ok') {
+    if (!e.detail.errMsg?.includes('cancel')) {
+      uni.showToast({ title: '获取手机号失败', icon: 'none' })
+    }
+    return
+  }
+
+  try {
+    const phoneCode = e.detail.code
+    if (!phoneCode) {
+      uni.showToast({ title: '获取手机号失败', icon: 'none' })
+      return
+    }
+    const updatedUser = await bindPhone(phoneCode)
+    userStore.setUserInfo(updatedUser)
+    uni.showToast({ title: '绑定成功', icon: 'success' })
+  } catch (err: any) {
+    console.error('绑定手机号失败:', err)
+    uni.showToast({ title: err.message || '绑定失败', icon: 'none' })
+  }
+}
+
+const onChangePhone = () => {
+  uni.showModal({
+    title: '更换手机号',
+    content: '确定要更换绑定的手机号吗？',
+    success: (res) => {
+      if (res.confirm) {
+        uni.showToast({ title: '请在小程序设置中操作', icon: 'none' })
+      }
+    }
+  })
+}
+
+const maskPhone = (phone: string) => {
+  if (!phone || phone.length < 7) return phone
+  return phone.substring(0, 3) + '****' + phone.substring(7)
+}
+
 const handleSave = async () => {
   if (saving.value) return
   saving.value = true
-  
+
   try {
-    const result = await updateUserInfo({
+    await updateUserInfo({
       nickname: formData.value.nickname,
       avatarUrl: formData.value.avatarUrl
     })
-    
+
     userStore.setUserInfo({
       ...userStore.userInfo,
       nickname: formData.value.nickname,
       avatarUrl: formData.value.avatarUrl
     } as any)
-    
+
     uni.showToast({ title: '保存成功', icon: 'success' })
-    
+
     setTimeout(() => {
       uni.navigateBack()
     }, 1500)
@@ -228,38 +271,49 @@ const handleSave = async () => {
     display: flex;
     align-items: center;
     gap: 24rpx;
+  }
 
-    .avatar-preview {
-      width: 120rpx;
-      height: 120rpx;
-      border-radius: 60rpx;
-      background: #F5F5F5;
-      flex-shrink: 0;
+  .avatar-choose-btn {
+    padding: 0;
+    margin: 0;
+    background: none;
+    border: none;
+    line-height: 1;
+
+    &::after {
+      border: none;
     }
+  }
 
-    .avatar-actions {
-      flex: 1;
+  .avatar-preview {
+    width: 120rpx;
+    height: 120rpx;
+    border-radius: 60rpx;
+    background: #F5F5F5;
+  }
+
+  .avatar-actions {
+    flex: 1;
+    display: flex;
+    gap: 16rpx;
+
+    .action-btn {
+      height: 72rpx;
       display: flex;
-      gap: 16rpx;
+      align-items: center;
+      justify-content: center;
+      gap: 8rpx;
+      background: #F5F5F5;
+      border-radius: 8rpx;
+      padding: 0 24rpx;
 
-      .action-btn {
-        flex: 1;
-        height: 72rpx;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8rpx;
-        background: #F5F5F5;
-        border-radius: 8rpx;
+      .action-icon {
+        font-size: 32rpx;
+      }
 
-        .action-icon {
-          font-size: 32rpx;
-        }
-
-        .action-text {
-          font-size: 24rpx;
-          color: #666666;
-        }
+      .action-text {
+        font-size: 24rpx;
+        color: #666666;
       }
     }
   }
@@ -269,6 +323,7 @@ const handleSave = async () => {
   background: #FFFFFF;
   border-radius: 16rpx;
   padding: 24rpx;
+  margin-bottom: 24rpx;
 
   .section-label {
     font-size: 28rpx;
@@ -287,6 +342,59 @@ const handleSave = async () => {
 
     &::placeholder {
       color: #999999;
+    }
+  }
+}
+
+.phone-section {
+  background: #FFFFFF;
+  border-radius: 16rpx;
+  padding: 24rpx;
+  margin-bottom: 24rpx;
+
+  .section-label {
+    font-size: 28rpx;
+    font-weight: 500;
+    color: #2C2C2C;
+    margin-bottom: 16rpx;
+  }
+
+  .phone-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .phone-value {
+    font-size: 30rpx;
+    color: #2C2C2C;
+
+    &.phone-unbind {
+      color: #999999;
+    }
+  }
+
+  .phone-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    line-height: 1;
+
+    &::after {
+      border: none;
+    }
+
+    .phone-btn-text {
+      font-size: 28rpx;
+      color: #C9A86C;
+    }
+
+    &.phone-btn-plain {
+      height: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
   }
 }

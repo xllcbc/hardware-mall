@@ -201,9 +201,14 @@ const payOrder = async () => {
       package: res.packageValue,
       signType: 'RSA',
       paySign: res.paySign,
-      success: () => {
+      success: async () => {
         uni.showToast({ title: '支付成功', icon: 'success' })
-        loadOrder()
+        try {
+          const data = await getOrderDetail(Number(order.value.id))
+          order.value = data || {}
+        } catch (e) {
+          console.error('刷新订单失败:', e)
+        }
       },
       fail: (err: any) => {
         if (err.errMsg?.includes('cancel')) {

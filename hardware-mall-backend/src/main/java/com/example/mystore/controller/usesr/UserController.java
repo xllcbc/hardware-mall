@@ -26,9 +26,7 @@ public class UserController {
     @RateLimit(key = "user:login", count = 5, time = 60)
     public Result<Map<String, Object>> login(@RequestBody Map<String, String> params) {
         String code = params.get("code");
-        String nickname = params.get("nickname");
-        String avatarUrl = params.get("avatarUrl");
-        User user = userService.login(code, nickname, avatarUrl);
+        User user = userService.login(code);
 
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", user.getId());
@@ -36,6 +34,10 @@ public class UserController {
         String token = jwtUtil.generateToken(claims);
 
         redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + user.getId(), token);
+
+        if (user.getOpenid() != null) {
+            user.setOpenid(null);
+        }
 
         Map<String, Object> data = new HashMap<>();
         data.put("token", token);
@@ -62,6 +64,16 @@ public class UserController {
     public Result<String> refreshToken(@RequestHeader("Authorization") String authHeader) {
         Long userId = extractUserId(authHeader);
         return Result.success(userService.refreshToken(userId));
+    }
+
+    @PostMapping("/phone")
+    @RateLimit(key = "user:phone", count = 5, time = 60)
+    public Result<User> bindPhone(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody Map<String, String> params) {
+        Long userId = extractUserId(authHeader);
+        String phoneCode = params.get("code");
+        return Result.success(userService.updatePhone(userId, phoneCode));
     }
 
     @PostMapping("/logout")
