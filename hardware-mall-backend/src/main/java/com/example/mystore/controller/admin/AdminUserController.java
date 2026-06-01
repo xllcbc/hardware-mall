@@ -8,6 +8,8 @@ import com.example.mystore.annotation.RequireAdmin;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/admin/user")
 @RequiredArgsConstructor
@@ -29,6 +31,16 @@ public class AdminUserController {
     @PutMapping("/{id}/status")
     public Result<Void> updateUserStatus(@PathVariable Long id, @RequestParam Integer status) {
         userService.updateUserStatus(id, status);
+        return Result.success();
+    }
+
+    @PutMapping("/{id}/region")
+    public Result<Void> updateUserRegion(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> params) {
+        String province = params.get("province");
+        String city = params.get("city");
+        userService.updateUserRegion(id, province, city);
         return Result.success();
     }
 }

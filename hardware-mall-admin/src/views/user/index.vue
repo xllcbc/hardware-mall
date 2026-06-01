@@ -81,15 +81,19 @@
             <span class="time">{{ row.createTime }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="handleViewOrders(row)">
               <el-icon><List /></el-icon>
               订单
             </el-button>
-            <el-button 
-              link 
-              :type="row.status === 1 ? 'warning' : 'success'" 
+            <el-button link type="success" @click="handleEditRegion(row)">
+              <el-icon><Location /></el-icon>
+              地区
+            </el-button>
+            <el-button
+              link
+              :type="row.status === 1 ? 'warning' : 'success'"
               @click="handleToggleStatus(row)"
             >
               <el-icon><Switch /></el-icon>
@@ -111,6 +115,23 @@
         />
       </div>
     </div>
+
+    <el-dialog v-model="regionDialogVisible" title="编辑用户地区" width="400px">
+      <el-form label-width="60px">
+        <el-form-item label="地区">
+          <el-cascader
+            v-model="regionForm"
+            :options="provinceCityOptions"
+            placeholder="请选择省市"
+            style="width: 100%"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="regionDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleRegionSubmit" :loading="regionLoading">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -119,7 +140,7 @@ import { ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { provinceCityOptions } from '@/utils/regions'
-import { getUserList, updateUserStatus } from '@/api/admin/user'
+import { getUserList, updateUserStatus, updateUserRegion } from '@/api/admin/user'
 import { USER_ROLE, USER_ROLE_TEXT, USER_STATUS, USER_STATUS_TEXT } from '@/constants/status'
 
 const router = useRouter()
@@ -127,6 +148,11 @@ const loading = ref(false)
 const tableData = ref<any[]>([])
 
 const regionFilter = ref<string[]>([])
+
+const regionDialogVisible = ref(false)
+const regionForm = ref<string[]>([])
+const regionLoading = ref(false)
+const editingUserId = ref<number | null>(null)
 
 watch(regionFilter, () => {
   pagination.page = 1
@@ -155,6 +181,30 @@ const handleToggleStatus = async (row: any) => {
     loadData()
   } catch {
     // error handled by interceptor
+  }
+}
+
+const handleEditRegion = (row: any) => {
+  editingUserId.value = row.id
+  regionForm.value = row.province && row.city ? [row.province, row.city] : []
+  regionDialogVisible.value = true
+}
+
+const handleRegionSubmit = async () => {
+  if (!regionForm.value || regionForm.value.length < 2) {
+    ElMessage.warning('请选择省市')
+    return
+  }
+  regionLoading.value = true
+  try {
+    await updateUserRegion(editingUserId.value!, regionForm.value[0], regionForm.value[1])
+    ElMessage.success('地区修改成功')
+    regionDialogVisible.value = false
+    loadData()
+  } catch {
+    // error handled by interceptor
+  } finally {
+    regionLoading.value = false
   }
 }
 

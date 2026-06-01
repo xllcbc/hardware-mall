@@ -1,8 +1,11 @@
 package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.mystore.entity.db.Address;
+import com.example.mystore.entity.db.User;
 import com.example.mystore.mapper.AddressMapper;
+import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.AddressService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -16,6 +19,7 @@ import java.util.List;
 public class AddressServiceImpl implements AddressService {
 
     private final AddressMapper addressMapper;
+    private final UserMapper userMapper;
 
     @Override
     public List<Address> getAddressList(Long userId) {
@@ -54,8 +58,13 @@ public class AddressServiceImpl implements AddressService {
         if (address.getIsDefault() == 1) {
             clearDefaultAddress(userId);
         }
-        
+
         addressMapper.insert(address);
+
+        if (address.getIsDefault() == 1) {
+            syncUserRegion(userId);
+        }
+
         return address;
     }
 
@@ -92,9 +101,14 @@ public class AddressServiceImpl implements AddressService {
             clearDefaultAddress(userId);
             exist.setIsDefault(1);
         }
-        
+
         exist.setUpdateTime(LocalDateTime.now());
         addressMapper.updateById(exist);
+
+        if (exist.getIsDefault() == 1) {
+            syncUserRegion(userId);
+        }
+
         return exist;
     }
 
@@ -108,8 +122,15 @@ public class AddressServiceImpl implements AddressService {
         if (address.getDeleteTime() != 0) {
             throw new RuntimeException("地址不存在");
         }
+
+        boolean wasDefault = address.getIsDefault() == 1;
+
         address.setDeleteTime(System.currentTimeMillis());
         addressMapper.updateById(address);
+
+        if (wasDefault) {
+            syncUserRegion(userId);
+        }
     }
 
     @Override
@@ -121,10 +142,12 @@ public class AddressServiceImpl implements AddressService {
         }
         
         clearDefaultAddress(userId);
-        
+
         address.setIsDefault(1);
         address.setUpdateTime(LocalDateTime.now());
         addressMapper.updateById(address);
+
+        syncUserRegion(userId);
     }
 
     private void clearDefaultAddress(Long userId) {
@@ -137,5 +160,22 @@ public class AddressServiceImpl implements AddressService {
             addr.setUpdateTime(LocalDateTime.now());
             addressMapper.updateById(addr);
         }
+    }
+
+    private void syncUserRegion(Long userId) {
+        LambdaQueryWrapper<Address> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Address::getUserId, userId)
+               .eq(Address::getIsDefault, 1)
+               .eq(Address::getDeleteTime, 0);
+        Address defaultAddress = addressMapper.selectOne(wrapper);
+
+        if (defaultAddress != null) {
+            LambdaUpdateWrapper<User> updateWrapper = new LambdaUpdateWrapper<>();
+            updateWrapper.eq(User::getId, userId)
+                         .set(User::getProvince, defaultAddress.getProvince())
+                         .set(User::getCity, defaultAddress.getCity());
+            userMapper.update(null, updateWrapper);
+        }
+        // 无默认地址时不做任何修改
     }
 }

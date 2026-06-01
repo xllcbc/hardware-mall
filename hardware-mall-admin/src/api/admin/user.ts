@@ -31,3 +31,7 @@ export const getUserList = (params?: UserQuery) => {
 export const updateUserStatus = (id: number, status: number) => {
   return request.put(`/admin/user/${id}/status`, { status })
 }
+
+export const updateUserRegion = (id: number, province: string, city: string) => {
+  return request.put(`/admin/user/${id}/region`, { province, city })
+}

@@ -103,6 +103,18 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public void updateUserRegion(Long id, String province, String city) {
+        User user = userMapper.selectById(id);
+        if (user == null) {
+            throw new RuntimeException("用户不存在");
+        }
+        user.setProvince(province);
+        user.setCity(city);
+        user.setUpdateTime(LocalDateTime.now());
+        userMapper.updateById(user);
+    }
+
+    @Override
     public String refreshToken(Long userId) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);

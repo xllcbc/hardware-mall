@@ -11,6 +11,7 @@ public interface UserService {
     String refreshToken(Long userId);
     Page<User> getUserPage(Integer page, Integer limit, String province, String city, Integer status);
     void updateUserStatus(Long id, Integer status);
+    void updateUserRegion(Long id, String province, String city);
     void logout(Long userId, String token);
     String getSessionKey(Long userId);
 }

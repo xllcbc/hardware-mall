@@ -84,6 +84,15 @@ public class UserController {
         return Result.success(null);
     }
 
+    @PutMapping("/region")
+    public Result<Void> updateRegion(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody Map<String, String> params) {
+        Long userId = extractUserId(authHeader);
+        userService.updateUserRegion(userId, params.get("province"), params.get("city"));
+        return Result.success(null);
+    }
+
     private Long extractUserId(String authHeader) {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String token = authHeader.substring(7);
