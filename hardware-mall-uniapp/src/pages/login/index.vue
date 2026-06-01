@@ -30,15 +30,11 @@
 
       <button
         class="login-btn main-btn"
-        :disabled="!canLogin || loading"
-        @tap="handleLogin"
+        open-type="getPhoneNumber"
+        @getphonenumber="onGetPhoneNumber"
         v-if="avatarUrl"
+        :disabled="!canLogin || loginLoading"
       >
-        <text class="btn-icon">📱</text>
-        <text class="btn-text">{{ loading ? '登录中...' : '微信一键登录' }}</text>
-      </button>
-
-      <button class="login-btn main-btn" open-type="getPhoneNumber" @getphonenumber="onGetPhoneNumber" v-if="!avatarUrl" :disabled="loginLoading">
         <text class="btn-icon">📱</text>
         <text class="btn-text">{{ loginLoading ? '登录中...' : '微信一键登录' }}</text>
       </button>
@@ -59,14 +55,11 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { login, bindPhone } from '@/api/user'
+import { login, bindPhone, updateUserInfo } from '@/api/user'
 
-const loading = ref(false)
 const loginLoading = ref(false)
 const avatarUrl = ref('')
 const nickname = ref('')
-const tempToken = ref('')
-const tempUserInfo = ref<any>(null)
 
 const canLogin = computed(() => {
   return avatarUrl.value && nickname.value.trim().length > 0
@@ -109,10 +102,19 @@ const onGetPhoneNumber = async (e: any) => {
     if (!code) throw new Error('获取登录凭证失败')
 
     const result = await login({ code })
-    tempToken.value = result.token
-    tempUserInfo.value = result.userInfo
 
-    let finalUserInfo = { ...result.userInfo }
+    uni.setStorageSync('token', result.token)
+
+    await updateUserInfo({
+      nickname: nickname.value,
+      avatarUrl: avatarUrl.value
+    })
+
+    let finalUserInfo = {
+      ...result.userInfo,
+      nickname: nickname.value,
+      avatarUrl: avatarUrl.value
+    }
     const phoneCode = e.detail.code
     if (phoneCode) {
       try {
@@ -123,59 +125,18 @@ const onGetPhoneNumber = async (e: any) => {
       }
     }
 
+    uni.removeStorageSync('token')
+
     uni.setStorageSync('LOGIN_RESULT', JSON.stringify({
       token: result.token,
       userInfo: finalUserInfo
     }))
     navigateBack()
   } catch (err: any) {
+    uni.removeStorageSync('token')
     console.error('Login failed:', err)
     uni.showToast({ title: err.message || '登录失败，请重试', icon: 'none' })
     loginLoading.value = false
-  }
-}
-
-const handleLogin = async () => {
-  if (!canLogin.value || loading.value) return
-  loading.value = true
-
-  try {
-    const loginRes = await new Promise<UniApp.LoginRes>((resolve, reject) => {
-      uni.login({ provider: 'weixin', success: resolve, fail: reject })
-    })
-
-    const code = loginRes.code
-    if (!code) throw new Error('获取登录凭证失败')
-
-    if (tempToken.value) {
-      const { updateUserInfo } = await import('@/api/user')
-      await updateUserInfo({
-        nickname: nickname.value,
-        avatarUrl: avatarUrl.value
-      })
-      uni.setStorageSync('LOGIN_RESULT', JSON.stringify({
-        token: tempToken.value,
-        userInfo: { ...tempUserInfo.value, nickname: nickname.value, avatarUrl: avatarUrl.value }
-      }))
-      navigateBack()
-      return
-    }
-
-    const result = await login({ code })
-    const { updateUserInfo } = await import('@/api/user')
-    await updateUserInfo({
-      nickname: nickname.value,
-      avatarUrl: avatarUrl.value
-    })
-    uni.setStorageSync('LOGIN_RESULT', JSON.stringify({
-      token: result.token,
-      userInfo: { ...result.userInfo, nickname: nickname.value, avatarUrl: avatarUrl.value }
-    }))
-    navigateBack()
-  } catch (e: any) {
-    console.error('Login failed:', e)
-    uni.showToast({ title: e.message || '登录失败，请重试', icon: 'none' })
-    loading.value = false
   }
 }
 

@@ -50,14 +50,14 @@
             class="product-list-item"
             @tap="goProductDetail(product.id)"
           >
-            <image class="list-item-image" :src="product.images?.[0]" mode="aspectFill" />
+            <image class="list-item-image" :src="product.images?.[0]" mode="aspectFill" lazy-load />
             <view class="list-item-info">
               <text class="list-item-name">{{ product.name }}</text>
               <text class="list-item-sub" v-if="product.subtitle">{{ product.subtitle }}</text>
               <view class="list-item-bottom">
                 <view class="list-item-price">
                   <text class="price-symbol">¥</text>
-                  <text class="price-value">{{ product.minPrice || product.price || product.originalPrice }}</text>
+                  <text class="price-value">{{ product.minPrice ?? product.price ?? product.originalPrice }}</text>
                   <text v-if="product.originalPrice" class="original-price">¥{{ product.originalPrice }}</text>
                 </view>
                 <text class="list-item-sales">已售{{ product.salesCount || 0 }}</text>
@@ -147,6 +147,10 @@ const onSearch = (keyword: string) => {
 
 const onSort = (sort: string) => {
   currentSort.value = sort
+  page.value = 1
+  noMore.value = false
+  products.value = []
+  loadProducts()
 }
 
 const goProductDetail = (id: number) => {

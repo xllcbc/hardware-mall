@@ -29,8 +29,8 @@
           </view>
 
           <view class="order-products">
-            <view class="product-item" v-for="item in order.items" :key="item.id" @tap.stop="goProductDetail(item.productId)">
-              <image class="product-image" :src="item.productImage || '/static/images/default.png'" mode="aspectFill" />
+            <view class="product-item" v-for="item in order.items" :key="item.id" @tap.stop="goProductDetail(item.spuId)">
+              <image class="product-image" :src="item.productImage || '/static/images/default.png'" mode="aspectFill" lazy-load />
               <view class="product-info">
                 <text class="product-name">{{ item.productName }}</text>
                 <text class="product-spec" v-if="item.productSpec">{{ item.productSpec }}</text>

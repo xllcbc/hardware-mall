@@ -51,7 +51,7 @@
         <view class="items-header">商品清单</view>
         <view class="item" v-for="(item, index) in order.items" :key="item.id">
           <view class="item-inner" :class="{ 'border-bottom': index < order.items.length - 1 }">
-            <image class="item-image" :src="item.productImage || '/static/images/default.png'" mode="aspectFill" />
+            <image class="item-image" :src="item.productImage || '/static/images/default.png'" mode="aspectFill" lazy-load />
             <view class="item-info">
               <text class="item-name">{{ item.productName }}</text>
               <text class="item-spec" v-if="item.productSpec">{{ item.productSpec }}</text>
@@ -110,14 +110,19 @@ onMounted(async () => {
   const pages = getCurrentPages()
   const currentPage = pages[pages.length - 1] as any
   const orderId = currentPage?.options?.id
-  if (orderId) {
+  const numericId = Number(orderId)
+  if (orderId && numericId > 0) {
     try {
-      const data = await getOrderDetail(Number(orderId))
+      const data = await getOrderDetail(numericId)
       order.value = data || {}
     } catch (e) {
       console.error('加载订单详情失败:', e)
       uni.showToast({ title: '加载失败', icon: 'none' })
     }
+  } else {
+    uni.showToast({ title: '订单不存在', icon: 'none' })
+    setTimeout(() => uni.navigateBack(), 1500)
+    return
   }
 })
 

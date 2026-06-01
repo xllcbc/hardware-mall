@@ -1,5 +1,18 @@
 <template>
   <view class="address-container">
+    <view v-if="!loaded" class="skeleton-address-list">
+      <view class="skeleton-card" v-for="i in 3" :key="i">
+        <view class="skeleton-contact">
+          <view class="skeleton-circle"></view>
+          <view class="skeleton-line short"></view>
+          <view class="skeleton-line short"></view>
+        </view>
+        <view class="skeleton-line"></view>
+        <view class="skeleton-line"></view>
+      </view>
+    </view>
+
+    <template v-if="loaded">
     <scroll-view class="address-list" scroll-y>
       <view class="list-header">
         <text class="list-title">我的收货地址</text>
@@ -60,21 +73,26 @@
         <text>添加新地址</text>
       </view>
     </view>
+    </template>
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getAddressList, deleteAddress as deleteAddressApi } from '@/api/address'
 import type { Address } from '@/types'
 
 const addresses = ref<Address[]>([])
+const loaded = ref(false)
 const selectMode = ref(false)
 const isManaging = ref(false)
 
 onMounted(() => {
+  nextTick(() => {
+    loaded.value = true
+  })
   const pages = getCurrentPages()
   const currentPage = pages[pages.length - 1] as any
   if (currentPage?.options?.mode === 'select') {
@@ -144,6 +162,42 @@ const deleteAddress = (addr: Address) => {
   display: flex;
   flex-direction: column;
   background: #FAFAFA;
+}
+
+.skeleton-address-list {
+  padding: 24rpx;
+}
+
+.skeleton-card {
+  background: #FFFFFF;
+  border-radius: 16rpx;
+  padding: 24rpx;
+  margin-bottom: 24rpx;
+}
+
+.skeleton-contact {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  margin-bottom: 16rpx;
+}
+
+.skeleton-circle {
+  width: 48rpx;
+  height: 48rpx;
+  border-radius: 50%;
+  background: #EEEEEE;
+}
+
+.skeleton-line {
+  height: 28rpx;
+  margin-bottom: 16rpx;
+  background: #EEEEEE;
+  border-radius: 4rpx;
+}
+
+.skeleton-line.short {
+  width: 120rpx;
 }
 
 .list-header {

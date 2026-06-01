@@ -26,7 +26,7 @@
           <text class="items-count">共{{ orderItems.length }}件</text>
         </view>
         <view class="item" v-for="item in orderItems" :key="item.skuId || item.productId">
-          <image class="item-image" :src="item.productImage || '/static/images/placeholder.svg'" mode="aspectFill" />
+          <image class="item-image" :src="item.productImage || '/static/images/placeholder.svg'" mode="aspectFill" lazy-load />
           <view class="item-info">
             <text class="item-name">{{ item.productName }}</text>
             <text v-if="item.spec" class="item-spec">{{ formatSpec(item.spec) }}</text>
@@ -161,6 +161,7 @@ const submitOrder = async () => {
     return
   }
 
+  submitted.value = true
   try {
     const items = isDirectBuy.value
       ? [{ skuId: preOrderStore.item.skuId, quantity: preOrderStore.item.quantity }]
@@ -174,7 +175,6 @@ const submitOrder = async () => {
     }
 
     const order = await createOrder(orderData)
-    submitted.value = true
 
     if (isDirectBuy.value) {
       preOrderStore.clearItem()
@@ -207,6 +207,7 @@ const submitOrder = async () => {
           } else {
             uni.showToast({ title: '支付失败', icon: 'none' })
           }
+          submitted.value = false
           setTimeout(() => {
             uni.redirectTo({ url: `/pages/order/detail?id=${order.id}` })
           }, 1500)
@@ -215,12 +216,14 @@ const submitOrder = async () => {
     } catch (payErr: any) {
       uni.hideLoading()
       uni.showToast({ title: payErr.message || '调起支付失败', icon: 'none' })
+      submitted.value = false
       setTimeout(() => {
         uni.redirectTo({ url: `/pages/order/detail?id=${order.id}` })
       }, 1500)
     }
   } catch (e: any) {
     uni.showToast({ title: e.message || '提交失败', icon: 'none' })
+    submitted.value = false
   }
 }
 

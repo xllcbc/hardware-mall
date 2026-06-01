@@ -1,7 +1,7 @@
 <template>
   <view class="product-card" @tap="onClick">
     <view class="image-wrapper">
-      <image class="product-image" :src="image || '/static/images/placeholder.svg'" mode="aspectFill" />
+      <image class="product-image" :src="image || '/static/images/placeholder.svg'" mode="aspectFill" lazy-load />
     </view>
     <view class="product-info">
       <text class="product-name">{{ name }}</text>
@@ -44,13 +44,15 @@ const formatPrice = (price: number | string | undefined) => {
 }
 
 const displayPrice = computed(() => {
-  if (props.minPrice && props.minPrice !== props.originalPrice) {
+  if (props.minPrice != null && props.minPrice !== props.originalPrice) {
     return formatPrice(props.minPrice) + '起'
   }
-  return formatPrice(props.price || props.originalPrice)
+  return formatPrice(props.price ?? props.originalPrice)
 })
 
 const onClick = () => {
+  const id = props.id
+  if (id == null || Number(id) <= 0) return
   emit('click', props.id!)
 }
 </script>

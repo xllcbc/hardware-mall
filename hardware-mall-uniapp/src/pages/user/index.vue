@@ -115,7 +115,7 @@ const goPage = (url: string) => {
     uni.navigateTo({ url: '/pages/login/index' })
     return
   }
-  uni.navigateTo({ url })
+  uni.navigateTo({ url, animationType: 'none' })
 }
 
 const handleLogout = () => {

@@ -57,8 +57,12 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  let _saveFavoritesTimer: ReturnType<typeof setTimeout> | null = null
   const saveFavorites = () => {
-    uni.setStorageSync(FAVORITES_KEY, favorites.value)
+    if (_saveFavoritesTimer) clearTimeout(_saveFavoritesTimer)
+    _saveFavoritesTimer = setTimeout(() => {
+      uni.setStorageSync(FAVORITES_KEY, favorites.value)
+    }, 300)
   }
 
   const addFootprint = (item: Omit<FootprintItem, 'viewTime'>) => {
@@ -81,8 +85,20 @@ export const useAppStore = defineStore('app', () => {
     saveFootprint()
   }
 
+  const removeFootprint = (id: number) => {
+    const index = footprint.value.findIndex(f => f.id === id)
+    if (index > -1) {
+      footprint.value.splice(index, 1)
+      saveFootprint()
+    }
+  }
+
+  let _saveFootprintTimer: ReturnType<typeof setTimeout> | null = null
   const saveFootprint = () => {
-    uni.setStorageSync(FOOTPRINT_KEY, footprint.value)
+    if (_saveFootprintTimer) clearTimeout(_saveFootprintTimer)
+    _saveFootprintTimer = setTimeout(() => {
+      uni.setStorageSync(FOOTPRINT_KEY, footprint.value)
+    }, 300)
   }
 
   const selectCategory = (id: number | null) => {
@@ -101,6 +117,7 @@ export const useAppStore = defineStore('app', () => {
     removeFavorite,
     toggleFavorite,
     addFootprint,
-    clearFootprint
+    clearFootprint,
+    removeFootprint
   }
 })

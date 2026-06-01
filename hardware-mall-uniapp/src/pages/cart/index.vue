@@ -25,7 +25,7 @@
           </view>
 
           <view class="item-main" @tap="goProductDetail(item.productId)">
-            <image class="item-image" :src="item.productImage || '/static/images/default.png'" mode="aspectFill" />
+            <image class="item-image" :src="item.productImage || '/static/images/default.png'" mode="aspectFill" lazy-load />
 
             <view class="item-content">
               <text class="item-name">{{ item.productName }}</text>

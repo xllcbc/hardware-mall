@@ -14,6 +14,17 @@
       <text class="cancel-btn" @tap="cancel">取消</text>
     </view>
 
+    <view v-if="!loaded" class="skeleton-search-content">
+      <view class="skeleton-grid">
+        <view class="skeleton-item" v-for="i in 4" :key="i">
+          <view class="skeleton-image"></view>
+          <view class="skeleton-line"></view>
+          <view class="skeleton-line short"></view>
+        </view>
+      </view>
+    </view>
+
+    <template v-if="loaded">
     <scroll-view v-if="!hasSearched" class="search-content" scroll-y>
       <view v-if="historyKeywords.length" class="search-section">
         <view class="section-header">
@@ -74,11 +85,12 @@
         />
       </view>
     </scroll-view>
+    </template>
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import ProductCard from '@/components/common/ProductCard.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -86,6 +98,7 @@ import { getProductList } from '@/api/product'
 import type { Product } from '@/types'
 
 const HISTORY_KEY = 'mall_search_history'
+const loaded = ref(false)
 const keyword = ref('')
 const hasSearched = ref(false)
 const loading = ref(false)
@@ -94,6 +107,9 @@ const hotKeywords = ref(['门锁', '工具箱', '螺丝刀', '水管', '灯具',
 const products = ref<Product[]>([])
 
 onMounted(() => {
+  nextTick(() => {
+    loaded.value = true
+  })
   const pages = getCurrentPages()
   const currentPage = pages[pages.length - 1] as any
   const kw = currentPage?.options?.keyword
@@ -160,6 +176,47 @@ const goProductDetail = (id: number | string) => {
   display: flex;
   flex-direction: column;
   background: #F7F8FA;
+}
+
+.skeleton-search-content {
+  flex: 1;
+  padding: 20rpx;
+}
+
+.skeleton-grid {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.skeleton-item {
+  width: calc((100% - 20rpx) / 2);
+  margin-right: 20rpx;
+  margin-bottom: 20rpx;
+  background: #FFFFFF;
+  border-radius: 16rpx;
+  overflow: hidden;
+}
+
+.skeleton-item:nth-child(2n) {
+  margin-right: 0;
+}
+
+.skeleton-image {
+  width: 100%;
+  height: 0;
+  padding-bottom: 100%;
+  background: #EEEEEE;
+}
+
+.skeleton-line {
+  height: 28rpx;
+  margin: 16rpx;
+  background: #EEEEEE;
+  border-radius: 4rpx;
+}
+
+.skeleton-line.short {
+  width: 60%;
 }
 
 .search-header {

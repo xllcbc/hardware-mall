@@ -4,10 +4,25 @@ import type { UserInfo } from '@/types'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref<string>(uni.getStorageSync('token') || '')
-  const userInfo = ref<UserInfo | null>(uni.getStorageSync('userInfo') ? JSON.parse(uni.getStorageSync('userInfo')) : null)
+  const savedUserInfo = uni.getStorageSync('userInfo')
+const userInfo = ref<UserInfo | null>(savedUserInfo ? JSON.parse(savedUserInfo) : null)
   
   const isLoggedIn = computed(() => !!token.value)
-  
+
+  const loginResult = ref<{ token: string; userInfo: UserInfo } | null>(null)
+
+  function setLoginResult(t: string, info: UserInfo) {
+    setToken(t)
+    setUserInfo(info)
+    loginResult.value = { token: t, userInfo: info }
+  }
+
+  function consumeLoginResult() {
+    const result = loginResult.value
+    loginResult.value = null
+    return result
+  }
+
   function setToken(newToken: string) {
     token.value = newToken
     uni.setStorageSync('token', newToken)
@@ -29,6 +44,9 @@ export const useUserStore = defineStore('user', () => {
     token,
     userInfo,
     isLoggedIn,
+    loginResult,
+    setLoginResult,
+    consumeLoginResult,
     setToken,
     setUserInfo,
     logout

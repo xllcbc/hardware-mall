@@ -1,5 +1,15 @@
 <template>
   <view class="footprint-container">
+    <view v-if="!loaded" class="skeleton-divider"></view>
+    <view v-if="!loaded" class="skeleton-grid">
+      <view class="skeleton-item" v-for="i in 4" :key="i">
+        <view class="skeleton-image"></view>
+        <view class="skeleton-line"></view>
+        <view class="skeleton-line short"></view>
+      </view>
+    </view>
+
+    <template v-if="loaded">
     <view class="footprint-header">
       <text class="footprint-tip">最近30天的浏览记录</text>
       <text class="manage-btn" @tap="toggleManageMode">
@@ -11,7 +21,7 @@
       <view class="footprint-grid">
         <view
           v-for="item in appStore.footprint"
-          :key="`${item.id}-${item.viewTime}`"
+          :key="item.id"
           class="footprint-item"
         >
           <view v-if="manageMode" class="item-checkbox" @tap="toggleSelect(item.id)">
@@ -21,7 +31,7 @@
           </view>
 
           <view class="item-image-wrap" @tap="goProductDetail(item.id)">
-            <image class="item-image" :src="item.image || '/static/images/placeholder.svg'" mode="aspectFill" />
+            <image class="item-image" :src="item.image || '/static/images/placeholder.svg'" mode="aspectFill" lazy-load />
           </view>
 
           <view class="item-info">
@@ -49,17 +59,25 @@
         <text>删除</text>
       </view>
     </view>
+    </template>
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { useAppStore, type FootprintItem } from '@/stores/app'
 
 const appStore = useAppStore()
+const loaded = ref(false)
 const manageMode = ref(false)
 const selectedIds = ref<number[]>([])
+
+onMounted(() => {
+  nextTick(() => {
+    loaded.value = true
+  })
+})
 
 const selectedCount = computed(() => selectedIds.value.length)
 
@@ -130,10 +148,7 @@ const deleteSelected = () => {
     success: (res) => {
       if (res.confirm) {
         selectedIds.value.forEach(id => {
-          const index = appStore.footprint.findIndex(f => f.id === id)
-          if (index > -1) {
-            appStore.footprint.splice(index, 1)
-          }
+          appStore.removeFootprint(id)
         })
         selectedIds.value = []
         uni.showToast({ title: '已删除', icon: 'success' })
@@ -154,6 +169,47 @@ const goShopping = () => {
   flex-direction: column;
   background: #F5F5F5;
   position: relative;
+}
+
+.skeleton-divider {
+  height: 80rpx;
+}
+
+.skeleton-grid {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 20rpx;
+}
+
+.skeleton-item {
+  width: calc((100% - 20rpx) / 2);
+  margin-right: 20rpx;
+  margin-bottom: 20rpx;
+  background: #FFFFFF;
+  border-radius: 16rpx;
+  overflow: hidden;
+}
+
+.skeleton-item:nth-child(2n) {
+  margin-right: 0;
+}
+
+.skeleton-image {
+  width: 100%;
+  height: 0;
+  padding-bottom: 100%;
+  background: #EEEEEE;
+}
+
+.skeleton-line {
+  height: 28rpx;
+  margin: 16rpx;
+  background: #EEEEEE;
+  border-radius: 4rpx;
+}
+
+.skeleton-line.short {
+  width: 60%;
 }
 
 .footprint-header {
@@ -183,9 +239,8 @@ const goShopping = () => {
 }
 
 .footprint-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 20rpx;
+  display: flex;
+  flex-wrap: wrap;
 }
 
 .footprint-item {
@@ -194,6 +249,13 @@ const goShopping = () => {
   border-radius: 16rpx;
   overflow: hidden;
   box-shadow: 0 4rpx 20rpx rgba(201, 168, 108, 0.08);
+  width: calc((100% - 20rpx) / 2);
+  margin-right: 20rpx;
+  margin-bottom: 20rpx;
+}
+
+.footprint-item:nth-child(2n) {
+  margin-right: 0;
 }
 
 .item-checkbox {

@@ -119,7 +119,6 @@ export interface OrderItem {
   orderId: number
   skuId: number
   spuId: number
-  productId: number
   productName: string
   productSpec?: string
   productImage?: string

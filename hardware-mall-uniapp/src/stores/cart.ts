@@ -57,12 +57,14 @@ export const useCartStore = defineStore('cart', () => {
   }
 
   async function clearSelected() {
-    const selected = items.value.filter(item => item.selected)
-    items.value = items.value.filter(item => !item.selected)
+    const selectedIds = items.value.filter(item => item.selected).map(i => i.cartId!)
     try {
-      await clearCartApi()
+      for (const cartId of selectedIds) {
+        await removeFromCart(cartId)
+      }
     } catch (e) {
       console.error('清空购物车失败:', e)
+      throw e
     }
   }
 

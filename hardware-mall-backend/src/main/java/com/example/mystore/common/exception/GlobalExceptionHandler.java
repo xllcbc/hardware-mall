@@ -6,6 +6,7 @@ import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import javax.servlet.http.HttpServletRequest;
 
@@ -35,6 +36,15 @@ public class GlobalExceptionHandler {
                 .findFirst()
                 .orElse("参数绑定失败");
         return Result.error(400, message);
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public Result<Void> handleTypeMismatch(MethodArgumentTypeMismatchException e, HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        String paramName = e.getName();
+        String requiredType = e.getRequiredType() != null ? e.getRequiredType().getSimpleName() : "unknown";
+        log.warn("参数类型不匹配 at {} | 参数: {}={} | 期望类型: {}", uri, paramName, e.getValue(), requiredType);
+        return Result.error(400, "参数格式错误: " + paramName);
     }
 
     @ExceptionHandler(RuntimeException.class)

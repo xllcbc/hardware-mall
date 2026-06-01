@@ -120,7 +120,7 @@ const currentSku = computed(() => {
     if (sku.specs.length !== selectedSpecList.length) return false
     return selectedSpecList.every(selected =>
       sku.specs.some(skuSpec =>
-        skuSpec.templateId == selected.templateId && skuSpec.itemId == selected.itemId
+        skuSpec.templateId === selected.templateId && skuSpec.itemId === selected.itemId
       )
     )
   }) || null
@@ -176,7 +176,7 @@ const isSpecAvailable = (templateId: number, itemId: number) => {
     sku.status === 1 &&
     sku.stock > 0 &&
     currentSpecs.every(cs =>
-      sku.specs.some(s => s.templateId == cs.templateId && s.itemId == cs.itemId)
+      sku.specs.some(s => s.templateId === cs.templateId && s.itemId === cs.itemId)
     )
   )
 }
@@ -197,9 +197,10 @@ onMounted(async () => {
   const currentPage = pages[pages.length - 1] as any
   const productId = currentPage?.options?.id
 
-  if (productId) {
+  const numericId = Number(productId)
+  if (productId && numericId > 0) {
     try {
-      const data = await getProductDetail(Number(productId))
+      const data = await getProductDetail(numericId)
       detailData.value = data
       product.value = data?.spu || {}
       appStore.addFootprint({
@@ -211,6 +212,10 @@ onMounted(async () => {
     } catch (e) {
       console.error('Failed to load product:', e)
     }
+  } else {
+    uni.showToast({ title: '商品不存在', icon: 'none' })
+    setTimeout(() => uni.navigateBack(), 1500)
+    return
   }
   loading.value = false
 })
@@ -235,12 +240,17 @@ const addToCart = async () => {
     uni.showToast({ title: '请选择商品规格', icon: 'none' })
     return
   }
+  if (!specTemplates.value.length && !currentSku.value) {
+    uni.showToast({ title: '暂无可用规格，请稍后再试', icon: 'none' })
+    return
+  }
   if (currentSkuStock.value <= 0) {
     uni.showToast({ title: '商品已售罄', icon: 'none' })
     return
   }
   try {
     const skuId = currentSku.value?.id || product.value.id
+    if (!skuId) throw new Error('未找到可用规格')
     await addToCartApi(skuId, quantity.value)
     uni.showToast({ title: '已加入购物车', icon: 'success' })
   } catch (e: any) {
@@ -254,8 +264,16 @@ const buyNow = async () => {
     uni.showToast({ title: '请选择商品规格', icon: 'none' })
     return
   }
+  if (!specTemplates.value.length && !currentSku.value) {
+    uni.showToast({ title: '暂无可用规格，请稍后再试', icon: 'none' })
+    return
+  }
   if (currentSkuStock.value <= 0) {
     uni.showToast({ title: '商品已售罄', icon: 'none' })
+    return
+  }
+  if (!currentSku.value) {
+    uni.showToast({ title: '暂无可用规格，请稍后再试', icon: 'none' })
     return
   }
 
