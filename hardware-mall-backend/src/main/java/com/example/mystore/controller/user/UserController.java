@@ -1,4 +1,4 @@
-package com.example.mystore.controller.usesr;
+package com.example.mystore.controller.user;
 
 import com.example.mystore.annotation.RateLimit;
 import com.example.mystore.common.constant.RedisConstants;

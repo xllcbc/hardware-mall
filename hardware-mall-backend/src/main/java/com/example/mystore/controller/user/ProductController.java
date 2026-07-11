@@ -1,4 +1,4 @@
-package com.example.mystore.controller.usesr;
+package com.example.mystore.controller.user;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.result.Result;
