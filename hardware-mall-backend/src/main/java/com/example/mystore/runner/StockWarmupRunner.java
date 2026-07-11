@@ -1,4 +1,4 @@
-package com.example.mystore.handler;
+package com.example.mystore.runner;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.constant.RedisConstants;

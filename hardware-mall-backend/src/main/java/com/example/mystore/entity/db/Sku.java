@@ -2,7 +2,7 @@ package com.example.mystore.entity.db;
 
 import com.baomidou.mybatisplus.annotation.*;
 import com.example.mystore.entity.vo.SpecVO;
-import com.example.mystore.handler.SpecVOTypeHandler;
+import com.example.mystore.mapper.typehandler.SpecVOTypeHandler;
 import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;

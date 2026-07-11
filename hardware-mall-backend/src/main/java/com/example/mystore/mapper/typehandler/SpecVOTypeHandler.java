@@ -1,4 +1,4 @@
-package com.example.mystore.handler;
+package com.example.mystore.mapper.typehandler;
 
 import com.example.mystore.entity.vo.SpecVO;
 import com.fasterxml.jackson.core.JsonProcessingException;
