@@ -163,18 +163,3 @@ CREATE TABLE IF NOT EXISTS `order_item` (
     `subtotal` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE TABLE IF NOT EXISTS `mq_message` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    `business_type` VARCHAR(50) NOT NULL,
-    `business_id` VARCHAR(64) NOT NULL,
-    `exchange` VARCHAR(100) DEFAULT NULL,
-    `routing_key` VARCHAR(100) DEFAULT NULL,
-    `message_body` TEXT DEFAULT NULL,
-    `status` INT NOT NULL DEFAULT 0,
-    `retry_count` INT NOT NULL DEFAULT 0,
-    `error_msg` VARCHAR(500) DEFAULT NULL,
-    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `send_time` DATETIME DEFAULT NULL,
-    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);

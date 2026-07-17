@@ -14,8 +14,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 订单超时兜底定时任务
- * 扫描超期的待付款订单，自动取消（防止 MQ 消息丢失或消费失败）
+ * 订单超时自动取消定时任务
+ * 扫描超期的待付款订单，自动取消并恢复库存
  */
 @Component
 @RequiredArgsConstructor
@@ -26,8 +26,8 @@ public class OrderCancelStaleJob {
     private final OrderMapper orderMapper;
     private final RedisLockUtil redisLockUtil;
 
-    // 超时阈值：40分钟（比 MQ TTL 30分钟多 10分钟，给 MQ 主路径优先处理时间）
-    private static final int STALE_MINUTES = 40;
+    // 超时阈值：30分钟
+    private static final int STALE_MINUTES = 30;
     // 单次处理上限
     private static final int BATCH_SIZE = 100;
     // 分布式锁 key
@@ -40,7 +40,7 @@ public class OrderCancelStaleJob {
     public void cancelStaleOrders() {
         boolean locked = redisLockUtil.tryLock(LOCK_KEY);
         if (!locked) {
-            log.debug("未获取到分布式锁，跳过本次兜底任务");
+            log.debug("未获取到分布式锁，跳过本次任务");
             return;
         }
 
@@ -54,27 +54,27 @@ public class OrderCancelStaleJob {
                 return;
             }
 
-            log.info("发现 {} 条超期待付款订单，开始兜底取消", staleOrders.size());
+            log.info("发现 {} 条超期待付款订单，开始自动取消", staleOrders.size());
             int successCount = 0;
             int skipCount = 0;
 
             for (Order order : staleOrders) {
                 try {
                     boolean success = orderService.autoCancelOrder(
-                            order.getId(), "超时未支付，系统自动取消（兜底任务）");
+                            order.getId(), "超时未支付，系统自动取消");
                     if (success) {
                         successCount++;
-                        log.info("兜底取消成功, orderId={}", order.getId());
+                        log.info("自动取消成功, orderId={}", order.getId());
                     } else {
                         skipCount++;
-                        log.info("兜底取消跳过（订单已非待付款状态）, orderId={}", order.getId());
+                        log.info("自动取消跳过（订单已非待付款状态）, orderId={}", order.getId());
                     }
                 } catch (Exception e) {
-                    log.error("兜底取消失败, orderId={}", order.getId(), e);
+                    log.error("自动取消失败, orderId={}", order.getId(), e);
                 }
             }
 
-            log.info("兜底任务完成, 成功={}, 跳过={}, 失败={}",
+            log.info("自动取消任务完成, 成功={}, 跳过={}, 失败={}",
                     successCount, skipCount, staleOrders.size() - successCount - skipCount);
 
         } finally {

@@ -17,11 +17,9 @@ import com.example.mystore.entity.vo.DashboardStatsVO;
 import com.example.mystore.entity.vo.RecentOrderVO;
 import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.SpecVO;
-import com.example.mystore.entity.db.MqMessage;
 import com.example.mystore.event.StockSyncEvent;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
-import com.example.mystore.service.MqMessageService;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.SkuService;
@@ -38,9 +36,6 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-
-import static com.example.mystore.config.RabbitMQConfig.ORDER_DELAY_ROUTING_KEY;
-import static com.example.mystore.config.RabbitMQConfig.ORDER_EXCHANGE;
 
 @Service
 @RequiredArgsConstructor
@@ -60,7 +55,6 @@ public class OrderServiceImpl implements OrderService {
     private PayService payService;
     private final RedisLockUtil redisLockUtil;
     private final RedisUtil redisUtil;
-    private final MqMessageService mqMessageService;
     private final ApplicationEventPublisher applicationEventPublisher;
 
     private static final DateTimeFormatter ORDER_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -187,21 +181,6 @@ public class OrderServiceImpl implements OrderService {
                 log.info("删除购物车商品, cartId={}, skuId={}", cart.getId(), cartItem.getSkuId());
             }
         }
-
-        // 【本地消息表】记录 MQ 消息，与订单数据在同一事务中
-        // 后续由 MqMessageProducer 定时任务轮询发送
-        MqMessage mqMessage = new MqMessage();
-        mqMessage.setBusinessType("ORDER_TIMEOUT");
-        mqMessage.setBusinessId(order.getId().toString());
-        mqMessage.setExchange(ORDER_EXCHANGE);
-        mqMessage.setRoutingKey(ORDER_DELAY_ROUTING_KEY);
-        mqMessage.setMessageBody(order.getId().toString());
-        mqMessage.setStatus(StatusConstants.MQ_STATUS_PENDING);
-        mqMessage.setRetryCount(0);
-        mqMessage.setCreateTime(LocalDateTime.now());
-        mqMessage.setUpdateTime(LocalDateTime.now());
-        mqMessageService.saveMessage(mqMessage);
-        log.info("订单超时取消消息已记录到本地消息表, orderId={}, messageId={}", order.getId(), mqMessage.getId());
 
         // 发布库存同步事件，事务提交后由监听器异步执行
         List<Long> skuIds = orderItems.stream()

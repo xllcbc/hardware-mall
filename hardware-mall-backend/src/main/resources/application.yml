@@ -36,17 +36,6 @@ spring:
         max-size: 20
         queue-capacity: 100
         keep-alive: 60s
-  rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
-    port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USERNAME:guest}
-    password: ${RABBITMQ_PASSWORD:guest}
-    publisher-confirm-type: correlated
-    publisher-returns: true
-    listener:
-      simple:
-        acknowledge-mode: manual
-        prefetch: 1
 
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml

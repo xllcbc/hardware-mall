@@ -61,15 +61,4 @@ public class StatusConstants {
     /** 非默认地址 */
     public static final int ADDRESS_NOT_DEFAULT = 0;
 
-    // ==================== MQ消息状态 ====================
-    /** 待发送 */
-    public static final int MQ_STATUS_PENDING = 0;
-    /** 已发送 */
-    public static final int MQ_STATUS_SENT = 1;
-    /** 发送失败 */
-    public static final int MQ_STATUS_FAILED = 2;
-    /** 已消费 */
-    public static final int MQ_STATUS_CONSUMED = 3;
-    /** 发送中 */
-    public static final int MQ_STATUS_SENDING = 4;
 }

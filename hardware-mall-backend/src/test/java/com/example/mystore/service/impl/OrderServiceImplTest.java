@@ -6,7 +6,6 @@ import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
-import com.example.mystore.service.MqMessageService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
@@ -54,8 +53,6 @@ class OrderServiceImplTest {
     private RedisLockUtil redisLockUtil;
     @Mock
     private RedisUtil redisUtil;
-    @Mock
-    private MqMessageService mqMessageService;
     @Mock
     private ApplicationEventPublisher applicationEventPublisher;
 
