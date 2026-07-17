@@ -18,6 +18,7 @@ import com.example.mystore.entity.vo.RecentOrderVO;
 import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.entity.db.MqMessage;
+import com.example.mystore.event.StockSyncEvent;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.MqMessageService;
@@ -206,7 +207,7 @@ public class OrderServiceImpl implements OrderService {
         List<Long> skuIds = orderItems.stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new com.example.mystore.mq.StockSyncEvent(skuIds));
+        applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
 
         return getOrderVO(order.getId(), userId);
     }
@@ -307,7 +308,7 @@ public class OrderServiceImpl implements OrderService {
         List<Long> skuIds = items.stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new com.example.mystore.mq.StockSyncEvent(skuIds));
+        applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
     }
 
     @Override
@@ -452,7 +453,7 @@ public class OrderServiceImpl implements OrderService {
         List<Long> skuIds = items.stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new com.example.mystore.mq.StockSyncEvent(skuIds));
+        applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
     }
 
     @Override
@@ -488,7 +489,7 @@ public class OrderServiceImpl implements OrderService {
         List<Long> skuIds = items.stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new com.example.mystore.mq.StockSyncEvent(skuIds));
+        applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
 
         return true;
     }
