@@ -77,6 +77,34 @@ async function request<T = any>(options: RequestOptions): Promise<T> {
         console.log('请求响应:', { url, code: response.code, message: response.message, data: response.data })
         if (response.code === 200) {
           resolve(response.data)
+        } else if (response.code === 401) {
+          uni.removeStorageSync('token')
+          uni.removeStorageSync('userInfo')
+
+          const pages = getCurrentPages()
+          if (pages.length > 0) {
+            const page = pages[pages.length - 1] as any
+            const route = page.route || ''
+            const options = page.$page?.options || page.options || {}
+            const query = Object.keys(options).length > 0
+              ? '?' + Object.entries(options).map(([k, v]) =>
+                  `${k}=${encodeURIComponent(String(v))}`
+                ).join('&')
+              : ''
+            if (route) {
+              uni.setStorageSync('LOGIN_REDIRECT', query ? route + query : route)
+            }
+          }
+
+          uni.showModal({
+            title: '提示',
+            content: response.message || '登录已过期，请重新登录',
+            showCancel: false,
+            success: () => {
+              uni.reLaunch({ url: '/pages/login/index' })
+            }
+          })
+          reject(new Error(response.message))
         } else {
           uni.showToast({ title: response.message || '请求失败', icon: 'none' })
           console.error('请求失败:', { url, code: response.code, message: response.message })

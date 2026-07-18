@@ -56,10 +56,12 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { login, bindPhone, updateUserInfo } from '@/api/user'
+import { useUserStore } from '@/stores/user'
 
 const loginLoading = ref(false)
 const avatarUrl = ref('')
 const nickname = ref('')
+const userStore = useUserStore()
 
 const canLogin = computed(() => {
   return avatarUrl.value && nickname.value.trim().length > 0
@@ -127,11 +129,26 @@ const onGetPhoneNumber = async (e: any) => {
 
     uni.removeStorageSync('token')
 
-    uni.setStorageSync('LOGIN_RESULT', JSON.stringify({
-      token: result.token,
-      userInfo: finalUserInfo
-    }))
-    navigateBack()
+    userStore.setToken(result.token)
+    userStore.setUserInfo(finalUserInfo)
+
+    const redirect = uni.getStorageSync('LOGIN_REDIRECT')
+    if (redirect) {
+      uni.removeStorageSync('LOGIN_REDIRECT')
+      const route = redirect.split('?')[0]
+      const tabBarPages = ['pages/index/index', 'pages/category/index', 'pages/cart/index', 'pages/user/index']
+      if (tabBarPages.includes(route)) {
+        uni.switchTab({ url: '/' + route })
+      } else {
+        uni.reLaunch({ url: '/' + redirect })
+      }
+    } else {
+      uni.setStorageSync('LOGIN_RESULT', JSON.stringify({
+        token: result.token,
+        userInfo: finalUserInfo
+      }))
+      navigateBack()
+    }
   } catch (err: any) {
     uni.removeStorageSync('token')
     console.error('Login failed:', err)

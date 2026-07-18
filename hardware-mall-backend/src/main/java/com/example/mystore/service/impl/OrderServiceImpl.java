@@ -23,7 +23,6 @@ import com.example.mystore.service.CartService;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.SkuService;
-import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -53,7 +52,6 @@ public class OrderServiceImpl implements OrderService {
     private final SkuService skuService;
     @Autowired(required = false)
     private PayService payService;
-    private final RedisLockUtil redisLockUtil;
     private final RedisUtil redisUtil;
     private final ApplicationEventPublisher applicationEventPublisher;
 
@@ -86,64 +84,55 @@ public class OrderServiceImpl implements OrderService {
                 throw new RuntimeException("商品不存在或已下架: " + cartItem.getSkuId());
             }
 
-            String lockKey = "stock:" + cartItem.getSkuId();
-            boolean locked = redisLockUtil.tryLock(lockKey);
-            if (!locked) {
-                throw new RuntimeException("系统繁忙，请稍后重试: " + cartItem.getSkuId());
+            // 【库存检查】优先读缓存，缓存 miss 则读 DB
+            // 注意：不再先扣缓存！只在事务内扣 DB，方法末尾统一 syncStockToCache()
+            Object cachedStock = redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + sku.getId());
+            long availableStock;
+            if (cachedStock != null && !redisUtil.isNull(cachedStock)) {
+                availableStock = Long.parseLong(cachedStock.toString());
+            } else {
+                availableStock = sku.getStock();
             }
-            try {
-                // 【库存检查】优先读缓存，缓存 miss 则读 DB
-                // 注意：不再先扣缓存！只在事务内扣 DB，方法末尾统一 syncStockToCache()
-                Object cachedStock = redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + sku.getId());
-                long availableStock;
-                if (cachedStock != null && !redisUtil.isNull(cachedStock)) {
-                    availableStock = Long.parseLong(cachedStock.toString());
-                } else {
-                    availableStock = sku.getStock();
-                }
-                if (availableStock < cartItem.getQuantity()) {
-                    throw new RuntimeException("库存不足: " + sku.getId());
-                }
-
-                Spu spu = spuMapper.selectById(sku.getSpuId());
-                BigDecimal subtotal = sku.getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
-                totalAmount = totalAmount.add(subtotal);
-
-                OrderItem item = new OrderItem();
-                item.setSkuId(sku.getId());
-                item.setSpuId(sku.getSpuId());
-                item.setProductName(spu.getName());
-
-                List<SpecVO> specVOList = sku.getSpecs();
-
-                StringBuilder specStr = new StringBuilder();
-                for (SpecVO specVO : specVOList) {
-                    if (specVO.getValue() != null) {
-                        specStr.append(specVO.getValue()).append(" ");
-                    }
-                }
-
-                item.setProductSpec(specStr.length() > 0 ? specStr.toString().trim() : "");
-
-                item.setProductImage(sku.getImage() != null ? sku.getImage() : getFirstImage(spu.getImages()));
-                item.setPrice(sku.getPrice());
-                item.setQuantity(cartItem.getQuantity());
-                item.setSubtotal(subtotal);
-                item.setCreateTime(LocalDateTime.now());
-                orderItems.add(item);
-
-                // 【事务内】只扣 DB 库存
-                boolean deducted = skuService.deductStock(sku.getId(), cartItem.getQuantity());
-                if (!deducted) {
-                    throw new RuntimeException("库存扣减失败: " + sku.getId());
-                }
-
-                spu.setSalesCount(spu.getSalesCount() + cartItem.getQuantity());
-                spu.setUpdateTime(LocalDateTime.now());
-                spuMapper.updateById(spu);
-            } finally {
-                redisLockUtil.unlock(lockKey);
+            if (availableStock < cartItem.getQuantity()) {
+                throw new RuntimeException("库存不足: " + sku.getId());
             }
+
+            Spu spu = spuMapper.selectById(sku.getSpuId());
+            BigDecimal subtotal = sku.getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
+            totalAmount = totalAmount.add(subtotal);
+
+            OrderItem item = new OrderItem();
+            item.setSkuId(sku.getId());
+            item.setSpuId(sku.getSpuId());
+            item.setProductName(spu.getName());
+
+            List<SpecVO> specVOList = sku.getSpecs();
+
+            StringBuilder specStr = new StringBuilder();
+            for (SpecVO specVO : specVOList) {
+                if (specVO.getValue() != null) {
+                    specStr.append(specVO.getValue()).append(" ");
+                }
+            }
+
+            item.setProductSpec(specStr.length() > 0 ? specStr.toString().trim() : "");
+
+            item.setProductImage(sku.getImage() != null ? sku.getImage() : getFirstImage(spu.getImages()));
+            item.setPrice(sku.getPrice());
+            item.setQuantity(cartItem.getQuantity());
+            item.setSubtotal(subtotal);
+            item.setCreateTime(LocalDateTime.now());
+            orderItems.add(item);
+
+            // 【事务内】只扣 DB 库存
+            boolean deducted = skuService.deductStock(sku.getId(), cartItem.getQuantity());
+            if (!deducted) {
+                throw new RuntimeException("库存扣减失败: " + sku.getId());
+            }
+
+            spu.setSalesCount(spu.getSalesCount() + cartItem.getQuantity());
+            spu.setUpdateTime(LocalDateTime.now());
+            spuMapper.updateById(spu);
         }
 
         String orderNo = generateOrderNo();
