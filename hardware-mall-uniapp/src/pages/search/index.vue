@@ -80,7 +80,6 @@
           :price="product.price"
           :original-price="product.originalPrice"
           :min-price="product.minPrice"
-          :sales-count="product.salesCount"
           @click="goProductDetail"
         />
       </view>

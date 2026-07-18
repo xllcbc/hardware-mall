@@ -335,7 +335,6 @@ public class SpuServiceImpl implements SpuService {
         vo.setSubtitle(spu.getSubtitle());
         vo.setImages(spu.getImages());
         vo.setOriginalPrice(spu.getOriginalPrice());
-        vo.setSalesCount(spu.getSalesCount());
         vo.setStatus(spu.getStatus());
         return vo;
     }

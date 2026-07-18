@@ -48,7 +48,6 @@ export interface Spu {
   images?: string[]
   originalPrice?: number
   weight?: number
-  salesCount: number
   status: number
   isRecommend: number
 }
@@ -62,7 +61,6 @@ export interface ProductListVO {
   originalPrice?: number
   minPrice?: number
   maxPrice?: number
-  salesCount: number
   status: number
 }
 

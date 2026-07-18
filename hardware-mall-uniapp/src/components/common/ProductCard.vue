@@ -11,7 +11,6 @@
           <text class="price-symbol">¥</text>
           <text class="price-value">{{ displayPrice }}</text>
         </view>
-        <text v-if="salesCount" class="sales-count">已售{{ salesCount }}</text>
       </view>
     </view>
   </view>
@@ -29,7 +28,6 @@ interface Props {
   originalPrice?: number | string
   minPrice?: number | string
   maxPrice?: number | string
-  salesCount?: number | string
 }
 
 const props = defineProps<Props>()
@@ -152,9 +150,5 @@ const onClick = () => {
   max-width: 100%;
 }
 
-.sales-count {
-  font-size: 20rpx;
-  color: #999999;
-  flex-shrink: 0;
-}
+
 </style>

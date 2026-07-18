@@ -14,18 +14,18 @@ export const MOCK_CATEGORIES: Category[] = [
 ]
 
 export const MOCK_PRODUCTS: Product[] = [
-  { id: 1, categoryId: 1, name: '防盗门锁 指纹密码锁', subtitle: 'C级锁芯 半导体指纹', price: 399, originalPrice: 599, stock: 100, salesCount: 2580, images: [], status: 1, isRecommend: 1 },
-  { id: 2, categoryId: 1, name: '卧室门锁 欧式把手', subtitle: '静音设计 多色可选', price: 159, originalPrice: 239, stock: 200, salesCount: 1850, images: [], status: 1, isRecommend: 1 },
-  { id: 3, categoryId: 2, name: '玻璃胶 万能胶', subtitle: '防水防霉 快干型', price: 29, originalPrice: 45, stock: 500, salesCount: 3200, images: [], status: 1, isRecommend: 1 },
-  { id: 4, categoryId: 2, name: '结构胶 粘钢胶', subtitle: '高强度 耐候性强', price: 68, originalPrice: 99, stock: 300, salesCount: 980, images: [], status: 1, isRecommend: 0 },
-  { id: 5, categoryId: 3, name: '工具箱 家用套装', subtitle: '28件套 钢制工具', price: 199, originalPrice: 299, stock: 150, salesCount: 1200, images: [], status: 1, isRecommend: 1 },
-  { id: 6, categoryId: 3, name: '电钻 充电式电动工具', subtitle: '锂电池 大功率', price: 289, originalPrice: 399, stock: 80, salesCount: 650, images: [], status: 1, isRecommend: 1 },
-  { id: 7, categoryId: 4, name: 'LED吸顶灯 超薄圆形', subtitle: '三色变光 遥控控制', price: 128, originalPrice: 199, stock: 200, salesCount: 2100, images: [], status: 1, isRecommend: 1 },
-  { id: 8, categoryId: 4, name: '吊灯 创意餐厅灯', subtitle: '现代简约风格', price: 358, originalPrice: 520, stock: 50, salesCount: 420, images: [], status: 1, isRecommend: 0 },
-  { id: 9, categoryId: 5, name: 'PPR热水管 4分', subtitle: '纳米抗菌 食品级', price: 15, originalPrice: 22, stock: 1000, salesCount: 5600, images: [], status: 1, isRecommend: 1 },
-  { id: 10, categoryId: 5, name: 'PVC下水管 50管', subtitle: '防臭防堵 家装必备', price: 12, originalPrice: 18, stock: 800, salesCount: 4300, images: [], status: 1, isRecommend: 0 },
-  { id: 11, categoryId: 6, name: '开关插座 86型面板', subtitle: 'USB充电 免布线', price: 45, originalPrice: 68, stock: 400, salesCount: 1800, images: [], status: 1, isRecommend: 1 },
-  { id: 12, categoryId: 6, name: '空开漏电保护器', subtitle: '63A大电流 家用配电', price: 89, originalPrice: 129, stock: 150, salesCount: 720, images: [], status: 1, isRecommend: 0 }
+  { id: 1, categoryId: 1, name: '防盗门锁 指纹密码锁', subtitle: 'C级锁芯 半导体指纹', price: 399, originalPrice: 599, stock: 100, images: [], status: 1, isRecommend: 1 },
+  { id: 2, categoryId: 1, name: '卧室门锁 欧式把手', subtitle: '静音设计 多色可选', price: 159, originalPrice: 239, stock: 200, images: [], status: 1, isRecommend: 1 },
+  { id: 3, categoryId: 2, name: '玻璃胶 万能胶', subtitle: '防水防霉 快干型', price: 29, originalPrice: 45, stock: 500, images: [], status: 1, isRecommend: 1 },
+  { id: 4, categoryId: 2, name: '结构胶 粘钢胶', subtitle: '高强度 耐候性强', price: 68, originalPrice: 99, stock: 300, images: [], status: 1, isRecommend: 0 },
+  { id: 5, categoryId: 3, name: '工具箱 家用套装', subtitle: '28件套 钢制工具', price: 199, originalPrice: 299, stock: 150, images: [], status: 1, isRecommend: 1 },
+  { id: 6, categoryId: 3, name: '电钻 充电式电动工具', subtitle: '锂电池 大功率', price: 289, originalPrice: 399, stock: 80, images: [], status: 1, isRecommend: 1 },
+  { id: 7, categoryId: 4, name: 'LED吸顶灯 超薄圆形', subtitle: '三色变光 遥控控制', price: 128, originalPrice: 199, stock: 200, images: [], status: 1, isRecommend: 1 },
+  { id: 8, categoryId: 4, name: '吊灯 创意餐厅灯', subtitle: '现代简约风格', price: 358, originalPrice: 520, stock: 50, images: [], status: 1, isRecommend: 0 },
+  { id: 9, categoryId: 5, name: 'PPR热水管 4分', subtitle: '纳米抗菌 食品级', price: 15, originalPrice: 22, stock: 1000, images: [], status: 1, isRecommend: 1 },
+  { id: 10, categoryId: 5, name: 'PVC下水管 50管', subtitle: '防臭防堵 家装必备', price: 12, originalPrice: 18, stock: 800, images: [], status: 1, isRecommend: 0 },
+  { id: 11, categoryId: 6, name: '开关插座 86型面板', subtitle: 'USB充电 免布线', price: 45, originalPrice: 68, stock: 400, images: [], status: 1, isRecommend: 1 },
+  { id: 12, categoryId: 6, name: '空开漏电保护器', subtitle: '63A大电流 家用配电', price: 89, originalPrice: 129, stock: 150, images: [], status: 1, isRecommend: 0 }
 ]
 
 export const MOCK_BANNERS = [

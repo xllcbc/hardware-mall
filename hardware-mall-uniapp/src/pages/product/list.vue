@@ -39,7 +39,6 @@
             :price="product.price"
             :original-price="product.originalPrice"
             :min-price="product.minPrice"
-            :sales-count="product.salesCount"
             @click="goProductDetail"
           />
         </view>
@@ -60,7 +59,6 @@
                   <text class="price-value">{{ product.minPrice ?? product.price ?? product.originalPrice }}</text>
                   <text v-if="product.originalPrice" class="original-price">¥{{ product.originalPrice }}</text>
                 </view>
-                <text class="list-item-sales">已售{{ product.salesCount || 0 }}</text>
               </view>
             </view>
           </view>
@@ -93,7 +91,6 @@ const viewMode = ref<'grid' | 'list'>('grid')
 
 const sortOptions = [
   { label: '综合', value: 'default' },
-  { label: '销量', value: 'sales' },
   { label: '价格', value: 'price_asc' }
 ]
 
@@ -287,10 +284,7 @@ const goProductDetail = (id: number) => {
   }
 }
 
-.list-item-sales {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-placeholder);
-}
+
 
 .loading-wrap {
   padding: var(--spacing-xxl);

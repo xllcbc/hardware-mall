@@ -22,11 +22,6 @@
         <view class="meta-item">
           <text class="meta-value" :class="{ 'out-of-stock': !currentSkuStock }">{{ stockText }}</text>
         </view>
-        <view class="meta-divider">|</view>
-        <view class="meta-item">
-          <text class="meta-label">销量</text>
-          <text class="meta-value">{{ product.salesCount || 0 }}</text>
-        </view>
       </view>
 
       <view class="product-info">
