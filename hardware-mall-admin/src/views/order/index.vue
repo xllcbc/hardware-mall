@@ -28,6 +28,7 @@
             <el-option label="已发货" :value="ORDER_STATUS.SHIPPED" />
             <el-option label="已完成" :value="ORDER_STATUS.COMPLETED" />
             <el-option label="已取消" :value="ORDER_STATUS.CANCELLED" />
+            <el-option label="已退款" :value="ORDER_STATUS.REFUNDED" />
           </el-select>
         </el-form-item>
         <el-form-item label="订单号">
