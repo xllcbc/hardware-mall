@@ -77,6 +77,10 @@ aliyun:
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:*}
 
+dingtalk:
+  webhook: ${DINGTALK_WEBHOOK:}
+  secret: ${DINGTALK_SECRET:}
+
 logging:
   level:
     com.example.mystore: debug

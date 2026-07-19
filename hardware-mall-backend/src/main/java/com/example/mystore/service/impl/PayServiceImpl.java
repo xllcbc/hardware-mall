@@ -45,6 +45,7 @@ public class PayServiceImpl implements PayService {
     private final UserMapper userMapper;
     private final Config wechatPayConfig;
     private final NotificationParser notificationParser;
+    private final DingTalkAlertService dingTalkAlertService;
 
     @Value("${wechat.appid}")
     private String appId;
@@ -168,6 +169,7 @@ public class PayServiceImpl implements PayService {
             return Map.of("code", "SUCCESS", "message", "成功");
         } catch (Exception e) {
             log.error("支付回调处理失败", e);
+            dingTalkAlertService.alert("PAY_CALLBACK_FAIL", "支付回调异常: " + e.getMessage());
             return Map.of("code", "FAIL", "message", "处理异常");
         }
     }
@@ -212,8 +214,10 @@ public class PayServiceImpl implements PayService {
             }
 
             if (!"SUCCESS".equals(refundStatus)) {
-                // 退款失败/异常, 状态保持 REFUNDING 留待人工介入(阶段⑧将加钉钉告警)
+                // 退款失败/异常, 状态保持 REFUNDING, 钉钉告警通知人工介入
                 log.error("退款失败, outTradeNo={}, outRefundNo={}, refundStatus={}", outTradeNo, outRefundNo, refundStatus);
+                dingTalkAlertService.alert("REFUND_CONFIRM_FAIL",
+                        "退款未确认, outRefundNo=" + outRefundNo + ", refundStatus=" + refundStatus);
                 return Map.of("code", "SUCCESS", "message", "成功");
             }
 
@@ -324,6 +328,8 @@ public class PayServiceImpl implements PayService {
                 } catch (Exception refundErr) {
                     log.error("自动退款失败, orderId={}, payment_record=PAID 待人工介入",
                             record.getOrderId(), refundErr);
+                    dingTalkAlertService.alert("AUTO_REFUND_FAIL",
+                            "订单=" + record.getOrderId() + " 已取消但支付回调迟到, 自动退款发起失败: " + refundErr.getMessage());
                 }
             }
         }
