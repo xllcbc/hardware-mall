@@ -262,7 +262,7 @@ CREATE TABLE `payment_record` (
   `out_trade_no` varchar(64) NOT NULL COMMENT '商户订单号',
   `transaction_id` varchar(64) DEFAULT NULL COMMENT '微信支付交易号',
   `amount` decimal(10,2) NOT NULL COMMENT '支付金额(元)',
-  `status` tinyint NOT NULL DEFAULT 0 COMMENT '0待支付 1已支付 2已关闭 3已退款',
+  `status` tinyint NOT NULL DEFAULT 0 COMMENT '0待支付 1已支付 2已关闭 3已退款 4退款中',
   `pay_time` datetime DEFAULT NULL COMMENT '支付完成时间',
   `refund_amount` decimal(10,2) DEFAULT NULL COMMENT '退款金额',
   `refund_time` datetime DEFAULT NULL COMMENT '退款时间',
