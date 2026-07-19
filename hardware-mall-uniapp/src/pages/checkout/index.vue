@@ -84,7 +84,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useCartStore } from '@/stores/cart'
 import { usePreOrderStore } from '@/stores/preOrder'
 import { getAddressList } from '@/api/address'
-import { createOrder } from '@/api/order'
+import { createOrder, getOrderDetail } from '@/api/order'
 import { prepayOrder } from '@/api/pay'
 import type { Address } from '@/types'
 
@@ -197,7 +197,8 @@ const submitOrder = async () => {
         paySign: payParams.paySign,
         success: () => {
           uni.showToast({ title: '支付成功', icon: 'success' })
-          setTimeout(() => {
+          setTimeout(async () => {
+            await getOrderDetail(order.id)
             uni.redirectTo({ url: `/pages/order/detail?id=${order.id}` })
           }, 1500)
         },

@@ -67,7 +67,7 @@
       "root": "pages/order",
       "pages": [
         { "path": "list", "style": { "navigationBarTitleText": "我的订单" } },
-        { "path": "detail", "style": { "navigationBarTitleText": "订单详情" } }
+        { "path": "detail", "style": { "navigationBarTitleText": "订单详情", "enablePullDownRefresh": true } }
       ]
     },
     {
