@@ -29,6 +29,7 @@
             <el-option label="已完成" :value="ORDER_STATUS.COMPLETED" />
             <el-option label="已取消" :value="ORDER_STATUS.CANCELLED" />
             <el-option label="已退款" :value="ORDER_STATUS.REFUNDED" />
+            <el-option label="退款中" :value="ORDER_STATUS.REFUNDING" />
           </el-select>
         </el-form-item>
         <el-form-item label="订单号">
@@ -336,8 +337,14 @@ const confirmShip = async () => {
 
 const handleRefund = async (row: any) => {
   try {
-    await ElMessageBox.confirm('确定要退款该订单吗？', '提示', { type: 'warning' })
-    await refundOrder(row.id, '管理员操作退款')
+    const { value } = await ElMessageBox.prompt('请输入退款原因', '退款', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputPlaceholder: '请填写退款原因(必填)',
+      inputValidator: (v: string) => (!!v && v.trim().length > 0) || '请输入退款原因',
+      type: 'warning'
+    })
+    await refundOrder(row.id, value)
     ElMessage.success('退款处理成功')
     loadData()
   } catch {
