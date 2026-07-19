@@ -187,6 +187,24 @@ public class PayServiceImpl implements PayService {
                             .set(Order::getUpdateTime, now));
 
             log.info("支付成功, orderId={}, transactionId={}", record.getOrderId(), transactionId);
+
+            // ④ 已取消订单收到支付回调 → 自动退款
+            // 场景: natapp 断/服务重启/证书过期等导致回调晚到, 但订单已在 30 分钟时被 OrderCancelStaleJob 取消
+            // 此时 payment_record 已被上面置为 PAID, 钱在商户账户但订单显示已取消, 用户没退款
+            // 直接调 refund() 而非 orderService.refundOrder() —— 避免重复恢复库存(自动取消时已恢复过)
+            Order order = orderMapper.selectById(record.getOrderId());
+            if (order != null && order.getStatus() == StatusConstants.ORDER_CANCELLED) {
+                log.warn("订单已自动取消但收到支付回调, 自动退款, orderId={}, transactionId={}",
+                        record.getOrderId(), transactionId);
+                try {
+                    refund(record.getOrderId(), "订单已超时取消,支付回调迟到,自动退款");
+                } catch (Exception refundErr) {
+                    // 退款发起失败保持 payment_record=PAID 状态, 留待阶段 ⑦ lazy sync 兜底 + ⑧ 钉钉告警人工介入
+                    log.error("自动退款失败, orderId={}, payment_record=PAID 待人工或 lazy sync 补单",
+                            record.getOrderId(), refundErr);
+                }
+            }
+
             return Map.of("code", "SUCCESS", "message", "成功");
         } catch (Exception e) {
             log.error("支付回调处理失败", e);
