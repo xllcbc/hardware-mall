@@ -9,4 +9,5 @@ public interface PayService {
     Map<String, String> refundCallback(String body, String signature, String nonce, String timestamp, String serial);
     PaymentRecord queryByOrderId(Long orderId);
     void refund(Long orderId, String reason);
+    boolean processPaymentSuccess(String outTradeNo, String transactionId);
 }

@@ -157,54 +157,14 @@ public class PayServiceImpl implements PayService {
                 return Map.of("code", "FAIL", "message", "支付金额不一致");
             }
 
-            LocalDateTime now = LocalDateTime.now();
-
-            // 用 SQL 条件 update 代替 select-then-update, 利用 MySQL 行锁天然原子:
-            // 只有线程在 status=0 时才能改成 PAID, 并发下只有一个 affect=1, 其他 affect=0
-            int rowsAffected = paymentRecordMapper.update(null,
-                    new LambdaUpdateWrapper<PaymentRecord>()
-                            .eq(PaymentRecord::getId, record.getId())
-                            .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_PENDING)
-                            .set(PaymentRecord::getStatus, PaymentRecord.STATUS_PAID)
-                            .set(PaymentRecord::getTransactionId, transactionId)
-                            .set(PaymentRecord::getPayTime, now)
-                            .set(PaymentRecord::getUpdateTime, now));
-
-            if (rowsAffected == 0) {
-                // 已被其他线程处理过(回调重试/lazy sync), 直接 Ack 微信不再重复处理
-                log.info("支付记录已被并发处理, 跳过, outTradeNo={}", outTradeNo);
-                return Map.of("code", "SUCCESS", "message", "成功");
+            boolean processed = processPaymentSuccess(outTradeNo, transactionId);
+            if (!processed) {
+                // processPaymentSuccess 返回 false 涵盖三种情况:
+                //   - 无支付记录(理论上前面已拦截, 兜底)
+                //   - 已被并发处理(回调重试/lazy sync) → 幂等 Ack 微信
+                //   - SQL 条件 update affect=0(竞争失败) → 幂等 Ack 微信
+                log.info("支付回调处理完成, processPaymentSuccess=false, outTradeNo={}", outTradeNo);
             }
-
-            // 订单状态条件更新: 仅 order.status=1 时才改成 2
-            // 若订单已被自动取消(status=5)或其他状态, 此处 affect=0, 不影响订单, 留给 ④ 处理退款
-            orderMapper.update(null,
-                    new LambdaUpdateWrapper<Order>()
-                            .eq(Order::getId, record.getOrderId())
-                            .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
-                            .set(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
-                            .set(Order::getPayTime, now)
-                            .set(Order::getUpdateTime, now));
-
-            log.info("支付成功, orderId={}, transactionId={}", record.getOrderId(), transactionId);
-
-            // ④ 已取消订单收到支付回调 → 自动退款
-            // 场景: natapp 断/服务重启/证书过期等导致回调晚到, 但订单已在 30 分钟时被 OrderCancelStaleJob 取消
-            // 此时 payment_record 已被上面置为 PAID, 钱在商户账户但订单显示已取消, 用户没退款
-            // 直接调 refund() 而非 orderService.refundOrder() —— 避免重复恢复库存(自动取消时已恢复过)
-            Order order = orderMapper.selectById(record.getOrderId());
-            if (order != null && order.getStatus() == StatusConstants.ORDER_CANCELLED) {
-                log.warn("订单已自动取消但收到支付回调, 自动退款, orderId={}, transactionId={}",
-                        record.getOrderId(), transactionId);
-                try {
-                    refund(record.getOrderId(), "订单已超时取消,支付回调迟到,自动退款");
-                } catch (Exception refundErr) {
-                    // 退款发起失败保持 payment_record=PAID 状态, 留待阶段 ⑦ lazy sync 兜底 + ⑧ 钉钉告警人工介入
-                    log.error("自动退款失败, orderId={}, payment_record=PAID 待人工或 lazy sync 补单",
-                            record.getOrderId(), refundErr);
-                }
-            }
-
             return Map.of("code", "SUCCESS", "message", "成功");
         } catch (Exception e) {
             log.error("支付回调处理失败", e);
@@ -290,6 +250,85 @@ public class PayServiceImpl implements PayService {
                .orderByDesc(PaymentRecord::getCreateTime)
                .last("LIMIT 1");
         return paymentRecordMapper.selectOne(wrapper);
+    }
+
+    /**
+     * 支付成功核心处理: payment_record 翻转 PAID + 订单状态 1→2(待发货)
+     * 三处复用: 回调 callback / ⑥ OrderCancelStaleJob 微信查单补单 / ⑦ getOrderById lazy sync
+     *
+     * 幂等保证:
+     *   - 已 PAID 直接返回 false(已被处理过)
+     *   - SQL 条件 update WHERE id AND status=0, 并发下仅一个 affect=1, 其余 false
+     *
+     * 已取消订单收到支付(回调迟到/补单)的 ④ 兜底自动退款也在此处理, 退款失败只 log
+     *
+     * @return true 表示本次成功推进了支付状态(无论是否触发自动退款)
+     *         false 表示无需处理(无记录 / 已 PAID / 并发竞争失败) —— 调用方直接 Ack 或跳过
+     */
+    @Override
+    @Transactional
+    public boolean processPaymentSuccess(String outTradeNo, String transactionId) {
+        LambdaQueryWrapper<PaymentRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(PaymentRecord::getOutTradeNo, outTradeNo);
+        PaymentRecord record = paymentRecordMapper.selectOne(wrapper);
+
+        if (record == null) {
+            log.warn("processPaymentSuccess 未找到支付记录, outTradeNo={}", outTradeNo);
+            return false;
+        }
+
+        if (record.getStatus() == PaymentRecord.STATUS_PAID) {
+            log.info("processPaymentSuccess 支付记录已 PAID, 跳过, outTradeNo={}", outTradeNo);
+            return false;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // SQL 条件 update, 利用 MySQL 行锁天然原子: 只有 status=0 时才能改为 PAID
+        int rowsAffected = paymentRecordMapper.update(null,
+                new LambdaUpdateWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getId, record.getId())
+                        .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_PENDING)
+                        .set(PaymentRecord::getStatus, PaymentRecord.STATUS_PAID)
+                        .set(PaymentRecord::getTransactionId, transactionId)
+                        .set(PaymentRecord::getPayTime, now)
+                        .set(PaymentRecord::getUpdateTime, now));
+
+        if (rowsAffected == 0) {
+            log.info("支付记录已被并发处理, 跳过, outTradeNo={}", outTradeNo);
+            return false;
+        }
+
+        // 订单状态条件更新: 仅 order.status=1(待付款) 时才改成 2(待发货)
+        // 若订单已被自动取消(status=5)或其他状态, affect=0, 走下面 ④ 兜底退款
+        int orderRows = orderMapper.update(null,
+                new LambdaUpdateWrapper<Order>()
+                        .eq(Order::getId, record.getOrderId())
+                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
+                        .set(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
+                        .set(Order::getPayTime, now)
+                        .set(Order::getUpdateTime, now));
+
+        log.info("支付成功, orderId={}, transactionId={}, 订单推进与否(orderRows={})",
+                record.getOrderId(), transactionId, orderRows);
+
+        // ④ 已取消订单(回调迟到/lazy sync 补单) → payment_record 已 PAID 但订单 5(已取消)
+        // 直接 refund(), 不调 orderService.refundOrder() 避免重复恢复库存(自动取消时已恢复)
+        if (orderRows == 0) {
+            Order order = orderMapper.selectById(record.getOrderId());
+            if (order != null && order.getStatus() == StatusConstants.ORDER_CANCELLED) {
+                log.warn("订单已自动取消但收到支付, 自动退款, orderId={}, transactionId={}",
+                        record.getOrderId(), transactionId);
+                try {
+                    refund(record.getOrderId(), "订单已超时取消,支付迟到,自动退款");
+                } catch (Exception refundErr) {
+                    log.error("自动退款失败, orderId={}, payment_record=PAID 待人工介入",
+                            record.getOrderId(), refundErr);
+                }
+            }
+        }
+
+        return true;
     }
 
     @Override
