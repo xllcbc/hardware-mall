@@ -7,6 +7,8 @@
         </view>
         <view class="status-info">
           <text class="status-text">{{ order.statusText }}</text>
+          <text v-if="order.status === 6" class="status-desc">退款处理中，请耐心等待</text>
+          <text v-if="order.status === 7" class="status-desc">已退款，金额已原路退回</text>
           <text v-if="order.status === 1" class="status-desc">请尽快完成支付</text>
           <text v-if="order.status === 3" class="status-desc">正在配送中，请保持电话畅通</text>
         </view>
@@ -99,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onPullDownRefresh } from 'vue'
 import type { Order } from '@/types'
 import { cancelOrder as cancelOrderApi, confirmReceive as confirmReceiveApi, deleteOrder as deleteOrderApi, getOrderDetail } from '@/api/order'
 import { prepayOrder } from '@/api/pay'
@@ -126,6 +128,21 @@ onMounted(async () => {
   }
 })
 
+onPullDownRefresh(async () => {
+  const pages = getCurrentPages()
+  const currentPage = pages[pages.length - 1] as any
+  const id = currentPage?.options?.id
+  if (id) {
+    try {
+      const data = await getOrderDetail(Number(id))
+      order.value = (data || {}) as any
+    } catch (e) {
+      console.error('下拉刷新失败', e)
+    }
+  }
+  uni.stopPullDownRefresh()
+})
+
 const getStatusClass = (status: number) => {
   const map: Record<number, string> = {
     1: 'warning',
@@ -141,7 +158,9 @@ const getStatusBgClass = (status: number) => {
     1: 'bg-warning',
     2: 'bg-info',
     3: 'bg-primary',
-    4: 'bg-success'
+    4: 'bg-success',
+    6: 'bg-danger',
+    7: 'bg-danger'
   }
   return map[status] || ''
 }
@@ -151,7 +170,9 @@ const getStatusIcon = (status: number) => {
     1: '⏱',
     2: '📦',
     3: '🚚',
-    4: '✓'
+    4: '✓',
+    6: '⟳',
+    7: '✓'
   }
   return map[status] || '📋'
 }
@@ -300,6 +321,9 @@ const deleteOrder = async () => {
   }
   &.bg-success {
     background: linear-gradient(135deg, #388E3C 0%, #2E7D32 100%);
+  }
+  &.bg-danger {
+    background: linear-gradient(135deg, #f56c6c, #e64242);
   }
 }
 
