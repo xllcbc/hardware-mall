@@ -8,6 +8,7 @@ import com.example.mystore.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -33,8 +34,8 @@ public class PayController {
         return Result.success(payParams);
     }
 
-    @PostMapping("/callback")
-    public String callback(
+    @PostMapping(value = "/callback", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, String> callback(
             @RequestBody String body,
             @RequestHeader(value = "Wechatpay-Signature", required = false) String signature,
             @RequestHeader(value = "Wechatpay-Nonce", required = false) String nonce,

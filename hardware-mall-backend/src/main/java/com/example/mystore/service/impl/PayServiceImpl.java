@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.PaymentRecord;
@@ -119,7 +120,7 @@ public class PayServiceImpl implements PayService {
 
     @Override
     @Transactional
-    public String callback(String body, String signature, String nonce, String timestamp, String serial) {
+    public Map<String, String> callback(String body, String signature, String nonce, String timestamp, String serial) {
         try {
             RequestParam requestParam = new RequestParam.Builder()
                     .serialNumber(serial)
@@ -141,39 +142,54 @@ public class PayServiceImpl implements PayService {
 
             if (record == null) {
                 log.warn("支付回调未找到支付记录, outTradeNo={}", outTradeNo);
-                return "FAIL";
+                return Map.of("code", "FAIL", "message", "未找到支付记录");
             }
 
             if (record.getStatus() == PaymentRecord.STATUS_PAID) {
                 log.info("支付回调重复通知, outTradeNo={}", outTradeNo);
-                return "SUCCESS";
+                return Map.of("code", "SUCCESS", "message", "成功");
             }
 
             BigDecimal callbackAmount = new BigDecimal(totalAmount).divide(new BigDecimal("100"));
             if (callbackAmount.compareTo(record.getAmount()) != 0) {
                 log.error("支付金额不一致, outTradeNo={}, 期望={}, 实际={}", outTradeNo, record.getAmount(), callbackAmount);
-                return "FAIL";
+                return Map.of("code", "FAIL", "message", "支付金额不一致");
             }
 
-            record.setStatus(PaymentRecord.STATUS_PAID);
-            record.setTransactionId(transactionId);
-            record.setPayTime(LocalDateTime.now());
-            record.setUpdateTime(LocalDateTime.now());
-            paymentRecordMapper.updateById(record);
+            LocalDateTime now = LocalDateTime.now();
 
-            Order order = orderMapper.selectById(record.getOrderId());
-            if (order != null && order.getStatus() == StatusConstants.ORDER_PENDING_PAYMENT) {
-                order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
-                order.setPayTime(LocalDateTime.now());
-                order.setUpdateTime(LocalDateTime.now());
-                orderMapper.updateById(order);
+            // 用 SQL 条件 update 代替 select-then-update, 利用 MySQL 行锁天然原子:
+            // 只有线程在 status=0 时才能改成 PAID, 并发下只有一个 affect=1, 其他 affect=0
+            int rowsAffected = paymentRecordMapper.update(null,
+                    new LambdaUpdateWrapper<PaymentRecord>()
+                            .eq(PaymentRecord::getId, record.getId())
+                            .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_PENDING)
+                            .set(PaymentRecord::getStatus, PaymentRecord.STATUS_PAID)
+                            .set(PaymentRecord::getTransactionId, transactionId)
+                            .set(PaymentRecord::getPayTime, now)
+                            .set(PaymentRecord::getUpdateTime, now));
+
+            if (rowsAffected == 0) {
+                // 已被其他线程处理过(回调重试/lazy sync), 直接 Ack 微信不再重复处理
+                log.info("支付记录已被并发处理, 跳过, outTradeNo={}", outTradeNo);
+                return Map.of("code", "SUCCESS", "message", "成功");
             }
+
+            // 订单状态条件更新: 仅 order.status=1 时才改成 2
+            // 若订单已被自动取消(status=5)或其他状态, 此处 affect=0, 不影响订单, 留给 ④ 处理退款
+            orderMapper.update(null,
+                    new LambdaUpdateWrapper<Order>()
+                            .eq(Order::getId, record.getOrderId())
+                            .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
+                            .set(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
+                            .set(Order::getPayTime, now)
+                            .set(Order::getUpdateTime, now));
 
             log.info("支付成功, orderId={}, transactionId={}", record.getOrderId(), transactionId);
-            return "SUCCESS";
+            return Map.of("code", "SUCCESS", "message", "成功");
         } catch (Exception e) {
             log.error("支付回调处理失败", e);
-            return "FAIL";
+            return Map.of("code", "FAIL", "message", "处理异常");
         }
     }
 
