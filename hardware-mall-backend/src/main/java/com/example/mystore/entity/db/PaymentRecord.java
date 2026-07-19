@@ -36,4 +36,5 @@ public class PaymentRecord {
     public static final int STATUS_PAID = 1;
     public static final int STATUS_CLOSED = 2;
     public static final int STATUS_REFUNDED = 3;
+    public static final int STATUS_REFUNDING = 4;
 }

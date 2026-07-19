@@ -22,6 +22,7 @@ import com.wechat.pay.java.service.payments.model.Transaction;
 import com.wechat.pay.java.service.refund.RefundService;
 import com.wechat.pay.java.service.refund.model.CreateRequest;
 import com.wechat.pay.java.service.refund.model.AmountReq;
+import com.wechat.pay.java.service.refund.model.RefundNotification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -194,6 +195,77 @@ public class PayServiceImpl implements PayService {
     }
 
     @Override
+    @Transactional
+    public Map<String, String> refundCallback(String body, String signature, String nonce, String timestamp, String serial) {
+        try {
+            RequestParam requestParam = new RequestParam.Builder()
+                    .serialNumber(serial)
+                    .nonce(nonce)
+                    .timestamp(timestamp)
+                    .signature(signature)
+                    .body(body)
+                    .build();
+
+            RefundNotification notification = notificationParser.parse(requestParam, RefundNotification.class);
+
+            String outTradeNo = notification.getOutTradeNo();
+            String outRefundNo = notification.getOutRefundNo();
+            String refundStatus = String.valueOf(notification.getRefundStatus());
+
+            // 按 outTradeNo 找支付记录
+            LambdaQueryWrapper<PaymentRecord> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(PaymentRecord::getOutTradeNo, outTradeNo);
+            PaymentRecord record = paymentRecordMapper.selectOne(wrapper);
+
+            if (record == null) {
+                log.warn("退款回调未找到支付记录, outTradeNo={}", outTradeNo);
+                return Map.of("code", "FAIL", "message", "未找到支付记录");
+            }
+
+            // 只处理退款中(4)状态, 已退款(3)直接 Ack 微信
+            if (record.getStatus() == PaymentRecord.STATUS_REFUNDED) {
+                log.info("退款回调重复通知, outRefundNo={}", outRefundNo);
+                return Map.of("code", "SUCCESS", "message", "成功");
+            }
+
+            if (record.getStatus() != PaymentRecord.STATUS_REFUNDING) {
+                log.warn("退款回调但支付记录非退款中状态, outTradeNo={}, status={}", outTradeNo, record.getStatus());
+                return Map.of("code", "FAIL", "message", "支付记录状态异常");
+            }
+
+            if (!"SUCCESS".equals(refundStatus)) {
+                // 退款失败/异常, 状态保持 REFUNDING 留待人工介入(阶段⑧将加钉钉告警)
+                log.error("退款失败, outTradeNo={}, outRefundNo={}, refundStatus={}", outTradeNo, outRefundNo, refundStatus);
+                return Map.of("code", "SUCCESS", "message", "成功");
+            }
+
+            // 退款成功: payment_record 置 REFUNDED, 设 refundTime
+            LocalDateTime now = LocalDateTime.now();
+            paymentRecordMapper.update(null,
+                    new LambdaUpdateWrapper<PaymentRecord>()
+                            .eq(PaymentRecord::getId, record.getId())
+                            .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_REFUNDING)
+                            .set(PaymentRecord::getStatus, PaymentRecord.STATUS_REFUNDED)
+                            .set(PaymentRecord::getRefundTime, now)
+                            .set(PaymentRecord::getUpdateTime, now));
+
+            // 订单状态推进 6(退款中) -> 7(已退款), WHERE status=6 防并发
+            orderMapper.update(null,
+                    new LambdaUpdateWrapper<Order>()
+                            .eq(Order::getId, record.getOrderId())
+                            .eq(Order::getStatus, StatusConstants.ORDER_REFUNDING)
+                            .set(Order::getStatus, StatusConstants.ORDER_REFUNDED)
+                            .set(Order::getUpdateTime, now));
+
+            log.info("退款成功, orderId={}, outRefundNo={}", record.getOrderId(), outRefundNo);
+            return Map.of("code", "SUCCESS", "message", "成功");
+        } catch (Exception e) {
+            log.error("退款回调处理失败", e);
+            return Map.of("code", "FAIL", "message", "处理异常");
+        }
+    }
+
+    @Override
     public PaymentRecord queryByOrderId(Long orderId) {
         LambdaQueryWrapper<PaymentRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(PaymentRecord::getOrderId, orderId)
@@ -220,6 +292,7 @@ public class PayServiceImpl implements PayService {
             refundRequest.setOutTradeNo(record.getOutTradeNo());
             refundRequest.setOutRefundNo(outRefundNo);
             refundRequest.setReason(reason);
+            refundRequest.setNotifyUrl(notifyUrl + "/refund");
             AmountReq amountReq = new AmountReq();
             amountReq.setRefund(record.getAmount().multiply(new BigDecimal("100")).longValue());
             amountReq.setTotal(record.getAmount().multiply(new BigDecimal("100")).longValue());
@@ -231,13 +304,17 @@ public class PayServiceImpl implements PayService {
                     .build();
             refundService.create(refundRequest);
 
-            record.setStatus(PaymentRecord.STATUS_REFUNDED);
-            record.setRefundAmount(record.getAmount());
-            record.setRefundTime(LocalDateTime.now());
-            record.setUpdateTime(LocalDateTime.now());
-            paymentRecordMapper.updateById(record);
+            // 微信退款是异步: create() 受理成功不代表钱已到用户账上
+            // 先置 REFUNDING(4) 等退款回调确认成功后才置 REFUNDED(3), 期间允许退款失败回滚/重试
+            paymentRecordMapper.update(null,
+                    new LambdaUpdateWrapper<PaymentRecord>()
+                            .eq(PaymentRecord::getId, record.getId())
+                            .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_PAID)
+                            .set(PaymentRecord::getStatus, PaymentRecord.STATUS_REFUNDING)
+                            .set(PaymentRecord::getRefundAmount, record.getAmount())
+                            .set(PaymentRecord::getUpdateTime, LocalDateTime.now()));
 
-            log.info("退款成功, orderId={}, refundAmount={}", orderId, record.getAmount());
+            log.info("退款受理成功, orderId={}, outRefundNo={}, 待回调确认", orderId, outRefundNo);
         } catch (Exception e) {
             log.error("退款失败, orderId={}", orderId, e);
             throw new RuntimeException("退款失败: " + e.getMessage());

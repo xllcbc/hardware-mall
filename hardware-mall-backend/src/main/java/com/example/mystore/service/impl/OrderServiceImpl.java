@@ -2,6 +2,7 @@ package com.example.mystore.service.impl;
 
 import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
@@ -412,11 +413,18 @@ public class OrderServiceImpl implements OrderService {
             skuService.restoreStock(item.getSkuId(), item.getQuantity());
         }
 
-        order.setStatus(StatusConstants.ORDER_REFUNDED);
-        order.setCancelReason(reason);
-        order.setCancelTime(LocalDateTime.now());
-        order.setUpdateTime(LocalDateTime.now());
-        orderMapper.updateById(order);
+        // 退款是异步: payService.refund() 已受理, 此处置 6(退款中) 等 PayCallback 回调确认成功再置 7(已退款)
+        // 用条件 update 防并发, WHERE id=? AND status IN (2,3)
+        orderMapper.update(null,
+                new LambdaUpdateWrapper<Order>()
+                        .eq(Order::getId, orderId)
+                        .in(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT, StatusConstants.ORDER_SHIPPED)
+                        .set(Order::getStatus, StatusConstants.ORDER_REFUNDING)
+                        .set(Order::getCancelReason, reason)
+                        .set(Order::getCancelTime, LocalDateTime.now())
+                        .set(Order::getUpdateTime, LocalDateTime.now()));
+
+        log.info("订单置退款中, orderId={}, 等待微信退款回调确认", orderId);
 
         List<Long> skuIds = items.stream()
                 .map(OrderItem::getSkuId)

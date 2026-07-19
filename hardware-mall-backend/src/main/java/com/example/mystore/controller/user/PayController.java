@@ -45,6 +45,17 @@ public class PayController {
         return payService.callback(body, signature, nonce, timestamp, serial);
     }
 
+    @PostMapping(value = "/callback/refund", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, String> refundCallback(
+            @RequestBody String body,
+            @RequestHeader(value = "Wechatpay-Signature", required = false) String signature,
+            @RequestHeader(value = "Wechatpay-Nonce", required = false) String nonce,
+            @RequestHeader(value = "Wechatpay-Timestamp", required = false) String timestamp,
+            @RequestHeader(value = "Wechatpay-Serial", required = false) String serial) {
+        log.info("收到微信退款回调通知");
+        return payService.refundCallback(body, signature, nonce, timestamp, serial);
+    }
+
     @GetMapping("/query/{orderId}")
     public Result<PaymentRecord> queryPayStatus(
             @RequestHeader("Authorization") String authHeader,
