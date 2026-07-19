@@ -257,6 +257,22 @@ public class PayServiceImpl implements PayService {
     }
 
     /**
+     * 查询微信支付订单状态(⑥⑦ 共用)
+     * 调用 JsapiServiceExtension.queryOrderByOutTradeNo, 返回 Transaction(含 tradeState / transactionId)
+     * 异常直接上抛, 由调用方决定是否跳过/重试
+     */
+    @Override
+    public Transaction queryWechatOrder(String outTradeNo) {
+        JsapiServiceExtension jsapiService = new JsapiServiceExtension.Builder()
+                .config(wechatPayConfig)
+                .build();
+        com.wechat.pay.java.service.payments.jsapi.model.QueryOrderByOutTradeNoRequest request =
+                new com.wechat.pay.java.service.payments.jsapi.model.QueryOrderByOutTradeNoRequest();
+        request.setOutTradeNo(outTradeNo);
+        return jsapiService.queryOrderByOutTradeNo(request);
+    }
+
+    /**
      * 支付成功核心处理: payment_record 翻转 PAID + 订单状态 1→2(待发货)
      * 三处复用: 回调 callback / ⑥ OrderCancelStaleJob 微信查单补单 / ⑦ getOrderById lazy sync
      *
