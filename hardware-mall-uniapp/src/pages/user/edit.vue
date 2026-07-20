@@ -66,8 +66,7 @@
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { updateUserInfo, bindPhone } from '@/api/user'
-
-const BASE_URL = 'http://localhost:8080/api'
+import { BASE_URL } from '@/utils/request'
 
 const userStore = useUserStore()
 const saving = ref(false)
