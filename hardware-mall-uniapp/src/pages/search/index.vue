@@ -64,7 +64,7 @@
       </view>
     </scroll-view>
 
-    <scroll-view v-else class="result-content" scroll-y>
+    <scroll-view v-else class="result-content" scroll-y @scrolltolower="loadMore">
       <view v-if="loading" class="loading-wrap">
         <LoadingState text="搜索中..." />
       </view>
@@ -104,6 +104,10 @@ const loading = ref(false)
 const historyKeywords = ref<string[]>(uni.getStorageSync(HISTORY_KEY) || [])
 const hotKeywords = ref(['门锁', '工具箱', '螺丝刀', '水管', '灯具', '胶带', '插座', '开关'])
 const products = ref<Product[]>([])
+const page = ref(1)
+const pageSize = 10
+const noMore = ref(false)
+const loadingMore = ref(false)
 
 onMounted(() => {
   nextTick(() => {
@@ -123,15 +127,35 @@ const onSearch = async (kw: string) => {
   keyword.value = kw
   hasSearched.value = true
   saveHistory(kw)
+  page.value = 1
+  noMore.value = false
   loading.value = true
   try {
-    const data = await getProductList({ keyword: kw })
+    const data = await getProductList({ keyword: kw, page: 1, limit: pageSize })
     products.value = data?.records || []
+    if ((data?.total || 0) <= pageSize) noMore.value = true
   } catch (e) {
     console.error('Search failed:', e)
     products.value = []
   } finally {
     loading.value = false
+  }
+}
+
+const loadMore = async () => {
+  if (loadingMore.value || noMore.value || !keyword.value) return
+  loadingMore.value = true
+  try {
+    const nextPage = page.value + 1
+    const data = await getProductList({ keyword: keyword.value, page: nextPage, limit: pageSize })
+    const list = data?.records || []
+    products.value = [...products.value, ...list]
+    page.value = nextPage
+    if (list.length < pageSize) noMore.value = true
+  } catch (e) {
+    console.error(e)
+  } finally {
+    loadingMore.value = false
   }
 }
 

@@ -73,6 +73,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { onPullDownRefresh } from '@dcloudio/uni-app'
 import SearchBar from '@/components/common/SearchBar.vue'
 import ProductCard from '@/components/common/ProductCard.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
@@ -104,6 +105,17 @@ onMounted(() => {
   loadProducts()
 })
 
+onPullDownRefresh(async () => {
+  page.value = 1
+  noMore.value = false
+  products.value = []
+  try {
+    await loadProducts()
+  } finally {
+    uni.stopPullDownRefresh()
+  }
+})
+
 const loadProducts = async () => {
   if (loading.value || noMore.value) return
   loading.value = true
@@ -111,7 +123,8 @@ const loadProducts = async () => {
     const data = await getProductList({
       keyword: searchKeyword.value,
       page: page.value,
-      limit: pageSize
+      limit: pageSize,
+      sort: currentSort.value
     })
     const newProducts = data?.records || []
     if (page.value === 1) {
