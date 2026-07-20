@@ -108,7 +108,7 @@ class SpuServiceImplTest {
 
         spuService.createSpu(newSpu);
 
-        verify(spuMapper).insert(argThat(spu ->
+        verify(spuMapper).insert(org.mockito.Mockito.<Spu>argThat(spu ->
                 spu.getSalesCount() == 0 &&
                 spu.getStatus() == StatusConstants.PRODUCT_STATUS_ON_SHELF &&
                 spu.getIsRecommend() == 0 &&
@@ -161,7 +161,7 @@ class SpuServiceImplTest {
 
         spuService.updateStatus(1L, 0);
 
-        verify(spuMapper).updateById(argThat(spu -> spu.getStatus() == 0));
+        verify(spuMapper).updateById(org.mockito.Mockito.<Spu>argThat(spu -> spu.getStatus() == 0));
         verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
     }
 
@@ -171,7 +171,7 @@ class SpuServiceImplTest {
 
         spuService.deleteSpu(1L);
 
-        verify(spuMapper).updateById(argThat(spu -> spu.getDeleteTime() > 0));
+        verify(spuMapper).updateById(org.mockito.Mockito.<Spu>argThat(spu -> spu.getDeleteTime() > 0));
         verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
     }
 
