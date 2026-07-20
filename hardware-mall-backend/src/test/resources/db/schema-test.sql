@@ -150,6 +150,22 @@ CREATE TABLE IF NOT EXISTS `shop_order` (
     `user_delete_time` BIGINT DEFAULT NULL
 );
 
+CREATE TABLE IF NOT EXISTS `payment_record` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `order_id` BIGINT NOT NULL,
+    `out_trade_no` VARCHAR(64) NOT NULL,
+    `transaction_id` VARCHAR(64) DEFAULT NULL,
+    `amount` DECIMAL(10,2) NOT NULL,
+    `status` TINYINT NOT NULL DEFAULT 0,
+    `pay_time` DATETIME DEFAULT NULL,
+    `refund_amount` DECIMAL(10,2) DEFAULT NULL,
+    `refund_time` DATETIME DEFAULT NULL,
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_out_trade_no` (`out_trade_no`),
+    KEY `idx_order_id` (`order_id`)
+);
+
 CREATE TABLE IF NOT EXISTS `order_item` (
     `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `order_id` BIGINT NOT NULL,
