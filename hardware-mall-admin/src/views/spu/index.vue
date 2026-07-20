@@ -382,12 +382,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ElImageViewer } from 'element-plus'
 import { getCategoryList } from '@/api/admin/category'
 import { getSpuList, createSpu, updateSpu, deleteSpu, updateSpuStatus, Spu } from '@/api/admin/spu'
-import { getSkusBySpu, createSku, updateSku, deleteSku, generateSkus, Sku, SpecVO } from '@/api/admin/sku'
+import { getSkusBySpu, createSku, updateSku, deleteSku, generateSkus, Sku } from '@/api/admin/sku'
 import { uploadProductImage } from '@/api/admin/upload'
 
 const loading = ref(false)
@@ -566,13 +566,14 @@ const handleConfigSku = async (row: any) => {
 
 const handleGenerateSkus = async () => {
   if (!currentSpu.value) return
+  const spuId = currentSpu.value.id as number
   try {
     await ElMessageBox.confirm('将根据分类规格模板自动生成所有规格组合，确定继续吗？', '提示')
-    await generateSkus(currentSpu.value.id)
+    await generateSkus(spuId)
     ElMessage.success('SKU生成成功')
-    const res = await getSkusBySpu(currentSpu.value.id)
+    const res = await getSkusBySpu(spuId)
     skuList.value = res || []
-    skuCountMap.value[currentSpu.value.id] = skuList.value.length
+    skuCountMap.value[spuId] = skuList.value.length
   } catch {
     // error handled by interceptor
   }
@@ -589,7 +590,7 @@ const handleDeleteSku = async (row: Sku) => {
     ElMessage.success('删除成功')
     skuList.value = skuList.value.filter(s => s.id !== row.id)
     if (currentSpu.value) {
-      skuCountMap.value[currentSpu.value.id] = skuList.value.length
+      skuCountMap.value[currentSpu.value.id as number] = skuList.value.length
     }
   } catch {
     // error handled by interceptor
@@ -604,8 +605,8 @@ const handleSkuImageUpload = (row: Sku) => {
     const file = e.target.files[0]
     if (!file) return
     try {
-      const url = await uploadProductImage(file)
-      row.image = url
+      const result = await uploadProductImage(file)
+      row.image = result.url
     } catch {
       ElMessage.error('图片上传失败')
     }
@@ -660,7 +661,7 @@ const handleImageUpload = async (options: any) => {
 
   try {
     const res = await uploadProductImage(file)
-    form.images.push(res)
+    form.images.push(res.url)
     ElMessage.success('图片上传成功')
     onSuccess()
   } catch (error) {
@@ -682,10 +683,10 @@ const confirmSubmit = async () => {
   submitLoading.value = true
   try {
     if (isEdit.value) {
-      await updateSpu(form.id!, form)
+      await updateSpu(form.id as number, form as Spu)
       ElMessage.success('编辑成功')
     } else {
-      await createSpu(form)
+      await createSpu(form as Spu)
       ElMessage.success('新增成功')
     }
     dialogVisible.value = false

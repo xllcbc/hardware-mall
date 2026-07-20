@@ -101,7 +101,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onPullDownRefresh } from 'vue'
+import { ref, onMounted } from 'vue'
+import { onPullDownRefresh } from '@dcloudio/uni-app'
 import type { Order } from '@/types'
 import { cancelOrder as cancelOrderApi, confirmReceive as confirmReceiveApi, deleteOrder as deleteOrderApi, getOrderDetail } from '@/api/order'
 import { prepayOrder } from '@/api/pay'

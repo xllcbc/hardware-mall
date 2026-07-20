@@ -294,14 +294,14 @@ const handleDelete = async (row: any) => {
 
 const confirmSubmit = async () => {
   if (!formRef.value) return
-  await formRef.value.validate(async (valid) => {
+  await formRef.value.validate(async (valid: boolean) => {
     if (valid) {
       try {
         if (isEdit.value) {
-          await updateLogistics(form.id!, form)
+          await updateLogistics(form.id as number, form as any)
           ElMessage.success('编辑成功')
         } else {
-          await createLogistics(form)
+          await createLogistics(form as any)
           ElMessage.success('新增成功')
         }
         dialogVisible.value = false
@@ -334,7 +334,7 @@ const loadData = async () => {
       limit: pagination.limit,
       name: queryForm.name || undefined,
       city: queryForm.city || undefined,
-      status: queryForm.status
+      status: queryForm.status || undefined
     })
     tableData.value = res.records || []
     pagination.total = res.total || 0

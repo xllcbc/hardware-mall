@@ -100,7 +100,7 @@ const rules = {
 
 const handleLogin = async () => {
   if (!formRef.value) return
-  await formRef.value.validate(async (valid) => {
+  await formRef.value.validate(async (valid: boolean) => {
     if (valid) {
       loading.value = true
       try {

@@ -215,7 +215,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { getOrderList, shipOrder, refundOrder } from '@/api/admin/order'
 import { getLogisticsList } from '@/api/admin/logistics'
-import { ORDER_STATUS, ORDER_STATUS_TEXT, ORDER_STATUS_TYPE } from '@/constants/status'
+import { ORDER_STATUS, ORDER_STATUS_TYPE } from '@/constants/status'
 
 const route = useRoute()
 const router = useRouter()
@@ -321,7 +321,7 @@ const handleShip = async (row: any) => {
 
 const confirmShip = async () => {
   if (!shipFormRef.value) return
-  await shipFormRef.value.validate(async (valid) => {
+  await shipFormRef.value.validate(async (valid: boolean) => {
     if (valid) {
       try {
         await shipOrder(currentOrder.value.id, shipForm.logisticsId!, shipForm.logisticsNo)

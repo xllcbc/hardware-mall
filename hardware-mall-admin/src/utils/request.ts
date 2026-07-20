@@ -1,14 +1,14 @@
 import axios from 'axios'
-import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
+import type { AxiosRequestConfig, AxiosResponse } from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
 
-const request: AxiosInstance = axios.create({
+const http = axios.create({
   baseURL: '/api',
   timeout: 10000
 })
 
-request.interceptors.request.use(
+http.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token')
     if (token) {
@@ -21,7 +21,8 @@ request.interceptors.request.use(
   }
 )
 
-request.interceptors.response.use(
+// 响应拦截器: code=200 时返回 res.data(已解包), 非 200 统一 reject
+http.interceptors.response.use(
   (response: AxiosResponse) => {
     const res = response.data
     if (res.code !== 200) {
@@ -49,5 +50,17 @@ request.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+// 类型包装: 匹配拦截器 res.data 解包语义, 让外部调用拿到 T 而非 AxiosResponse<T>
+const request = {
+  get: <T = any>(url: string, config?: AxiosRequestConfig) =>
+    http.get(url, config) as unknown as Promise<T>,
+  post: <T = any>(url: string, data?: any, config?: AxiosRequestConfig) =>
+    http.post(url, data, config) as unknown as Promise<T>,
+  put: <T = any>(url: string, data?: any, config?: AxiosRequestConfig) =>
+    http.put(url, data, config) as unknown as Promise<T>,
+  delete: <T = any>(url: string, config?: AxiosRequestConfig) =>
+    http.delete(url, config) as unknown as Promise<T>,
+}
 
 export default request

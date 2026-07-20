@@ -391,14 +391,14 @@ const confirmAddItem = async () => {
 
 const confirmSubmit = async () => {
   if (!formRef.value) return
-  await formRef.value.validate(async (valid) => {
+  await formRef.value.validate(async (valid: boolean) => {
     if (valid) {
       try {
         if (isEdit.value) {
-          await updateSpecTemplate(form.id!, form)
+          await updateSpecTemplate(form.id as number, form as SpecTemplate)
           ElMessage.success('编辑成功')
         } else {
-          await createSpecTemplate(form)
+          await createSpecTemplate(form as SpecTemplate)
           ElMessage.success('新增成功')
         }
         dialogVisible.value = false

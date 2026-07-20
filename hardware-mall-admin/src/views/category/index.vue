@@ -213,7 +213,7 @@ const handleReset = () => {
 
 const confirmSubmit = async () => {
   if (!formRef.value) return
-  await formRef.value.validate(async (valid) => {
+  await formRef.value.validate(async (valid: boolean) => {
     if (valid) {
       try {
         if (isEdit.value) {
@@ -239,7 +239,7 @@ const loadData = async () => {
       page: pagination.page,
       limit: pagination.limit,
       name: queryForm.name || undefined,
-      status: queryForm.status
+      status: queryForm.status || undefined
     })
     tableData.value = (res.records || []).map((item: any) => ({
       ...item,
