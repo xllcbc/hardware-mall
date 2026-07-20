@@ -21,3 +21,7 @@ export const login = (data: LoginData) => {
 export const refresh = () => {
   return request.post<string>('/admin/refresh')
 }
+
+export const logout = () => {
+  return request.post<void>('/admin/logout')
+}

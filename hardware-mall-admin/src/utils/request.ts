@@ -1,7 +1,8 @@
 import axios from 'axios'
-import type { AxiosRequestConfig, AxiosResponse } from 'axios'
+import type { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
+import { useAuthStore } from '@/stores/auth'
 
 const http = axios.create({
   baseURL: '/api',
@@ -10,48 +11,66 @@ const http = axios.create({
 
 http.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+    const authStore = useAuthStore()
+    if (authStore.token) {
+      config.headers.Authorization = `Bearer ${authStore.token}`
     }
     return config
   },
-  (error) => {
-    return Promise.reject(error)
-  }
+  (error) => Promise.reject(error)
 )
 
-// 响应拦截器: code=200 时返回 res.data(已解包), 非 200 统一 reject
+let refreshing: Promise<string | null> | null = null
+
 http.interceptors.response.use(
-  (response: AxiosResponse) => {
+  (response) => {
     const res = response.data
     if (res.code !== 200) {
       if (res.code === 401) {
-        localStorage.removeItem('token')
-        localStorage.removeItem('userInfo')
-        router.push('/login')
-        ElMessage.error('登录已过期，请重新登录')
-      } else {
-        ElMessage.error(res.message || '请求失败')
+        return handle401(response.config as InternalAxiosRequestConfig)
+          .then((data) => Promise.resolve(data))
+          .catch(() => Promise.reject(new Error(res.message || '登录已过期')))
       }
+      ElMessage.error(res.message || '请求失败')
       return Promise.reject(new Error(res.message || '请求失败'))
     }
     return res.data
   },
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('userInfo')
-      router.push('/login')
-      ElMessage.error('登录已过期，请重新登录')
-    } else {
-      ElMessage.error(error.message || '网络错误')
+      return handle401(error.config)
+        .catch(() => {
+          ElMessage.error('登录已过期，请重新登录')
+          return Promise.reject(error)
+        })
     }
+    ElMessage.error(error.message || '网络错误')
     return Promise.reject(error)
   }
 )
 
-// 类型包装: 匹配拦截器 res.data 解包语义, 让外部调用拿到 T 而非 AxiosResponse<T>
+async function handle401(originalConfig: InternalAxiosRequestConfig): Promise<any> {
+  const authStore = useAuthStore()
+  if (!authStore.token) {
+    authStore.clearAuth()
+    router.push('/login')
+    throw new Error('no token')
+  }
+  if (!refreshing) {
+    refreshing = authStore.refreshToken()
+  }
+  const newToken = await refreshing
+  refreshing = null
+  if (!newToken) {
+    authStore.clearAuth()
+    router.push('/login')
+    throw new Error('refresh failed')
+  }
+  originalConfig.headers = originalConfig.headers || {}
+  ;(originalConfig.headers as any).Authorization = `Bearer ${newToken}`
+  return http(originalConfig)
+}
+
 const request = {
   get: <T = any>(url: string, config?: AxiosRequestConfig) =>
     http.get(url, config) as unknown as Promise<T>,

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -64,16 +65,19 @@ const router = createRouter({
 })
 
 router.beforeEach((to, _from, next) => {
-  const token = localStorage.getItem('token')
+  const authStore = useAuthStore()
   if (to.path === '/login') {
     next()
   } else {
-    if (token) {
+    if (authStore.isLoggedIn) {
       next()
     } else {
       next('/login')
     }
   }
 })
+
+import { setupAuthStorageSync } from '@/stores/auth'
+setupAuthStorageSync(router)
 
 export default router
