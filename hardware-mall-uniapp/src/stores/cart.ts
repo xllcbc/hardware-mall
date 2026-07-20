@@ -32,27 +32,32 @@ export const useCartStore = defineStore('cart', () => {
 
   async function updateQuantity(skuId: number, quantity: number) {
     const item = items.value.find(i => i.skuId === skuId)
-    if (item) {
-      item.quantity = quantity
-      item.subtotal = item.price * quantity
-      try {
-        await updateCartQuantity(item.cartId!, quantity)
-      } catch (e) {
-        console.error('更新购物车数量失败:', e)
-      }
+    if (!item) return
+    const oldQuantity = item.quantity
+    const oldSubtotal = item.subtotal
+    item.quantity = quantity
+    item.subtotal = item.price * quantity
+    try {
+      await updateCartQuantity(item.cartId!, quantity)
+    } catch (e) {
+      item.quantity = oldQuantity
+      item.subtotal = oldSubtotal
+      uni.showToast({ title: '更新数量失败, 请稍后重试', icon: 'none' })
+      console.error('更新购物车数量失败:', e)
     }
   }
 
   async function removeItem(skuId: number) {
     const index = items.value.findIndex(i => i.skuId === skuId)
-    if (index > -1) {
-      const item = items.value[index]
-      items.value.splice(index, 1)
-      try {
-        await removeFromCart(item.cartId!)
-      } catch (e) {
-        console.error('删除购物车商品失败:', e)
-      }
+    if (index === -1) return
+    const item = items.value[index]
+    items.value.splice(index, 1)
+    try {
+      await removeFromCart(item.cartId!)
+    } catch (e) {
+      items.value.splice(index, 0, item)
+      uni.showToast({ title: '删除失败, 请稍后重试', icon: 'none' })
+      console.error('删除购物车商品失败:', e)
     }
   }
 

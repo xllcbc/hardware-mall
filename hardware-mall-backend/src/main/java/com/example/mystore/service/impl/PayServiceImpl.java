@@ -256,6 +256,15 @@ public class PayServiceImpl implements PayService {
         return paymentRecordMapper.selectOne(wrapper);
     }
 
+    @Override
+    public PaymentRecord queryByOrderIdAndUserId(Long orderId, Long userId) {
+        Order order = orderMapper.selectById(orderId);
+        if (order == null || !order.getUserId().equals(userId)) {
+            return null;
+        }
+        return queryByOrderId(orderId);
+    }
+
     /**
      * 查询微信支付订单状态(⑥⑦ 共用)
      * 调用 JsapiServiceExtension.queryOrderByOutTradeNo, 返回 Transaction(含 tradeState / transactionId)

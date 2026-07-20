@@ -31,11 +31,7 @@ public class AdminOrderController {
 
     @GetMapping("/{id}")
     public Result<OrderVO> getOrderById(@PathVariable Long id) {
-        OrderVO order = orderService.getOrderByOrderNo(id.toString());
-        if (order == null) {
-            return Result.success(orderService.getOrderById(1L, id));
-        }
-        return Result.success(order);
+        return Result.success(orderService.getAdminOrderById(id));
     }
 
     @GetMapping("/stats")

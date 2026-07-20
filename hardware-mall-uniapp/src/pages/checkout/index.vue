@@ -100,6 +100,7 @@ const isDirectBuy = computed(() => preOrderStore.item !== null)
 const orderItems = computed(() => {
   if (isDirectBuy.value) {
     const item = preOrderStore.item
+    if (!item) return []
     return [{
       skuId: item.skuId,
       productId: item.productId,
@@ -111,9 +112,7 @@ const orderItems = computed(() => {
       subtotal: item.price * item.quantity
     }]
   }
-  return cartStore.selectedItems.length > 0
-    ? cartStore.selectedItems
-    : cartStore.items.slice(0, 2)
+  return cartStore.selectedItems
 })
 
 const goodsAmount = computed(() =>
@@ -158,6 +157,13 @@ const submitOrder = async () => {
   if (submitted.value) return
   if (!selectedAddress.value) {
     uni.showToast({ title: '请选择收货地址', icon: 'none' })
+    return
+  }
+  if (!isDirectBuy.value && orderItems.value.length === 0) {
+    uni.showToast({ title: '请先在购物车选择商品', icon: 'none' })
+    setTimeout(() => {
+      uni.redirectTo({ url: '/pages/cart/index' })
+    }, 1500)
     return
   }
 

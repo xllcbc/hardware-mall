@@ -64,9 +64,6 @@
         </el-form-item>
       </el-form>
       
-      <div class="login-footer">
-        <span class="footer-text">默认账号: admin / 123456</span>
-      </div>
     </div>
     
     <div class="login-decoration">
@@ -89,8 +86,8 @@ const loading = ref(false)
 const rememberMe = ref(false)
 
 const form = reactive({
-  username: 'admin',
-  password: '123456'
+  username: '',
+  password: ''
 })
 
 const rules = {
