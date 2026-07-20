@@ -891,6 +891,15 @@ docker-compose ps
 
 ---
 
-**文档版本**: v1.0
-**最后更新**: 2026-04-18
-**维护者**: 开发团队
+## 备份策略
+
+每日凌晨 2:30 执行 MySQL 逻辑备份, 凌晨 3:00 同步到 OSS 冷备。cron 模板:
+
+```cron
+30 2 * * * /opt/hardware-mall/scripts/backup/db-daily-backup.sh >> /var/log/hardware-mall/backup.log 2>&1
+0 3 * * * /opt/hardware-mall/scripts/backup/oss-sync.sh >> /var/log/hardware-mall/backup-oss.log 2>&1
+```
+
+恢复演练: 每月一次
+  - `gunzip < backups/hardware_mall_YYYYMMDD_HHMMSS.sql.gz | mysql -u ... hardware_mall_test`
+
