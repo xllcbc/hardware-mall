@@ -9,20 +9,6 @@ const userInfo = ref<UserInfo | null>(savedUserInfo ? JSON.parse(savedUserInfo) 
   
   const isLoggedIn = computed(() => !!token.value)
 
-  const loginResult = ref<{ token: string; userInfo: UserInfo } | null>(null)
-
-  function setLoginResult(t: string, info: UserInfo) {
-    setToken(t)
-    setUserInfo(info)
-    loginResult.value = { token: t, userInfo: info }
-  }
-
-  function consumeLoginResult() {
-    const result = loginResult.value
-    loginResult.value = null
-    return result
-  }
-
   function setToken(newToken: string) {
     token.value = newToken
     uni.setStorageSync('token', newToken)
@@ -44,9 +30,6 @@ const userInfo = ref<UserInfo | null>(savedUserInfo ? JSON.parse(savedUserInfo) 
     token,
     userInfo,
     isLoggedIn,
-    loginResult,
-    setLoginResult,
-    consumeLoginResult,
     setToken,
     setUserInfo,
     logout

@@ -33,4 +33,6 @@ public interface OrderService {
      * @return true-成功取消；false-订单不存在或已非待付款状态
      */
     boolean autoCancelOrder(Long orderId, String cancelReason);
+
+    OrderVO getAdminOrderById(Long orderId);
 }

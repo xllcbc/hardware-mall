@@ -9,6 +9,7 @@ public interface PayService {
     Map<String, String> callback(String body, String signature, String nonce, String timestamp, String serial);
     Map<String, String> refundCallback(String body, String signature, String nonce, String timestamp, String serial);
     PaymentRecord queryByOrderId(Long orderId);
+    PaymentRecord queryByOrderIdAndUserId(Long orderId, Long userId);
     void refund(Long orderId, String reason);
     boolean processPaymentSuccess(String outTradeNo, String transactionId);
     Transaction queryWechatOrder(String outTradeNo);

@@ -28,12 +28,6 @@ export const MOCK_PRODUCTS: Product[] = [
   { id: 12, categoryId: 6, name: '空开漏电保护器', subtitle: '63A大电流 家用配电', price: 89, originalPrice: 129, stock: 150, images: [], status: 1, isRecommend: 0 }
 ]
 
-export const MOCK_BANNERS = [
-  { id: 1, image: 'https://picsum.photos/750/320?random=1', title: '新品上市' },
-  { id: 2, image: 'https://picsum.photos/750/320?random=2', title: '限时优惠' },
-  { id: 3, image: 'https://picsum.photos/750/320?random=3', title: '品牌专区' }
-]
-
 export const MOCK_ADDRESSES: Address[] = [
   { id: 1, userId: 1, consignee: '张三', phone: '13800138000', province: '广东省', city: '深圳市', district: '南山区', detail: '科技园南路88号A栋1001', isDefault: 1 },
   { id: 2, userId: 1, consignee: '李四', phone: '13900139000', province: '广东省', city: '广州市', district: '天河区', detail: '体育西路123号', isDefault: 0 }

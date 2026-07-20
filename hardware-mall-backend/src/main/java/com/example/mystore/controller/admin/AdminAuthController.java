@@ -26,7 +26,7 @@ public class AdminAuthController {
     @Value("${admin.username:admin}")
     private String adminUsername;
 
-    @Value("${admin.password:123456}")
+    @Value("${admin.password}")
     private String adminPassword;
 
     @PostMapping("/login")
