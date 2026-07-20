@@ -243,6 +243,8 @@ public class PayServiceImpl implements PayService {
             return Map.of("code", "SUCCESS", "message", "成功");
         } catch (Exception e) {
             log.error("退款回调处理失败", e);
+            dingTalkAlertService.alert("REFUND_CALLBACK_FAIL",
+                    "退款回调处理异常: " + e.getMessage());
             return Map.of("code", "FAIL", "message", "处理异常");
         }
     }
@@ -396,6 +398,8 @@ public class PayServiceImpl implements PayService {
             log.info("退款受理成功, orderId={}, outRefundNo={}, 待回调确认", orderId, outRefundNo);
         } catch (Exception e) {
             log.error("退款失败, orderId={}", orderId, e);
+            dingTalkAlertService.alert("REFUND_FAIL",
+                    "退款受理失败, orderId=" + orderId + ", error=" + e.getMessage());
             throw new RuntimeException("退款失败: " + e.getMessage());
         }
     }
