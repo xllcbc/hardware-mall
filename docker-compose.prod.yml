@@ -1,0 +1,74 @@
+name: hardware-mall-prod
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: hw-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-hardware_mall}
+      MYSQL_USER: ${DB_USERNAME:-hardware_mall}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - hw-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: hw-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - hw-net
+
+  backend:
+    image: ${DOCKER_REGISTRY}/hardware-mall-backend:${IMAGE_TAG:-latest}
+    container_name: hw-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - /opt/hardware-mall/.env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: mysql
+      REDIS_HOST: redis
+    networks:
+      - hw-net
+
+  admin:
+    image: ${DOCKER_REGISTRY}/hardware-mall-admin:${IMAGE_TAG:-latest}
+    container_name: hw-admin
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - hw-net
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  hw-net:
+    driver: bridge

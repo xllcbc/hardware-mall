@@ -1,0 +1,51 @@
+name: deploy-uniapp-experience
+
+on:
+  workflow_dispatch:
+    inputs:
+      desc:
+        description: '版本描述'
+        required: false
+        default: 'CI 自动上传体验版'
+  push:
+    branches:
+      - main
+    paths:
+      - 'hardware-mall-uniapp/**'
+
+jobs:
+  upload-experience:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: hardware-mall-uniapp/package-lock.json
+
+      - name: Install deps
+        working-directory: hardware-mall-uniapp
+        run: |
+          npm ci
+          npm install miniprogram-ci --no-save
+
+      - name: Build mp-weixin
+        working-directory: hardware-mall-uniapp
+        run: |
+          VITE_API_BASE_URL=${{ secrets.UNIAPP_API_BASE_URL }} npm run build:mp-weixin
+
+      - name: Write wechat private key
+        run: |
+          mkdir -p ~/.wechat
+          echo "${{ secrets.WEAPP_PRIVATE_KEY }}" > ~/.wechat/private.${{ secrets.WEAPP_APPID }}.key
+          chmod 600 ~/.wechat/private.${{ secrets.WEAPP_APPID }}.key
+
+      - name: Upload to experience
+        working-directory: hardware-mall-uniapp
+        env:
+          WEAPP_APPID: ${{ secrets.WEAPP_APPID }}
+          WEAPP_PRIVATE_KEY_PATH: ~/.wechat/private.${{ secrets.WEAPP_APPID }}.key
+          CI_MODE: experience
+          CI_VERSION_DESC: ${{ github.event.inputs.desc || 'CI 自动上传' }}
+        run: node scripts/build-uni.js
