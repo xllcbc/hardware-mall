@@ -17,6 +17,7 @@ export const getProductList = (params: {
   keyword?: string
   page?: number
   limit?: number
+  sort?: string
 }) => {
   return request.get<PageResult<ProductListVO>>('/user/product/list', params)
 }

@@ -1,5 +1,9 @@
 <template>
   <view class="order-detail-container">
+    <view v-if="loading" class="loading-wrap">
+      <LoadingState text="加载中..." />
+    </view>
+    <template v-else>
     <scroll-view class="detail-content" scroll-y>
       <view class="order-status-section" :class="getStatusBgClass(order.status)">
         <view class="status-icon-wrap">
@@ -97,6 +101,7 @@
     <view v-if="order.status === 4 || order.status === 5" class="detail-footer">
       <view class="action-btn secondary" @tap="deleteOrder">删除订单</view>
     </view>
+    </template>
   </view>
 </template>
 
@@ -106,8 +111,10 @@ import { onPullDownRefresh } from '@dcloudio/uni-app'
 import type { Order } from '@/types'
 import { cancelOrder as cancelOrderApi, confirmReceive as confirmReceiveApi, deleteOrder as deleteOrderApi, getOrderDetail } from '@/api/order'
 import { prepayOrder } from '@/api/pay'
+import LoadingState from '@/components/common/LoadingState.vue'
 
 const order = ref<Partial<Order>>({})
+const loading = ref(true)
 
 onMounted(async () => {
   const pages = getCurrentPages()
@@ -127,6 +134,7 @@ onMounted(async () => {
     setTimeout(() => uni.navigateBack(), 1500)
     return
   }
+  loading.value = false
 })
 
 onPullDownRefresh(async () => {

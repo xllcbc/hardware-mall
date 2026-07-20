@@ -72,14 +72,12 @@ import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getCategoryList, getRecommendProducts } from '@/api/product'
 import { useAppStore } from '@/stores/app'
-// import { MOCK_BANNERS } from '@/utils/mock'
 import type { Category, Product } from '@/types'
 
 interface CategoryItem extends Category {
   isMore?: boolean
 }
 
-// const banners = ref(MOCK_BANNERS)
 const categories = ref<Category[]>([])
 const products = ref<Product[]>([])
 const loading = ref(true)
