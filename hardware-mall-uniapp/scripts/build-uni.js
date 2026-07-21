@@ -22,6 +22,7 @@ const APP_ID = process.env.WEAPP_APPID
 const PRIVATE_KEY = process.env.WEAPP_PRIVATE_KEY
 const PRIVATE_KEY_PATH = process.env.WEAPP_PRIVATE_KEY_PATH
 const CI_MODE = process.env.CI_MODE || 'experience'
+const CI_VERSION_DESC = process.env.CI_VERSION_DESC
 
 const PROJECT_PATH = path.resolve(__dirname, '../dist/build/mp-weixin')
 
@@ -73,7 +74,7 @@ async function main() {
   const uploadResult = await ci.upload({
     project,
     version: VERSION,
-    desc: `CI 自动构建 v${VERSION} - ${new Date().toLocaleString('zh-CN')}`,
+    desc: CI_VERSION_DESC || `CI 自动构建 v${VERSION} - ${new Date().toLocaleString('zh-CN')}`,
     setting: {
       es6: true,
       minify: true,
@@ -99,7 +100,7 @@ async function main() {
     const { testUrl } = await ci.Experience.createTestVersion({
       project,
       version: VERSION,
-      desc: `CI 自动构建 v${VERSION}`,
+      desc: CI_VERSION_DESC || `CI 自动构建 v${VERSION}`,
     })
     console.log('✅ 体验版发布成功')
     console.log('   体验二维码:', testUrl)
