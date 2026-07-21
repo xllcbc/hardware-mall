@@ -9,13 +9,15 @@
     {
       "path": "pages/category/index",
       "style": {
-        "navigationBarTitleText": "分类"
+        "navigationBarTitleText": "分类",
+        "enablePullDownRefresh": true
       }
     },
     {
       "path": "pages/cart/index",
       "style": {
-        "navigationBarTitleText": "购物车"
+        "navigationBarTitleText": "购物车",
+        "enablePullDownRefresh": true
       }
     },
     {
@@ -53,13 +55,25 @@
       "style": {
         "navigationBarTitleText": "搜索"
       }
+    },
+    {
+      "path": "pages/logistics/index",
+      "style": {
+        "navigationBarTitleText": "物流方式"
+      }
+    },
+    {
+      "path": "pages/user/edit",
+      "style": {
+        "navigationBarTitleText": "编辑资料"
+      }
     }
   ],
   "subPackages": [
     {
       "root": "pages/product",
       "pages": [
-        { "path": "list", "style": { "navigationBarTitleText": "商品列表" } },
+        { "path": "list", "style": { "navigationBarTitleText": "商品列表", "enablePullDownRefresh": true } },
         { "path": "detail", "style": { "navigationBarTitleText": "商品详情" } }
       ]
     },

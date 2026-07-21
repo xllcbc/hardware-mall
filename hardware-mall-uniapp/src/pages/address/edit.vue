@@ -1,5 +1,9 @@
 <template>
   <view class="edit-container">
+    <view v-if="loading" class="loading-wrap">
+      <LoadingState text="加载中..." />
+    </view>
+    <template v-else>
     <view class="form-section">
       <view class="form-item">
         <text class="form-label">收货人</text>
@@ -67,6 +71,7 @@
     </view>
 
     <view class="save-btn" @tap="saveAddress">保存地址</view>
+    </template>
   </view>
 </template>
 
@@ -74,6 +79,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import type { Address } from '@/types'
 import { createAddress, updateAddress, getAddressDetail } from '@/api/address'
+import LoadingState from '@/components/common/LoadingState.vue'
 
 const form = reactive({
   id: 0,
@@ -87,17 +93,22 @@ const form = reactive({
   isDefault: 0
 })
 
+const loading = ref(false)
+
 onMounted(async () => {
   const pages = getCurrentPages()
   const currentPage = pages[pages.length - 1] as any
   const addressId = currentPage?.options?.id
   if (addressId) {
     form.id = Number(addressId)
+    loading.value = true
     try {
       const data = await getAddressDetail(form.id)
       Object.assign(form, data)
     } catch (e) {
       console.error('Failed to load address:', e)
+    } finally {
+      loading.value = false
     }
   }
 })

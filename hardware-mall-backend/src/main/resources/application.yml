@@ -12,18 +12,20 @@ spring:
     url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:hardware_mall}?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      database: 0
+      password: ${REDIS_PASSWORD:}
+      timeout: 10s
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
+          max-wait: 3s
   redis:
-    host: ${REDIS_HOST:localhost}
-    port: ${REDIS_PORT:6379}
-    database: 0
-    password: ${REDIS_PASSWORD:}
-    timeout: 10s
-    lettuce:
-      pool:
-        max-active: 8
-        max-idle: 8
-        min-idle: 2
-        max-wait: 3s
     redisson:
       config: |
         singleServerConfig:

@@ -107,7 +107,7 @@ class UserServiceImplTest {
 
         userService.updateUserStatus(2L, StatusConstants.USER_STATUS_DISABLED);
 
-        verify(userMapper).updateById(argThat(u -> u.getStatus() == StatusConstants.USER_STATUS_DISABLED));
+        verify(userMapper).updateById(org.mockito.Mockito.<User>argThat(u -> u.getStatus() == StatusConstants.USER_STATUS_DISABLED));
     }
 
     @Test

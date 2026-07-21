@@ -60,7 +60,8 @@ public class PayController {
     public Result<PaymentRecord> queryPayStatus(
             @RequestHeader("Authorization") String authHeader,
             @PathVariable Long orderId) {
-        PaymentRecord record = payService.queryByOrderId(orderId);
+        Long userId = extractUserId(authHeader);
+        PaymentRecord record = payService.queryByOrderIdAndUserId(orderId, userId);
         return Result.success(record);
     }
 

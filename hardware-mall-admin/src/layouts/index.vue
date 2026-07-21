@@ -74,7 +74,7 @@
                 <el-icon><UserFilled /></el-icon>
               </el-avatar>
               <div class="user-details">
-                <span class="user-name">管理员</span>
+                <span class="user-name">{{ authStore.userInfo?.username || '管理员' }}</span>
                 <span class="user-role">Administrator</span>
               </div>
               <el-icon class="user-arrow"><CaretBottom /></el-icon>
@@ -114,9 +114,12 @@
 import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import { useAuthStore } from '@/stores/auth'
+import { logout as logoutApi } from '@/api/admin/auth'
 
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
 
 const isCollapsed = ref(false)
 const theme = ref(localStorage.getItem('theme') || 'light')
@@ -156,9 +159,13 @@ const handleCommand = (command: string) => {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
       type: 'warning'
-    }).then(() => {
-      localStorage.removeItem('token')
-      localStorage.removeItem('userInfo')
+    }).then(async () => {
+      try {
+        await logoutApi()
+      } catch {
+        // 即便后端调用失败也清本地, 避免用户卡住
+      }
+      authStore.clearAuth()
       router.push('/login')
     })
   }

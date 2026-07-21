@@ -113,7 +113,7 @@ class CategoryServiceImplTest {
 
         categoryService.deleteCategory(1L);
 
-        verify(categoryMapper).updateById(argThat(cat -> cat.getDeleteTime() > 0));
+        verify(categoryMapper).updateById(org.mockito.Mockito.<Category>argThat(cat -> cat.getDeleteTime() > 0));
         verify(redisUtil).delete(RedisConstants.PREFIX_CATEGORY_LIST);
     }
 

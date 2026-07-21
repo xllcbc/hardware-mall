@@ -180,7 +180,7 @@ class SkuServiceImplTest {
 
         skuService.deleteSku(1L);
 
-        verify(skuMapper).updateById(argThat(sku -> sku.getDeleteTime() > 0));
+        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku -> sku.getDeleteTime() > 0));
         verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
     }
 }

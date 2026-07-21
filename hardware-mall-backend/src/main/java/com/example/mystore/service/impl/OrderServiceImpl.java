@@ -134,9 +134,7 @@ public class OrderServiceImpl implements OrderService {
                 throw new RuntimeException("库存扣减失败: " + sku.getId());
             }
 
-            spu.setSalesCount(spu.getSalesCount() + cartItem.getQuantity());
-            spu.setUpdateTime(LocalDateTime.now());
-            spuMapper.updateById(spu);
+            spuMapper.incrementSalesCount(spu.getId(), cartItem.getQuantity());
         }
 
         String orderNo = generateOrderNo();
@@ -463,6 +461,11 @@ public class OrderServiceImpl implements OrderService {
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
         applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
+    }
+
+    @Override
+    public OrderVO getAdminOrderById(Long orderId) {
+        return getOrderVO(orderId, null);
     }
 
     @Override

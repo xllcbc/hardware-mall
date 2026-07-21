@@ -51,7 +51,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import SearchBar from '@/components/common/SearchBar.vue'
 import ProductCard from '@/components/common/ProductCard.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
@@ -82,6 +82,14 @@ onShow(() => {
   if (target) {
     selectCategory(target)
     store.selectCategory(null)
+  }
+})
+
+onPullDownRefresh(async () => {
+  try {
+    await loadCategories()
+  } finally {
+    uni.stopPullDownRefresh()
   }
 })
 

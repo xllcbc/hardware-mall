@@ -64,9 +64,6 @@
         </el-form-item>
       </el-form>
       
-      <div class="login-footer">
-        <span class="footer-text">默认账号: admin / 123456</span>
-      </div>
     </div>
     
     <div class="login-decoration">
@@ -82,6 +79,7 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { login } from '@/api/admin/auth'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const formRef = ref()
@@ -89,8 +87,8 @@ const loading = ref(false)
 const rememberMe = ref(false)
 
 const form = reactive({
-  username: 'admin',
-  password: '123456'
+  username: '',
+  password: ''
 })
 
 const rules = {
@@ -105,8 +103,8 @@ const handleLogin = async () => {
       loading.value = true
       try {
         const res = await login(form)
-        localStorage.setItem('token', res.token)
-        localStorage.setItem('userInfo', JSON.stringify(res.userInfo))
+        const authStore = useAuthStore()
+        authStore.setAuth(res.token, res.userInfo)
         ElMessage.success('登录成功')
         router.push('/dashboard')
       } catch {

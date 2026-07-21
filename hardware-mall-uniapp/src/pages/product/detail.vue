@@ -1,5 +1,9 @@
 <template>
   <view class="detail-container">
+    <view v-if="loading" class="loading-wrap">
+      <LoadingState text="加载中..." />
+    </view>
+    <template v-else>
     <swiper v-if="currentImages?.length" class="product-swiper" indicator-dots indicator-active-color="#C9A86C">
       <swiper-item v-for="(img, index) in currentImages" :key="index">
         <image class="product-image" :src="img" mode="aspectFill" />
@@ -75,6 +79,7 @@
         <view class="buy-btn" @tap="buyNow">立即购买</view>
       </view>
     </view>
+    </template>
   </view>
 </template>
 
@@ -85,6 +90,7 @@ import { addToCart as addToCartApi } from '@/api/cart'
 import { useAppStore } from '@/stores/app'
 import { usePreOrderStore } from '@/stores/preOrder'
 import CountStepper from '@/components/common/CountStepper.vue'
+import LoadingState from '@/components/common/LoadingState.vue'
 import type { ProductDetail, SpecTemplate, SpecItem, Sku, SpecVO } from '@/types'
 
 const appStore = useAppStore()

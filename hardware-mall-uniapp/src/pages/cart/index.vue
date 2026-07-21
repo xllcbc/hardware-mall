@@ -88,7 +88,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import EmptyState from '@/components/common/EmptyState.vue'
 import CountStepper from '@/components/common/CountStepper.vue'
 import { useCartStore } from '@/stores/cart'
@@ -106,6 +106,17 @@ onShow(async () => {
     cartStore.setItems(data || [])
   } catch (e) {
     console.error('加载购物车失败:', e)
+  }
+})
+
+onPullDownRefresh(async () => {
+  try {
+    const data = await getCartList()
+    cartStore.setItems(data || [])
+  } catch (e) {
+    console.error('刷新失败:', e)
+  } finally {
+    uni.stopPullDownRefresh()
   }
 })
 

@@ -205,7 +205,7 @@ class OrderServiceImplTest {
 
         orderService.shipOrder(1L, "SF123456789");
 
-        verify(orderMapper).updateById(argThat(o ->
+        verify(orderMapper).updateById(org.mockito.Mockito.<Order>argThat(o ->
                 o.getStatus() == StatusConstants.ORDER_SHIPPED &&
                 "SF123456789".equals(o.getLogisticsNo()) &&
                 o.getShipTime() != null
@@ -223,7 +223,7 @@ class OrderServiceImplTest {
         boolean result = orderService.autoCancelOrder(1L, "超时未支付");
 
         assertThat(result).isFalse();
-        verify(orderMapper, never()).updateById(any());
+        verify(orderMapper, never()).updateById(org.mockito.Mockito.<Order>any());
     }
 
     @Test
