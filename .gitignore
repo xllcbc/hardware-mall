@@ -4,9 +4,6 @@
 .env.local
 .env.*.local
 
-# 生产环境配置 (含密钥)
-application-prod.yml
-
 # IDE
 .idea/
 *.iml

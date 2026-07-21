@@ -1,0 +1,11 @@
+.git/
+.opencode/
+.sisyphus/
+.worktrees/
+docs/
+scripts/
+apifox/
+*.md
+.idea/
+*.xlsx
+get-docker.sh

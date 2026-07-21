@@ -1,0 +1,67 @@
+name: hardware-mall
+
+services:
+  backend:
+    build:
+      context: ./hardware-mall-backend
+      dockerfile: Dockerfile
+    container_name: hw-backend
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: host.docker.internal
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-hardware_mall}
+      DB_USERNAME: ${DB_USERNAME:-hardware_mall}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: host.docker.internal
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: 86400000
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      WECHAT_APPID: ${WECHAT_APPID:-}
+      WECHAT_SECRET: ${WECHAT_SECRET:-}
+      WECHAT_MCH_ID: ${WECHAT_MCH_ID:-}
+      WECHAT_API_V3_KEY: ${WECHAT_API_V3_KEY:-}
+      WECHAT_PRIVATE_KEY: ${WECHAT_PRIVATE_KEY:-}
+      WECHAT_PUBLIC_KEY: ${WECHAT_PUBLIC_KEY:-}
+      WECHAT_PUBLIC_KEY_ID: ${WECHAT_PUBLIC_KEY_ID:-}
+      WECHAT_MCH_SERIAL_NO: ${WECHAT_MCH_SERIAL_NO:-}
+      WECHAT_PAY_NOTIFY_URL: ${WECHAT_PAY_NOTIFY_URL:-}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      OSS_BUCKET_NAME: ${OSS_BUCKET_NAME:-}
+      OSS_REGION: ${OSS_REGION:-cn-beijing}
+      OSS_DOMAIN: ${OSS_DOMAIN:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
+      DINGTALK_WEBHOOK: ${DINGTALK_WEBHOOK:-}
+      DINGTALK_SECRET: ${DINGTALK_SECRET:-}
+    ports:
+      - "8080:8080"
+    networks:
+      - hw-net
+
+  admin:
+    build:
+      context: ./hardware-mall-admin
+      dockerfile: Dockerfile
+    container_name: hw-admin
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/nginx/certs:/etc/nginx/certs:ro
+      - /etc/nginx/.htpasswd:/etc/nginx/.htpasswd:ro
+    networks:
+      - hw-net
+
+networks:
+  hw-net:
+    driver: bridge
