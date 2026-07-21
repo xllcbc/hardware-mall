@@ -3,6 +3,7 @@ package com.example.mystore.config;
 import com.example.mystore.interceptor.AdminRoleInterceptor;
 import com.example.mystore.interceptor.JwtInterceptor;
 import com.example.mystore.interceptor.RateLimitInterceptor;
+import com.example.mystore.interceptor.TraceIdInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
@@ -14,6 +15,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @RequiredArgsConstructor
 public class WebMvcConfig implements WebMvcConfigurer {
 
+    private final TraceIdInterceptor traceIdInterceptor;
     private final JwtInterceptor jwtInterceptor;
     private final AdminRoleInterceptor adminRoleInterceptor;
     private final RateLimitInterceptor rateLimitInterceptor;
@@ -23,6 +25,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(traceIdInterceptor)
+                .addPathPatterns("/api/**")
+                .order(-1);
         registry.addInterceptor(rateLimitInterceptor)
                 .addPathPatterns("/api/**");
         registry.addInterceptor(jwtInterceptor)
