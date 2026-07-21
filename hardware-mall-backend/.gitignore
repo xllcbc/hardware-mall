@@ -9,6 +9,5 @@ target/
 .env
 .env.local
 .env.*.local
-application-prod.yml
 *.pem
 cert/
