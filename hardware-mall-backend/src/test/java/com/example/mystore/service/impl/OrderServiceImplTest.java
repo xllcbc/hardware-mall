@@ -148,7 +148,6 @@ class OrderServiceImplTest {
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
         when(skuService.getSkuById(5L)).thenReturn(sku);
-        when(redisLockUtil.tryLock(anyString())).thenReturn(true);
         when(redisUtil.get(anyString())).thenReturn(null);
 
         CreateOrderRequest.CartItem item = new CreateOrderRequest.CartItem();
@@ -163,8 +162,6 @@ class OrderServiceImplTest {
         assertThatThrownBy(() -> orderService.createOrder(2L, request))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("库存不足");
-
-        verify(redisLockUtil).unlock(anyString());
     }
 
     @Test

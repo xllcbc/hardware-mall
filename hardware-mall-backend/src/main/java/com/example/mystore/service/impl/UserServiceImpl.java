@@ -80,6 +80,9 @@ public class UserServiceImpl implements UserService {
         if (user.getAvatarUrl() != null) {
             existUser.setAvatarUrl(user.getAvatarUrl());
         }
+        if (user.getPhone() != null) {
+            existUser.setPhone(user.getPhone());
+        }
 
         userMapper.updateById(existUser);
         return existUser;
