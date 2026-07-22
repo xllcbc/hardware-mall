@@ -15,8 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
-      IMAGE_BACKEND: ${{ secrets.DOCKER_REGISTRY }}/hardware-mall-backend:${{ github.sha }}
-      IMAGE_ADMIN: ${{ secrets.DOCKER_REGISTRY }}/hardware-mall-admin:${{ github.sha }}
+      DOCKER_NAMESPACE: ${{ secrets.DOCKER_NAMESPACE }}
+      IMAGE_BACKEND: ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-backend:${{ github.sha }}
+      IMAGE_ADMIN: ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-admin:${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -37,9 +38,9 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_BACKEND }}
-            ${{ secrets.DOCKER_REGISTRY }}/hardware-mall-backend:latest
-          cache-from: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/hardware-mall-backend:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/hardware-mall-backend:buildcache,mode=max
+            ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-backend:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-backend:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-backend:buildcache,mode=max
 
       - name: Build & push admin
         uses: docker/build-push-action@v5
@@ -48,9 +49,9 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_ADMIN }}
-            ${{ secrets.DOCKER_REGISTRY }}/hardware-mall-admin:latest
-          cache-from: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/hardware-mall-admin:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/hardware-mall-admin:buildcache,mode=max
+            ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-admin:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-admin:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-admin:buildcache,mode=max
 
       - name: SSH deploy to server
         uses: appleboy/ssh-action@v1.0.0
@@ -64,6 +65,7 @@ jobs:
             git checkout ${{ github.sha }} -- docker-compose.yml
             export IMAGE_TAG=${{ github.sha }}
             export DOCKER_REGISTRY=${{ secrets.DOCKER_REGISTRY }}
+            export DOCKER_NAMESPACE=${{ secrets.DOCKER_NAMESPACE }}
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
             sleep 60

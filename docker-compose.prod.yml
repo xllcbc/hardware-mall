@@ -2,7 +2,7 @@ name: hardware-mall-prod
 
 services:
   backend:
-    image: ${DOCKER_REGISTRY}/hardware-mall-backend:${IMAGE_TAG:-latest}
+    image: ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/hardware-mall-backend:${IMAGE_TAG:-latest}
     container_name: hw-backend
     restart: unless-stopped
     extra_hosts:
@@ -17,7 +17,7 @@ services:
       - hw-net
 
   admin:
-    image: ${DOCKER_REGISTRY}/hardware-mall-admin:${IMAGE_TAG:-latest}
+    image: ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/hardware-mall-admin:${IMAGE_TAG:-latest}
     container_name: hw-admin
     restart: unless-stopped
     depends_on:
