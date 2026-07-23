@@ -33,6 +33,8 @@ admin:
 wechat:
   appid: wx-test-appid-for-ci
   secret: test-secret-for-ci
+  pay:
+    mch-id: "test-disabled"
 
 aliyun:
   oss:
