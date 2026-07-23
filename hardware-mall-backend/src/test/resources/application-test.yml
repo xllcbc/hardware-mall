@@ -30,6 +30,25 @@ admin:
   username: admin
   password: admin123
 
+wechat:
+  appid: wx-test-appid-for-ci
+  secret: test-secret-for-ci
+
+aliyun:
+  oss:
+    access-key-id: test-access-key
+    access-key-secret: test-secret-key
+    bucket-name: test-bucket
+    region: cn-beijing
+    domain: https://test-bucket.oss-cn-beijing.aliyuncs.com
+
+cors:
+  allowed-origins: http://localhost:*
+
+dingtalk:
+  webhook: ""
+  secret: ""
+
 logging:
   level:
     com.example.mystore: debug
