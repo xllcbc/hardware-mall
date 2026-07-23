@@ -1,8 +1,9 @@
 # 微信支付测试添加上手指南
 
 ## 背景
-当前 `application-test.yml` 设置了 `wechat.pay.mch-id: "test-disabled"`，
-使 `WechatPayConfig` 和 `PayServiceImpl` 在测试环境不加载（`@ConditionalOnProperty` 不命中）。
+当前 `application-test.yml` 设置了 `wechat.pay.mch-id: "false"`，
+使 `WechatPayConfig` 和 `PayServiceImpl` 在测试环境不加载。
+原理：Spring Boot 的 `@ConditionalOnProperty` 默认行为——属性值为 `"false"` 时条件不命中。
 这在没有真实微信商户号的 CI 环境里是必须的。
 
 ## 将来启用支付测试时，按顺序做：
@@ -16,7 +17,7 @@ openssl rsa -in src/test/resources/wechat/test_key.pem -pubout -out src/test/res
 ⚠️ 测试密钥不要用生产密钥，不要提交 .pem 进 git（加到 .gitignore）
 
 ### 2. 修改 application-test.yml
-把 `mch-id: "test-disabled"` 替换为：
+把 `mch-id: "false"` 替换为：
 ```yaml
 wechat:
   appid: wx-test-appid-for-ci
