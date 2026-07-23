@@ -60,9 +60,10 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
+            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY }} -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
             cd /opt/hardware-mall
             git fetch --all
-            git checkout ${{ github.sha }} -- docker-compose.yml
+            git checkout ${{ github.sha }} -- docker-compose.prod.yml
             export IMAGE_TAG=${{ github.sha }}
             export DOCKER_REGISTRY=${{ secrets.DOCKER_REGISTRY }}
             export DOCKER_NAMESPACE=${{ secrets.DOCKER_NAMESPACE }}

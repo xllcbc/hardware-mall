@@ -1,20 +1,22 @@
 name: hardware-mall-prod
 
 services:
-  backend:
-    image: ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/hardware-mall-backend:${IMAGE_TAG:-latest}
-    container_name: hw-backend
-    restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    env_file:
-      - /opt/hardware-mall/.env
-    environment:
-      SPRING_PROFILES_ACTIVE: prod
-      DB_HOST: host.docker.internal
-      REDIS_HOST: host.docker.internal
-    networks:
-      - hw-net
+   backend:
+     image: ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/hardware-mall-backend:${IMAGE_TAG:-latest}
+     container_name: hw-backend
+     restart: unless-stopped
+     extra_hosts:
+       - "host.docker.internal:host-gateway"
+     env_file:
+       - /opt/hardware-mall/.env
+     environment:
+       SPRING_PROFILES_ACTIVE: prod
+       DB_HOST: host.docker.internal
+       REDIS_HOST: host.docker.internal
+     ports:
+       - "8080:8080"
+     networks:
+       - hw-net
 
   admin:
     image: ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/hardware-mall-admin:${IMAGE_TAG:-latest}
