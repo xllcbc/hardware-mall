@@ -29,4 +29,4 @@ markdown-resume-*.json
 *.xlsx
 
 # 真实数据文件
-seed_real_products.sql
+# seed_real_products.sql
