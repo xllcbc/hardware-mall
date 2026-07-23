@@ -36,22 +36,22 @@ jobs:
         with:
           context: ./hardware-mall-backend
           push: true
+          provenance: false
+          sbom: false
           tags: |
             ${{ env.IMAGE_BACKEND }}
             ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-backend:latest
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
 
       - name: Build & push admin
         uses: docker/build-push-action@v5
         with:
           context: ./hardware-mall-admin
           push: true
+          provenance: false
+          sbom: false
           tags: |
             ${{ env.IMAGE_ADMIN }}
             ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-admin:latest
-          cache-from: type=gha,scope=admin
-          cache-to: type=gha,mode=max,scope=admin
 
       - name: SSH deploy to server
         uses: appleboy/ssh-action@v1.0.0
@@ -69,6 +69,16 @@ jobs:
             export DOCKER_NAMESPACE=${{ secrets.DOCKER_NAMESPACE }}
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
-            sleep 60
-            docker compose ps
-            curl -sf http://localhost:8080/actuator/health
+            sleep 5
+            docker compose -f docker-compose.prod.yml ps
+            for i in $(seq 1 20); do
+              if curl -sf http://localhost:8080/actuator/health; then
+                echo "healthy after ~$((i*5))s"
+                exit 0
+              fi
+              echo "attempt $i/20: not ready, retry in 5s..."
+              sleep 5
+            done
+            echo "health check failed after 20 attempts"
+            docker compose -f docker-compose.prod.yml logs --tail 200 backend
+            exit 1

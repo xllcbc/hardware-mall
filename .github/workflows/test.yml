@@ -42,7 +42,6 @@ jobs:
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: 6379
           JWT_SECRET: ${{ secrets.JWT_SECRET_FOR_TEST || 'ci_test_jwt_secret_32_bytes_long' }}
-          ADMIN_PASSWORD: TestStrongPwd_2026
         run: mvn -B clean test
 
   admin-build:
