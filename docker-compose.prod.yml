@@ -5,6 +5,8 @@ services:
     image: ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/hardware-mall-backend:${IMAGE_TAG:-latest}
     container_name: hw-backend
     restart: unless-stopped
+    depends_on:
+      - redis
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
@@ -12,11 +14,25 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: prod
       DB_HOST: host.docker.internal
-      REDIS_HOST: host.docker.internal
+      REDIS_HOST: redis
     ports:
       - "8080:8080"
     networks:
       - hw-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: hw-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - hw-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   admin:
     image: ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/hardware-mall-admin:${IMAGE_TAG:-latest}
@@ -36,3 +52,6 @@ services:
 networks:
   hw-net:
     driver: bridge
+
+volumes:
+  redis-data:
