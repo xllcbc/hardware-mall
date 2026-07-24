@@ -4,27 +4,24 @@ services:
   backend:
     image: ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/hardware-mall-backend:${IMAGE_TAG:-latest}
     container_name: hw-backend
+    network_mode: host
     restart: unless-stopped
     depends_on:
       redis:
         condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     env_file:
       - /opt/hardware-mall/.env
     environment:
       SPRING_PROFILES_ACTIVE: prod
-      DB_HOST: host.docker.internal
-      REDIS_HOST: redis
-    ports:
-      - "8080:8080"
-    networks:
-      - hw-net
+      DB_HOST: localhost
+      REDIS_HOST: localhost
 
   redis:
     image: redis:7-alpine
     container_name: hw-redis
     restart: unless-stopped
+    ports:
+      - "6379:6379"
     volumes:
       - redis-data:/data
     networks:
