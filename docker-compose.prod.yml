@@ -6,7 +6,8 @@ services:
     container_name: hw-backend
     restart: unless-stopped
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:

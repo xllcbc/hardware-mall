@@ -71,12 +71,12 @@ jobs:
             docker compose -f docker-compose.prod.yml up -d
             sleep 5
             docker compose -f docker-compose.prod.yml ps
-            for i in $(seq 1 20); do
+            for i in $(seq 1 30); do
               if curl -sf http://localhost:8080/actuator/health; then
                 echo "healthy after ~$((i*5))s"
                 exit 0
               fi
-              echo "attempt $i/20: not ready, retry in 5s..."
+              echo "attempt $i/30: not ready, retry in 5s..."
               sleep 5
             done
             echo "health check failed after 20 attempts"
