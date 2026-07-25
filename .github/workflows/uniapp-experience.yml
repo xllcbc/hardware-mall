@@ -37,15 +37,17 @@ jobs:
 
       - name: Write wechat private key
         run: |
-          mkdir -p ~/.wechat
-          echo "${{ secrets.WEAPP_PRIVATE_KEY }}" > ~/.wechat/private.${{ secrets.WEAPP_APPID }}.key
-          chmod 600 ~/.wechat/private.${{ secrets.WEAPP_APPID }}.key
+          mkdir -p "$HOME/.wechat"
+          echo "${{ secrets.WEAPP_PRIVATE_KEY }}" > "$HOME/.wechat/private.${{ secrets.WEAPP_APPID }}.key"
+          chmod 600 "$HOME/.wechat/private.${{ secrets.WEAPP_APPID }}.key"
 
       - name: Upload to experience
         working-directory: hardware-mall-uniapp
         env:
           WEAPP_APPID: ${{ secrets.WEAPP_APPID }}
-          WEAPP_PRIVATE_KEY_PATH: ~/.wechat/private.${{ secrets.WEAPP_APPID }}.key
           CI_MODE: experience
           CI_VERSION_DESC: ${{ github.event.inputs.desc || 'CI 自动上传' }}
-        run: node scripts/build-uni.js
+        run: |
+          export WEAPP_PRIVATE_KEY_PATH="$HOME/.wechat/private.${WEAPP_APPID}.key"
+          ls -l "$WEAPP_PRIVATE_KEY_PATH"
+          node scripts/build-uni.js
