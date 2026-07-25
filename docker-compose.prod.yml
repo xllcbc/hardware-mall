@@ -17,7 +17,7 @@ services:
       REDIS_HOST: localhost
 
   redis:
-    image: redis:7-alpine
+    image: crpi-gryw2txgea9uqhmk.cn-beijing.personal.cr.aliyuncs.com/hardware-mall/redis:7-alpine
     container_name: hw-redis
     restart: unless-stopped
     ports:

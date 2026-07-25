@@ -31,6 +31,7 @@ spring:
         singleServerConfig:
           address: "redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}"
           database: 0
+          password: ${REDIS_PASSWORD:}
   task:
     execution:
       pool:
