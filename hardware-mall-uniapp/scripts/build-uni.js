@@ -10,7 +10,7 @@
  *   WEAPP_APPID           - 小程序 AppID
  *   WEAPP_PRIVATE_KEY_PATH - 私钥文件路径
  *   WEAPP_PRIVATE_KEY     - 私钥内容（可选）
- *   CI_MODE               - 发布模式: experience | review | release（默认 experience）
+ *   CI_VERSION_DESC       - 版本描述（可选）
  */
 
 const ci = require('miniprogram-ci')
@@ -21,7 +21,6 @@ const VERSION = process.env.VERSION || '1.0.0'
 const APP_ID = process.env.WEAPP_APPID
 const PRIVATE_KEY = process.env.WEAPP_PRIVATE_KEY
 const PRIVATE_KEY_PATH = process.env.WEAPP_PRIVATE_KEY_PATH
-const CI_MODE = process.env.CI_MODE || 'experience'
 const CI_VERSION_DESC = process.env.CI_VERSION_DESC
 
 const PROJECT_PATH = path.resolve(__dirname, '../dist/build/mp-weixin')
@@ -48,8 +47,7 @@ function preparePrivateKey() {
 }
 
 async function main() {
-  console.log(`\n🚀 uni-app 微信小程序发布 v${VERSION}`)
-  console.log(`   模式: ${CI_MODE}`)
+  console.log(`\n🚀 uni-app 微信小程序上传 v${VERSION}`)
   console.log(`   AppID: ${APP_ID}\n`)
 
   checkEnv()
@@ -95,41 +93,11 @@ async function main() {
     console.log('   分包信息:', JSON.stringify(uploadResult.subPackageInfo))
   }
 
-  if (CI_MODE === 'experience' || CI_MODE === 'review' || CI_MODE === 'release') {
-    console.log('\n🎧 正在发布体验版...')
-    const { testUrl } = await ci.Experience.createTestVersion({
-      project,
-      version: VERSION,
-      desc: CI_VERSION_DESC || `CI 自动构建 v${VERSION}`,
-    })
-    console.log('✅ 体验版发布成功')
-    console.log('   体验二维码:', testUrl)
-  }
-
-  if (CI_MODE === 'review' || CI_MODE === 'release') {
-    console.log('\n📋 正在提交审核...')
-    await ci.Code.commitVersion({
-      project,
-      version: VERSION,
-      desc: `CI 自动提交审核 v${VERSION}`,
-    })
-    console.log('✅ 已提交审核')
-  }
-
-  if (CI_MODE === 'release') {
-    console.log('\n🎉 正在发布正式版...')
-    await ci.Code.release({
-      project,
-      version: VERSION,
-    })
-    console.log('✅ 正式版发布成功')
-  }
-
-  console.log('\n✨ 发布全部完成!\n')
+  console.log('\n💡 提示: 请前往微信公众平台手动设置体验版、提交审核\n')
 }
 
 main().catch((err) => {
-  console.error('\n❌ 发布失败:', err.message)
+  console.error('\n❌ 上传失败:', err.message)
   if (err.message.includes('40013')) {
     console.error('   → AppID 不合法，检查 WEAPP_APPID 是否与私钥匹配')
   }

@@ -26,9 +26,7 @@ jobs:
 
       - name: Install deps
         working-directory: hardware-mall-uniapp
-        run: |
-          npm ci
-          npm install miniprogram-ci --no-save
+        run: npm ci
 
       - name: Build mp-weixin
         working-directory: hardware-mall-uniapp
@@ -55,7 +53,6 @@ jobs:
         working-directory: hardware-mall-uniapp
         env:
           WEAPP_APPID: ${{ secrets.WEAPP_APPID }}
-          CI_MODE: experience
           CI_VERSION_DESC: ${{ github.event.inputs.desc || 'CI 自动上传' }}
         run: |
           export WEAPP_PRIVATE_KEY_PATH="$HOME/.wechat/private.${WEAPP_APPID}.key"

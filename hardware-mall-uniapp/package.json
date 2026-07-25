@@ -18,6 +18,7 @@
     "pinia": "^2.1.7"
   },
   "devDependencies": {
+    "miniprogram-ci": "^2.1.0",
     "@dcloudio/types": "^3.4.8",
     "@dcloudio/uni-automator": "^3.0.0-alpha-3081220230802001",
     "@dcloudio/uni-cli-shared": "^3.0.0-alpha-3081220230802001",
