@@ -34,7 +34,50 @@ wechat:
   appid: wx-test-appid-for-ci
   secret: test-secret-for-ci
   pay:
-    mch-id: "false"
+    mch-id: "1900000109"
+    api-v3-key: testapiv3key32bytesminimum1234
+    private-key: |
+          -----BEGIN PRIVATE KEY-----
+          MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCrlBmMrIeFl/Lb
+          26IDsqvOokZAkxNVTdcdS4Y3ZQBDY0mBggGOLTORfESORRqZDf72JIrW+hnQs5tn
+          oFQ2W5NBwmiIqzxHJMPBFoUg1qTRILnrFgRv5xOfLD4aJ94Y3MsKeHw0Kxn+2MlU
+          gX/a5Q1iPORNMuKTN9VeDreJ2uEGGu/OMaXrb/ueS4qHsakRBAWViZer7vlIViQx
+          V3phY8KAqlMNSz6N9YdpnTWVzQ4ILjn199YEJEMOCI6w3mKY6oF4C95cv/lcbsPZ
+          iPyL+t0VWa6pvCQjtHZihc8zC2MjkjUm/bdkFOkq/iqctc1X9/E+1V01ARIo1Dlt
+          isF0j7OpAgMBAAECggEAIWKf1g98DzKRvtXtoGqTo5FPuiDkEiUjRj/7zauJcZNQ
+          KjLxuohxEE3tyQEJO97NTXeuzEW94C4SfwdjW3BWJuV9EZrAD9fHfzqyjME3MLn9
+          cxDFrEB6QO6K5uv6+zt7Bn6LLFt2o2/rPNY12pHXGNZgVeUg0SR8D+EtNVWxk044
+          sC5dAp5OWCIVlba3uqNNDLQmKQKfKdHzpDIESvB1nzMsdrO4SEldSAwIfppWmwD2
+          Lehquc8SDyag8KOn63ggkPrrdmSfZbD/GI5PoA4C/ZWmWO1cmLTv/OVkR1bfq3eH
+          XOdyYw5W5+1HWcNyBDnEYbe4w6XdJL8UP1/l/7PDQQKBgQDiAA2Xz3WAABnjyqXJ
+          QD/Nn8Gp8N/V3hvisHyffmPY0ym1DPnVM+aMsevnzI9fILUdNEYoCohLKTzXgd4E
+          zS4nSum8FJvf6fG0eEfpg968df3fXU5xd7YYUmSfGbnvP4onddMtBljequLO5+eu
+          IKuIYZLiZw6ieesMCj19hDM78wKBgQDCWq/V4PiJTOusr08OryPIgIRrDrebS7DU
+          0BQuI8meM5beCzw7f+12Wls1za5SSkCOfFeRqhM32WES5vWYRcri05ue4f8Lbamc
+          hKOFF5M7sSwxS2Pzbu8YpWG59hU/Ko1L6q+IjJ2l1m1HpnSXMUe9boW449ED3eHu
+          JEMzPooE8wKBgGowDjL7VkErSv7d86Go35G086Duva1WbBHKTPP/xdhV923LSAPm
+          G/iVjLtgQSk4TAEJ08DymfF+0ciMi44D/iCWMVae9FJ0MI5USa2tuVUht4Rg6f+k
+          eNnatM6Qnu2MFFTQJsYsCkutTV5cVl5ZmV8+QW7Bb33l/QuuMBAusogDAoGAMmQQ
+          8wNBbVfkQwGxHb2LKZEoxBkswbb+Qi8xDEV7IOl/VFLVaxfgGa+Ttn99kxhtZIQY
+          sEvIb9KMuLnpM3HlCKqUzr0Jw4zLTSmWvAtAwVlOe/lwEM3ScDFxBSYonBgMSoKu
+          wFi1BypxawJdeFXuo87kHOv0ZWxCB9yfD8pHPsECgYBz/10QTjxsdbQhylRA+Gfh
+          XbrtnGMp+vrZRFNOPYeuDDgjfFfkbSfTdkvZSG1vDXmTG32bf6khCR/Gp1HD2ZWe
+          yvgC241zmnISliBm5qRr4yPxCGFD9t4RNCndP5nt0JaDNsO+XBZtLMN5DunRLYlX
+          GXJwZjXNaOUOuuPw61WViA==
+          -----END PRIVATE KEY-----
+    public-key: |
+          -----BEGIN PUBLIC KEY-----
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq5QZjKyHhZfy29uiA7Kr
+          zqJGQJMTVU3XHUuGN2UAQ2NJgYIBji0zkXxEjkUamQ3+9iSK1voZ0LObZ6BUNluT
+          QcJoiKs8RyTDwRaFINak0SC56xYEb+cTnyw+GifeGNzLCnh8NCsZ/tjJVIF/2uUN
+          YjzkTTLikzfVXg63idrhBhrvzjGl62/7nkuKh7GpEQQFlYmXq+75SFYkMVd6YWPC
+          gKpTDUs+jfWHaZ01lc0OCC459ffWBCRDDgiOsN5imOqBeAveXL/5XG7D2Yj8i/rd
+          FVmuqbwkI7R2YoXPMwtjI5I1Jv23ZBTpKv4qnLXNV/fxPtVdNQESKNQ5bYrBdI+z
+          qQIDAQAB
+          -----END PUBLIC KEY-----
+    public-key-id: test-pub-key-id
+    mch-serial-no: test-serial-no
+    notify-url: http://localhost:8080/api/pay/notify
 
 aliyun:
   oss:
