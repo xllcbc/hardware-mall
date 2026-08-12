@@ -32,6 +32,21 @@
 4. 配 `.env` 真实环境变量（导入 `.env.example` 模板）
 5. Prometheus / Grafana 容器（可选，自用项目可省）
 
+## 部署模型说明（重要，避免误导）
+
+线上代码**运行在 Docker 镜像里**，不是服务器的 git 仓库里：
+
+```
+GitHub main → deploy-prod 构建镜像(tag=commit sha) → ACR → 服务器 docker compose up -d
+```
+
+- **判断"服务器跑的是什么"的唯一依据**：`docker ps` 中镜像 tag（即 commit sha），如
+  `hardware-mall-backend:0e9d1e2bf12a281257ab8f7ec62890cc20345272`。
+- `deploy-prod` **只**把 `docker-compose.prod.yml` scp 到 `/opt/hardware-mall/`，并拉取镜像重启容器，
+  **不会**更新服务器上的 git 仓库。因此服务器上 `git log` 显示的 commit **不代表**线上运行的版本。
+- 排查问题请以镜像 tag → 对应 GitHub commit 为准，不要依赖服务器 git 仓库状态。
+- `test.yml` 与 `deploy-prod` 是两个独立工作流，测试失败不影响部署是否执行。
+
 ## Rollback
 
 ```bash
