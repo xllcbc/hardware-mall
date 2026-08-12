@@ -4,6 +4,7 @@ import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.util.JwtUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.StringUtil;
+import com.example.mystore.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -53,8 +54,10 @@ public class JwtInterceptor implements HandlerInterceptor {
                 return false;
             }
             Long userId = jwtUtil.getUserIdFromToken(token);
-            request.setAttribute("userId", userId);
-            log.debug("JWT验证通过 | URI: {} | userId: {}", uri, userId);
+            Integer role = jwtUtil.getRoleFromToken(token);
+            UserContext.setUserId(userId);
+            UserContext.setRole(role);
+            log.debug("JWT验证通过 | URI: {} | userId: {} | role: {}", uri, userId, role);
             return true;
         } catch (Exception e) {
             log.warn("JWT拦截-Token无效 | URI: {} | 原因: {}", uri, e.getMessage());
@@ -63,5 +66,10 @@ public class JwtInterceptor implements HandlerInterceptor {
             response.getWriter().write("{\"code\":401,\"message\":\"无效的认证信息\"}");
             return false;
         }
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
+        UserContext.clear();
     }
 }

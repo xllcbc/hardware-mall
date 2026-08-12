@@ -7,6 +7,7 @@ import com.example.mystore.entity.db.User;
 import com.example.mystore.service.UserService;
 import com.example.mystore.util.JwtUtil;
 import com.example.mystore.util.RedisUtil;
+import com.example.mystore.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -46,58 +47,44 @@ public class UserController {
     }
 
     @GetMapping("/info")
-    public Result<User> getUserInfo(@RequestHeader("Authorization") String authHeader) {
-        Long userId = extractUserId(authHeader);
+    public Result<User> getUserInfo() {
+        Long userId = UserContext.getUserId();
         return Result.success(userService.getUserInfo(userId));
     }
 
     @PutMapping("/info")
-    public Result<User> updateUserInfo(
-            @RequestHeader("Authorization") String authHeader,
-            @RequestBody User user) {
-        Long userId = extractUserId(authHeader);
+    public Result<User> updateUserInfo(@RequestBody User user) {
+        Long userId = UserContext.getUserId();
         user.setId(userId);
         return Result.success(userService.updateUserInfo(user));
     }
 
     @PostMapping("/refresh")
-    public Result<String> refreshToken(@RequestHeader("Authorization") String authHeader) {
-        Long userId = extractUserId(authHeader);
+    public Result<String> refreshToken() {
+        Long userId = UserContext.getUserId();
         return Result.success(userService.refreshToken(userId));
     }
 
     @PostMapping("/phone")
     @RateLimit(key = "user:phone", count = 5, time = 60)
-    public Result<User> bindPhone(
-            @RequestHeader("Authorization") String authHeader,
-            @RequestBody Map<String, String> params) {
-        Long userId = extractUserId(authHeader);
+    public Result<User> bindPhone(@RequestBody Map<String, String> params) {
+        Long userId = UserContext.getUserId();
         String phoneCode = params.get("code");
         return Result.success(userService.updatePhone(userId, phoneCode));
     }
 
     @PostMapping("/logout")
     public Result<Void> logout(@RequestHeader("Authorization") String authHeader) {
-        Long userId = extractUserId(authHeader);
+        Long userId = UserContext.getUserId();
         String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
         userService.logout(userId, token);
         return Result.success(null);
     }
 
     @PutMapping("/region")
-    public Result<Void> updateRegion(
-            @RequestHeader("Authorization") String authHeader,
-            @RequestBody Map<String, String> params) {
-        Long userId = extractUserId(authHeader);
+    public Result<Void> updateRegion(@RequestBody Map<String, String> params) {
+        Long userId = UserContext.getUserId();
         userService.updateUserRegion(userId, params.get("province"), params.get("city"));
         return Result.success(null);
-    }
-
-    private Long extractUserId(String authHeader) {
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7);
-            return jwtUtil.getUserIdFromToken(token);
-        }
-        throw new RuntimeException("无效的认证信息");
     }
 }

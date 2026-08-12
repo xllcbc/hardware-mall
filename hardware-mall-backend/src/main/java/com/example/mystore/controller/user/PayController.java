@@ -4,7 +4,7 @@ import com.example.mystore.annotation.RateLimit;
 import com.example.mystore.common.result.Result;
 import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.service.PayService;
-import com.example.mystore.util.JwtUtil;
+import com.example.mystore.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -21,14 +21,11 @@ import java.util.Map;
 public class PayController {
 
     private final PayService payService;
-    private final JwtUtil jwtUtil;
 
     @PostMapping("/prepay")
     @RateLimit(key = "pay", count = 10, time = 60)
-    public Result<Map<String, String>> prepay(
-            @RequestHeader("Authorization") String authHeader,
-            @RequestBody Map<String, Long> params) {
-        Long userId = extractUserId(authHeader);
+    public Result<Map<String, String>> prepay(@RequestBody Map<String, Long> params) {
+        Long userId = UserContext.getUserId();
         Long orderId = params.get("orderId");
         Map<String, String> payParams = payService.prepay(userId, orderId);
         return Result.success(payParams);
@@ -57,19 +54,9 @@ public class PayController {
     }
 
     @GetMapping("/query/{orderId}")
-    public Result<PaymentRecord> queryPayStatus(
-            @RequestHeader("Authorization") String authHeader,
-            @PathVariable Long orderId) {
-        Long userId = extractUserId(authHeader);
+    public Result<PaymentRecord> queryPayStatus(@PathVariable Long orderId) {
+        Long userId = UserContext.getUserId();
         PaymentRecord record = payService.queryByOrderIdAndUserId(orderId, userId);
         return Result.success(record);
-    }
-
-    private Long extractUserId(String authHeader) {
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7);
-            return jwtUtil.getUserIdFromToken(token);
-        }
-        throw new RuntimeException("无效的认证信息");
     }
 }

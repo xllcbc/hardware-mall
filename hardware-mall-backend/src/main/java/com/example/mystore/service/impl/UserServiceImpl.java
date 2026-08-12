@@ -52,10 +52,19 @@ public class UserServiceImpl implements UserService {
             userMapper.updateById(user);
         }
 
+        // 预留：当前业务未使用 session_key（手机号走新版 getuserphonenumber 接口，仅用 access_token）。
+        // 保留用于未来老版微信解密场景：wx.getUserInfo 签名校验、老版手机号 AES 解密、unionid 统一身份。
         redisUtil.set(RedisConstants.PREFIX_WECHAT_SESSION + user.getId(),
                 sessionKey, RedisConstants.WECHAT_SESSION_TTL, TimeUnit.SECONDS);
 
         return user;
+    }
+
+    @Override
+    public User getUserByOpenid(String openid) {
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(User::getOpenid, openid);
+        return userMapper.selectOne(wrapper);
     }
 
     @Override
@@ -169,6 +178,10 @@ public class UserServiceImpl implements UserService {
         }
     }
 
+    /**
+     * 预留方法：当前业务无调用方。
+     * 用于未来老版微信解密场景：wx.getUserInfo 签名校验、老版手机号 AES 解密、unionid 统一身份。
+     */
     @Override
     public String getSessionKey(Long userId) {
         Object value = redisUtil.get(RedisConstants.PREFIX_WECHAT_SESSION + userId);

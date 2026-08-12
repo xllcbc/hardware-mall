@@ -1,9 +1,7 @@
 package com.example.mystore.interceptor;
 
 import com.example.mystore.annotation.RequireAdmin;
-import com.example.mystore.util.JwtUtil;
-import com.example.mystore.util.StringUtil;
-import lombok.RequiredArgsConstructor;
+import com.example.mystore.util.UserContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
@@ -14,10 +12,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class AdminRoleInterceptor implements HandlerInterceptor {
-
-    private final JwtUtil jwtUtil;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
@@ -33,30 +28,9 @@ public class AdminRoleInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        String token = request.getHeader("Authorization");
-        if (StringUtil.isEmpty(token)) {
-            log.warn("AdminRole拦截-Token为空 | URI: {}", request.getRequestURI());
-            response.setStatus(401);
-            response.setContentType("application/json;charset=UTF-8");
-            response.getWriter().write("{\"code\":401,\"message\":\"未登录\"}");
-            return false;
-        }
-
-        if (token.startsWith("Bearer ")) {
-            token = token.substring(7);
-        }
-
-        try {
-            Integer role = jwtUtil.getRoleFromToken(token);
-            if (role == null || role != 2) {
-                log.warn("AdminRole拦截-权限不足 | URI: {} | role: {}", request.getRequestURI(), role);
-                response.setStatus(403);
-                response.setContentType("application/json;charset=UTF-8");
-                response.getWriter().write("{\"code\":403,\"message\":\"无权限访问\"}");
-                return false;
-            }
-        } catch (Exception e) {
-            log.warn("AdminRole拦截-Token解析失败 | URI: {}", request.getRequestURI(), e);
+        Integer role = UserContext.getRole();
+        if (role == null || role != 2) {
+            log.warn("AdminRole拦截-权限不足 | URI: {} | role: {}", request.getRequestURI(), role);
             response.setStatus(403);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"code\":403,\"message\":\"无权限访问\"}");
