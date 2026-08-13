@@ -51,7 +51,7 @@ read -rp "  管理后台 ADMIN 登录密码: " ADMIN_PASSWORD
 echo "  正在生成 JWT_SECRET..."
 JWT_SECRET=$(openssl rand -base64 32)
 
-sudo -u deploy cp /opt/hardware-mall/.env.example /opt/hardware-mall/.env
+#sudo -u deploy cp /opt/hardware-mall/.env.example /opt/hardware-mall/.env
 sudo -u deploy bash -c "cat > /opt/hardware-mall/.env <<ENVEOF
 DB_HOST=localhost
 DB_PORT=3306
