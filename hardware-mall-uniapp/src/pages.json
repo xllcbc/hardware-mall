@@ -67,6 +67,18 @@
       "style": {
         "navigationBarTitleText": "编辑资料"
       }
+    },
+    {
+      "path": "pages/agreement/privacy",
+      "style": {
+        "navigationBarTitleText": "隐私政策"
+      }
+    },
+    {
+      "path": "pages/agreement/terms",
+      "style": {
+        "navigationBarTitleText": "用户服务协议"
+      }
     }
   ],
   "subPackages": [

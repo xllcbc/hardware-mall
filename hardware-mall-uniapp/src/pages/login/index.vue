@@ -41,9 +41,9 @@
 
       <view class="login-tip">
         <text class="tip-text">登录即表示同意</text>
-        <text class="link">《用户服务协议》</text>
+        <text class="link" @tap="goTerms">《用户服务协议》</text>
         <text class="tip-text">和</text>
-        <text class="link">《隐私政策》</text>
+        <text class="link" @tap="goPrivacy">《隐私政策》</text>
       </view>
     </view>
 
@@ -164,6 +164,14 @@ const navigateBack = () => {
   } else {
     uni.switchTab({ url: '/pages/user/index' })
   }
+}
+
+const goTerms = () => {
+  uni.navigateTo({ url: '/pages/agreement/terms' })
+}
+
+const goPrivacy = () => {
+  uni.navigateTo({ url: '/pages/agreement/privacy' })
 }
 </script>
 
