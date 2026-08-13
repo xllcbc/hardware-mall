@@ -4,12 +4,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.vo.SpecVO;
 import java.util.List;
+import java.util.Map;
 
 public interface SkuService {
     Page<Sku> getSkuPage(Long spuId, Integer page, Integer limit);
     Sku getSkuById(Long id);
     List<Sku> getSkusBySpu(Long spuId);
     List<Sku> getSkusBySpu(Long spuId, Integer status);
+    Map<Long, Long> countBySpuIds(List<Long> spuIds);
     Sku getSkuBySpecs(Long spuId, List<SpecVO> specs);
     Sku createSku(Sku sku);
     Sku updateSku(Sku sku);

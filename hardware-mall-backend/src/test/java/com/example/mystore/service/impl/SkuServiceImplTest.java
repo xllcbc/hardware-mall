@@ -18,6 +18,7 @@ import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -172,6 +173,35 @@ class SkuServiceImplTest {
         boolean result = skuService.syncStockToCache(3L);
 
         assertThat(result).isFalse();
+    }
+
+    @Test
+    void testCountBySpuIds_GroupsBySpu_ExcludesDeleted() {
+        Sku sku3 = new Sku();
+        sku3.setId(3L);
+        sku3.setSpuId(2L);
+        sku3.setDeleteTime(0L);
+
+        Sku deleted = new Sku();
+        deleted.setId(4L);
+        deleted.setSpuId(2L);
+        deleted.setDeleteTime(System.currentTimeMillis());
+
+        when(skuMapper.selectList(any())).thenReturn(Arrays.asList(sku1, sku2, sku3, deleted));
+
+        Map<Long, Long> result = skuService.countBySpuIds(Arrays.asList(1L, 2L, 99L));
+
+        assertThat(result).containsEntry(1L, 2L);
+        assertThat(result).containsEntry(2L, 1L);
+        assertThat(result).doesNotContainKey(99L);
+        assertThat(result).doesNotContainKey(3L);
+    }
+
+    @Test
+    void testCountBySpuIds_EmptyInput_ReturnsEmptyMap() {
+        Map<Long, Long> result = skuService.countBySpuIds(Collections.emptyList());
+
+        assertThat(result).isEmpty();
     }
 
     @Test

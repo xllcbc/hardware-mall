@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/admin/sku")
@@ -36,6 +37,11 @@ public class AdminSkuController {
             @PathVariable Long spuId,
             @RequestParam(required = false) Integer status) {
         return Result.success(skuService.getSkusBySpu(spuId, status));
+    }
+
+    @GetMapping("/counts")
+    public Result<Map<Long, Long>> getSkuCounts(@RequestParam List<Long> spuIds) {
+        return Result.success(skuService.countBySpuIds(spuIds));
     }
 
     @PostMapping

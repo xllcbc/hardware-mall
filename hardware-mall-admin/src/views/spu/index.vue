@@ -387,7 +387,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ElImageViewer } from 'element-plus'
 import { getCategoryList } from '@/api/admin/category'
 import { getSpuList, createSpu, updateSpu, deleteSpu, updateSpuStatus, Spu } from '@/api/admin/spu'
-import { getSkusBySpu, createSku, updateSku, deleteSku, generateSkus, Sku } from '@/api/admin/sku'
+import { getSkusBySpu, getSkuCounts, createSku, updateSku, deleteSku, generateSkus, Sku } from '@/api/admin/sku'
 import { uploadProductImage } from '@/api/admin/upload'
 
 const loading = ref(false)
@@ -465,12 +465,15 @@ const loadData = async () => {
     })
     pagination.total = res.total || 0
 
-    for (const item of tableData.value) {
+    const spuIds = tableData.value.map((item: any) => item.id as number)
+    if (spuIds.length) {
       try {
-        const skus = await getSkusBySpu(item.id)
-        skuCountMap.value[item.id] = skus?.length || 0
+        const counts = await getSkuCounts(spuIds)
+        tableData.value.forEach((item: any) => {
+          skuCountMap.value[item.id] = counts[item.id] || 0
+        })
       } catch {
-        skuCountMap.value[item.id] = 0
+        // error handled by interceptor
       }
     }
   } catch {

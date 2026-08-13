@@ -32,6 +32,12 @@ export const getSkusBySpu = (spuId: number, status?: number) => {
   return request.get<Sku[]>(`/admin/sku/spu/${spuId}`, { params: { status } })
 }
 
+export const getSkuCounts = (spuIds: number[]) => {
+  return request.get<Record<number, number>>('/admin/sku/counts', {
+    params: { spuIds: spuIds.join(',') }
+  })
+}
+
 export const createSku = (data: Sku) => {
   return request.post<Sku>('/admin/sku', data)
 }
