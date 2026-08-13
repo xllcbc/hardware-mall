@@ -186,7 +186,7 @@ public class OrderServiceImpl implements OrderService {
     public Page<OrderVO> getOrderPage(Long userId, Integer status, Integer page, Integer limit) {
         Page<Order> pageParam = new Page<>(page, limit);
         LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Order::getUserDeleteTime, 0);
+        wrapper.and(w -> w.isNull(Order::getUserDeleteTime).or().eq(Order::getUserDeleteTime, 0));
         if (userId != null) {
             wrapper.eq(Order::getUserId, userId);
         }
@@ -210,7 +210,7 @@ public class OrderServiceImpl implements OrderService {
     public Page<OrderVO> getAdminOrderPage(Long userId, Integer status, Integer page, Integer limit) {
         Page<Order> pageParam = new Page<>(page, limit);
         LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Order::getAdminDeleteTime, 0);
+        wrapper.and(w -> w.isNull(Order::getAdminDeleteTime).or().eq(Order::getAdminDeleteTime, 0));
         if (userId != null) {
             wrapper.eq(Order::getUserId, userId);
         }
