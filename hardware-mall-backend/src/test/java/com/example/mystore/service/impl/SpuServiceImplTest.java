@@ -135,9 +135,10 @@ class SpuServiceImplTest {
     }
 
     @Test
-    void testGetProductDetailVO_CacheHit() {
+    void testGetProductDetailVO_FromCache() {
         ProductDetailVO cached = new ProductDetailVO();
-        when(redisUtil.get(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L)).thenReturn(cached);
+        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L),
+                eq(ProductDetailVO.class), anyLong(), any())).thenReturn(cached);
 
         ProductDetailVO result = spuService.getProductDetailVO(1L);
 
@@ -146,13 +147,37 @@ class SpuServiceImplTest {
     }
 
     @Test
-    void testGetProductDetailVO_CacheHit_Null() {
-        when(redisUtil.get(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L)).thenReturn(RedisConstants.CACHE_NULL);
-        when(redisUtil.isNull(RedisConstants.CACHE_NULL)).thenReturn(true);
+    void testGetProductDetailVO_NotFound() {
+        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L),
+                eq(ProductDetailVO.class), anyLong(), any())).thenReturn(null);
+
+        assertThatThrownBy(() -> spuService.getProductDetailVO(1L))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("商品不存在或已下架");
+    }
+
+    @Test
+    void testGetProductDetailVO_AssembleFromDb() {
+        sku1.setSpecs(Collections.emptyList());
+        sku2.setSpecs(Collections.emptyList());
+        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L),
+                eq(ProductDetailVO.class), anyLong(), any())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            java.util.function.Supplier<ProductDetailVO> supplier = inv.getArgument(3);
+            return supplier.get();
+        });
+        when(spuMapper.selectById(1L)).thenReturn(spu1);
+        when(skuService.getSkusBySpu(1L, 1)).thenReturn(Arrays.asList(sku1, sku2));
+        when(specTemplateService.getTemplatesByCategory(1L)).thenReturn(Collections.emptyList());
+        when(specItemService.getItemsGroupedByTemplateIds(any())).thenReturn(Collections.emptyMap());
 
         ProductDetailVO result = spuService.getProductDetailVO(1L);
 
-        assertThat(result).isNull();
+        assertThat(result).isNotNull();
+        assertThat(result.getSpu()).isSameAs(spu1);
+        assertThat(result.getSkus()).hasSize(2);
+        assertThat(result.getMinPrice()).isEqualByComparingTo(new BigDecimal("199.00"));
+        assertThat(result.getMaxPrice()).isEqualByComparingTo(new BigDecimal("299.00"));
     }
 
     @Test

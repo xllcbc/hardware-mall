@@ -30,7 +30,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -216,72 +215,58 @@ public class SpuServiceImpl implements SpuService {
 
     @Override
     public List<ProductListVO> getRecommendProductListVO(Integer limit) {
-        Object cached = redisUtil.get(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
-        if (cached != null) {
-            if (redisUtil.isNull(cached)) {
-                return Collections.emptyList();
-            }
-            try {
-                @SuppressWarnings("unchecked")
-                List<ProductListVO> list = (List<ProductListVO>) cached;
-                if (limit != null && list.size() > limit) {
-                    return list.subList(0, limit);
-                }
-                return list;
-            } catch (ClassCastException e) {
-                log.warn("缓存类型不匹配, key={}, 删除脏缓存", RedisConstants.PREFIX_PRODUCT_RECOMMEND, e);
-                redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
-            }
+        @SuppressWarnings("unchecked")
+        List<ProductListVO> voList = (List<ProductListVO>) redisUtil.queryWithCache(
+                RedisConstants.PREFIX_PRODUCT_RECOMMEND, List.class, RedisConstants.CACHE_TTL_HOUR,
+                () -> buildRecommendVO(limit));
+        if (voList == null) {
+            return Collections.emptyList();
         }
+        if (limit != null && voList.size() > limit) {
+            return voList.subList(0, limit);
+        }
+        return voList;
+    }
+
+    private List<ProductListVO> buildRecommendVO(Integer limit) {
         List<Spu> spus = getRecommendSpus();
         if (spus.isEmpty()) {
-            redisUtil.set(RedisConstants.PREFIX_PRODUCT_RECOMMEND,
-                    RedisConstants.CACHE_NULL, RedisConstants.CACHE_NULL_TTL, TimeUnit.SECONDS);
-            return Collections.emptyList();
+            return null;
         }
         if (limit != null && spus.size() > limit) {
             spus = spus.subList(0, limit);
         }
-        List<ProductListVO> voList = spus.stream().map(spu -> {
+        return spus.stream().map(spu -> {
             ProductListVO vo = convertToProductListVO(spu);
             List<Sku> skus = skuService.getSkusBySpu(spu.getId(), 1);
             if (skus != null && !skus.isEmpty()) {
-                BigDecimal minPrice = skus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(spu.getOriginalPrice());
-                BigDecimal maxPrice = skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice());
-                vo.setMinPrice(minPrice);
-                vo.setMaxPrice(maxPrice);
+                vo.setMinPrice(skus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
+                vo.setMaxPrice(skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
             } else {
                 vo.setMinPrice(spu.getOriginalPrice());
                 vo.setMaxPrice(spu.getOriginalPrice());
             }
             return vo;
         }).collect(Collectors.toList());
-        redisUtil.setWithJitter(RedisConstants.PREFIX_PRODUCT_RECOMMEND, voList, RedisConstants.CACHE_TTL_HOUR, TimeUnit.SECONDS, RedisConstants.CACHE_JITTER_MAX);
-        return voList;
     }
 
     @Override
     public ProductDetailVO getProductDetailVO(Long id) {
-        Object cached = redisUtil.get(RedisConstants.PREFIX_PRODUCT_DETAIL + id);
-        if (cached != null) {
-            if (redisUtil.isNull(cached)) {
-                return null;
-            }
-            try {
-                return (ProductDetailVO) cached;
-            } catch (ClassCastException e) {
-                log.warn("缓存类型不匹配, key={}, 删除脏缓存", RedisConstants.PREFIX_PRODUCT_DETAIL + id, e);
-                redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + id);
-            }
+        ProductDetailVO vo = redisUtil.queryWithCache(
+                RedisConstants.PREFIX_PRODUCT_DETAIL + id, ProductDetailVO.class, RedisConstants.CACHE_TTL_HOUR,
+                () -> buildProductDetailVO(id));
+        if (vo == null) {
+            throw new RuntimeException("商品不存在或已下架");
         }
+        return vo;
+    }
 
+    private ProductDetailVO buildProductDetailVO(Long id) {
         Spu spu;
         try {
             spu = getSpuById(id);
         } catch (RuntimeException e) {
-            redisUtil.set(RedisConstants.PREFIX_PRODUCT_DETAIL + id,
-                    RedisConstants.CACHE_NULL, RedisConstants.CACHE_NULL_TTL, TimeUnit.SECONDS);
-            throw e;
+            return null;
         }
 
         List<Sku> skus = skuService.getSkusBySpu(id, 1);
@@ -322,9 +307,7 @@ public class SpuServiceImpl implements SpuService {
             maxPrice = skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice());
         }
 
-        ProductDetailVO vo = new ProductDetailVO(spu, skus, specTemplates, specItemsMap, minPrice, maxPrice);
-        redisUtil.setWithJitter(RedisConstants.PREFIX_PRODUCT_DETAIL + id, vo, RedisConstants.CACHE_TTL_HOUR, TimeUnit.SECONDS, RedisConstants.CACHE_JITTER_MAX);
-        return vo;
+        return new ProductDetailVO(spu, skus, specTemplates, specItemsMap, minPrice, maxPrice);
     }
 
     private ProductListVO convertToProductListVO(Spu spu) {
