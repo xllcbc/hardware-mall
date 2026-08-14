@@ -80,6 +80,13 @@ aliyun:
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:*}
 
+cache:
+  query:
+    # 缓存击穿：未抢到锁时的告警轮数，告警后继续循环等待，不绕过互斥锁查库
+    lock-warn-loops: 10
+    # 每轮随机休眠时长上限(毫秒)，实际取 [lock-sleep-ms/2, lock-sleep-ms]
+    lock-sleep-ms: 100
+
 dingtalk:
   webhook: ${DINGTALK_WEBHOOK:}
   secret: ${DINGTALK_SECRET:}

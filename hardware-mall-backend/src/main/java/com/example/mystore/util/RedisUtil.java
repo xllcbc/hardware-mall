@@ -3,11 +3,13 @@ package com.example.mystore.util;
 import com.example.mystore.common.constant.RedisConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.Collection;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -19,8 +21,19 @@ public class RedisUtil {
     private final RedisTemplate<String, Object> redisTemplate;
     private final RedisLockUtil redisLockUtil;
 
-    private static final int LOCK_RETRY_TIMES = 5;
-    private static final long LOCK_RETRY_SLEEP_MS = 50L;
+    /**
+     * 未抢到锁时的告警轮数，达到后只告警，循环继续等待缓存重建
+     */
+    @Value("${cache.query.lock-warn-loops:10}")
+    private int lockWarnLoops = 10;
+
+    /**
+     * 每轮随机休眠时长上限（毫秒），实际取 [sleepMs/2, sleepMs]，抖动避免唤醒风暴
+     */
+    @Value("${cache.query.lock-sleep-ms:100}")
+    private long lockSleepMs = 100L;
+
+    private static final long ALERT_COOLDOWN_SECONDS = 30L;
 
     public void set(String key, Object value) {
         redisTemplate.opsForValue().set(key, value);
@@ -118,9 +131,9 @@ public class RedisUtil {
     }
 
     /**
-     * 带防护的查询缓存：穿透（空值哨兵）+ 击穿（互斥锁 + double-check）+ 雪崩（TTL 抖动）
-     * <p>缓存 miss 时通过分布式锁保证只有一个请求回源 DB，其余请求等待重读缓存；
-     * 锁获取失败时重试读缓存，仍无则兜底直查库（不写缓存），保证锁永不阻塞请求。</p>
+     * 带防护的查询缓存：穿透（空值哨兵）+ 击穿（互斥锁 + 循环等待）+ 雪崩（TTL 抖动）
+     * <p>缓存 miss 时通过分布式锁保证只有一个请求回源 DB；未抢到锁的请求休眠后重读缓存、
+     * 未命中再抢锁，循环等待重建完成；等待轮数达到告警阈值时记录告警，但不会绕过互斥锁直接查库。</p>
      *
      * @param key        缓存 key
      * @param type       缓存值类型（用于脏缓存检测）
@@ -152,40 +165,15 @@ public class RedisUtil {
             }
         }
 
-        // 击穿：抢锁重建，double-check 防止重复回源
+        // 击穿：首次尝试抢锁，成功则重建（double-check 防止重复回源）
         if (redisLockUtil.tryLock(key)) {
-            try {
-                Object again = get(key);
-                if (again != null) {
-                    if (isNull(again)) {
-                        return null;
-                    }
-                    T hit = castValue(key, type, again);
-                    if (hit != null) {
-                        return hit;
-                    }
-                }
-                T value = dbQuery.get();
-                if (value == null) {
-                    if (nullTtlSeconds > 0) {
-                        set(key, RedisConstants.CACHE_NULL, nullTtlSeconds, TimeUnit.SECONDS);
-                    }
-                    return null;
-                }
-                setWithJitter(key, value, ttlSeconds, TimeUnit.SECONDS, maxJitterSeconds);
-                return value;
-            } finally {
-                redisLockUtil.unlock(key);
-            }
+            return rebuildWithLock(key, type, ttlSeconds, nullTtlSeconds, maxJitterSeconds, dbQuery);
         }
 
-        // 抢锁失败：短暂重试读缓存，仍无则兜底直查库（不写缓存）
-        return retryReadCache(key, type, dbQuery);
-    }
-
-    private <T> T retryReadCache(String key, Class<T> type, Supplier<T> dbQuery) {
-        for (int i = 0; i < LOCK_RETRY_TIMES; i++) {
-            sleepQuietly(LOCK_RETRY_SLEEP_MS);
+        // 抢锁失败：休眠 -> 重读缓存 -> 再抢锁，持续循环等待重建完成
+        int loops = 0;
+        while (true) {
+            sleepQuietly(nextSleep());
             Object again = get(key);
             if (again != null) {
                 if (isNull(again)) {
@@ -196,8 +184,54 @@ public class RedisUtil {
                     return hit;
                 }
             }
+            if (redisLockUtil.tryLock(key)) {
+                return rebuildWithLock(key, type, ttlSeconds, nullTtlSeconds, maxJitterSeconds, dbQuery);
+            }
+            if (++loops == lockWarnLoops) {
+                alertRebuildTimeout(key, loops);
+            }
         }
-        return dbQuery.get();
+    }
+
+    private <T> T rebuildWithLock(String key, Class<T> type, long ttlSeconds,
+                                  long nullTtlSeconds, long maxJitterSeconds, Supplier<T> dbQuery) {
+        try {
+            Object again = get(key);
+            if (again != null) {
+                if (isNull(again)) {
+                    return null;
+                }
+                T hit = castValue(key, type, again);
+                if (hit != null) {
+                    return hit;
+                }
+            }
+            T value = dbQuery.get();
+            if (value == null) {
+                if (nullTtlSeconds > 0) {
+                    set(key, RedisConstants.CACHE_NULL, nullTtlSeconds, TimeUnit.SECONDS);
+                }
+                return null;
+            }
+            setWithJitter(key, value, ttlSeconds, TimeUnit.SECONDS, maxJitterSeconds);
+            return value;
+        } finally {
+            redisLockUtil.unlock(key);
+        }
+    }
+
+    private long nextSleep() {
+        long half = Math.max(1L, lockSleepMs / 2);
+        return ThreadLocalRandom.current().nextLong(half, lockSleepMs + 1);
+    }
+
+    private void alertRebuildTimeout(String key, int loops) {
+        // 每 key 冷却 30s，防止持续异常时刷爆日志（与钉钉告警防抖同款写法）
+        String cooldownKey = "alert:cache:rebuild:" + key;
+        boolean first = Boolean.TRUE.equals(setIfAbsent(cooldownKey, "1", ALERT_COOLDOWN_SECONDS, TimeUnit.SECONDS));
+        if (first) {
+            log.warn("缓存重建等待过久, key={}, loops={}, 继续等待缓存重建", key, loops);
+        }
     }
 
     private <T> T castValue(String key, Class<T> type, Object cached) {
@@ -214,6 +248,15 @@ public class RedisUtil {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new IllegalStateException("等待缓存重建时被中断", e);
         }
+    }
+
+    void setLockWarnLoops(int lockWarnLoops) {
+        this.lockWarnLoops = lockWarnLoops;
+    }
+
+    void setLockSleepMs(long lockSleepMs) {
+        this.lockSleepMs = lockSleepMs;
     }
 }
