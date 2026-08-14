@@ -9,6 +9,15 @@ const http = axios.create({
   timeout: 10000
 })
 
+export interface RequestConfig extends AxiosRequestConfig {
+  skipAuthRefresh?: boolean
+}
+
+interface RetryConfig extends InternalAxiosRequestConfig {
+  skipAuthRefresh?: boolean
+  _retry?: boolean
+}
+
 http.interceptors.request.use(
   (config) => {
     const authStore = useAuthStore()
@@ -21,13 +30,38 @@ http.interceptors.request.use(
 )
 
 let refreshing: Promise<string | null> | null = null
+let logoutPromptShown = false
+
+async function refreshTokenOnce(): Promise<string | null> {
+  const authStore = useAuthStore()
+  if (!authStore.token) return null
+  if (!refreshing) {
+    refreshing = authStore.refreshToken().finally(() => {
+      refreshing = null
+    })
+  }
+  return refreshing
+}
+
+function forceLogout(error: unknown): Promise<never> {
+  const authStore = useAuthStore()
+  authStore.clearAuth()
+  if (!logoutPromptShown) {
+    logoutPromptShown = true
+    ElMessage.error('登录已过期，请重新登录')
+    router.push('/login')
+  }
+  return Promise.reject(error)
+}
 
 http.interceptors.response.use(
   (response) => {
+    logoutPromptShown = false
     const res = response.data
+    const config = response.config as RetryConfig
     if (res.code !== 200) {
-      if (res.code === 401) {
-        return handle401(response.config as InternalAxiosRequestConfig)
+      if (res.code === 401 && !config.skipAuthRefresh) {
+        return handle401(config)
           .then((data) => Promise.resolve(data))
           .catch(() => Promise.reject(new Error(res.message || '登录已过期')))
       }
@@ -37,48 +71,40 @@ http.interceptors.response.use(
     return res.data
   },
   (error) => {
+    const config = error.config as RetryConfig
     if (error.response?.status === 401) {
-      return handle401(error.config)
-        .catch(() => {
-          ElMessage.error('登录已过期，请重新登录')
-          return Promise.reject(error)
-        })
+      if (config?.skipAuthRefresh) {
+        return Promise.reject(error)
+      }
+      if (config?._retry) {
+        return forceLogout(error)
+      }
+      return handle401(config).catch(() => forceLogout(error))
     }
     ElMessage.error(error.message || '网络错误')
     return Promise.reject(error)
   }
 )
 
-async function handle401(originalConfig: InternalAxiosRequestConfig): Promise<any> {
-  const authStore = useAuthStore()
-  if (!authStore.token) {
-    authStore.clearAuth()
-    router.push('/login')
-    throw new Error('no token')
-  }
-  if (!refreshing) {
-    refreshing = authStore.refreshToken()
-  }
-  const newToken = await refreshing
-  refreshing = null
+async function handle401(originalConfig: RetryConfig): Promise<any> {
+  const newToken = await refreshTokenOnce()
   if (!newToken) {
-    authStore.clearAuth()
-    router.push('/login')
-    throw new Error('refresh failed')
+    return forceLogout(new Error('refresh failed'))
   }
+  originalConfig._retry = true
   originalConfig.headers = originalConfig.headers || {}
   ;(originalConfig.headers as any).Authorization = `Bearer ${newToken}`
   return http(originalConfig)
 }
 
 const request = {
-  get: <T = any>(url: string, config?: AxiosRequestConfig) =>
+  get: <T = any>(url: string, config?: RequestConfig) =>
     http.get(url, config) as unknown as Promise<T>,
-  post: <T = any>(url: string, data?: any, config?: AxiosRequestConfig) =>
+  post: <T = any>(url: string, data?: any, config?: RequestConfig) =>
     http.post(url, data, config) as unknown as Promise<T>,
-  put: <T = any>(url: string, data?: any, config?: AxiosRequestConfig) =>
+  put: <T = any>(url: string, data?: any, config?: RequestConfig) =>
     http.put(url, data, config) as unknown as Promise<T>,
-  delete: <T = any>(url: string, config?: AxiosRequestConfig) =>
+  delete: <T = any>(url: string, config?: RequestConfig) =>
     http.delete(url, config) as unknown as Promise<T>,
 }
 

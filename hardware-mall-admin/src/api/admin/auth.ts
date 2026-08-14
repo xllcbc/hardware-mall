@@ -19,7 +19,7 @@ export const login = (data: LoginData) => {
 }
 
 export const refresh = () => {
-  return request.post<string>('/admin/refresh')
+  return request.post<string>('/admin/refresh', undefined, { skipAuthRefresh: true })
 }
 
 export const logout = () => {
