@@ -4,7 +4,7 @@
       <LoadingState text="加载中..." />
     </view>
     <template v-else>
-    <swiper v-if="currentImages?.length" class="product-swiper" indicator-dots indicator-active-color="#C9A86C">
+    <swiper v-if="currentImages?.length" class="product-swiper" :current="swiperCurrent" indicator-dots indicator-active-color="#C9A86C">
       <swiper-item v-for="(img, index) in currentImages" :key="index">
         <image class="product-image" :src="img" mode="aspectFill" />
       </swiper-item>
@@ -84,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { getProductDetail } from '@/api/product'
 import { addToCart as addToCartApi } from '@/api/cart'
 import { useAppStore } from '@/stores/app'
@@ -137,9 +137,15 @@ const currentSkuStock = computed(() => {
 
 const currentImages = computed(() => {
   if (currentSku.value?.image) {
-    return [currentSku.value.image, ...(product.value.images || [])]
+    return [currentSku.value.image]
   }
   return product.value.images || []
+})
+
+const swiperCurrent = ref(0)
+
+watch(currentImages, () => {
+  swiperCurrent.value = 0
 })
 
 const stockText = computed(() => {
