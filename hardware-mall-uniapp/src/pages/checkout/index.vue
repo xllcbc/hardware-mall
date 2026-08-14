@@ -80,7 +80,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useCartStore } from '@/stores/cart'
 import { usePreOrderStore } from '@/stores/preOrder'
 import { getAddressList } from '@/api/address'
@@ -134,15 +135,26 @@ const formatPhone = (phone: string) => {
   return phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')
 }
 
-onMounted(async () => {
+const loadAddresses = async () => {
   try {
     const data = await getAddressList()
     addresses.value = data || []
+    const picked = uni.getStorageSync('selectedAddress') as Address | null
+    if (picked?.id) {
+      const matched = addresses.value.find(a => a.id === picked.id)
+      selectedAddress.value = matched || picked
+      uni.removeStorageSync('selectedAddress')
+      return
+    }
     const defaultAddr = addresses.value.find(a => a.isDefault === 1)
     selectedAddress.value = defaultAddr || addresses.value[0] || null
   } catch (e) {
     console.error('Failed to load addresses:', e)
   }
+}
+
+onShow(() => {
+  loadAddresses()
 })
 
 const selectAddress = () => {
