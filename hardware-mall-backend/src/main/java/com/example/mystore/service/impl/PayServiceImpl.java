@@ -280,6 +280,7 @@ public class PayServiceImpl implements PayService {
         com.wechat.pay.java.service.payments.jsapi.model.QueryOrderByOutTradeNoRequest request =
                 new com.wechat.pay.java.service.payments.jsapi.model.QueryOrderByOutTradeNoRequest();
         request.setOutTradeNo(outTradeNo);
+        request.setMchid(mchId);
         return jsapiService.queryOrderByOutTradeNo(request);
     }
 
