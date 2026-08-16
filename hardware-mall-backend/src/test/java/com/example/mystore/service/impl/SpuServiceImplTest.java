@@ -124,7 +124,8 @@ class SpuServiceImplTest {
             page.setTotal(1);
             return page;
         });
-        when(skuService.getSkusBySpu(1L, 1)).thenReturn(Arrays.asList(sku1, sku2));
+        when(skuService.getSkusBySpuIds(Collections.singletonList(1L)))
+                .thenReturn(java.util.Collections.singletonMap(1L, Arrays.asList(sku1, sku2)));
 
         var result = spuService.getProductListVO(null, null, 1, 10, 1);
 
@@ -132,6 +133,32 @@ class SpuServiceImplTest {
         ProductListVO vo = result.getRecords().get(0);
         assertThat(vo.getMinPrice()).isEqualByComparingTo(new BigDecimal("199.00"));
         assertThat(vo.getMaxPrice()).isEqualByComparingTo(new BigDecimal("299.00"));
+    }
+
+    @Test
+    void getProductListVO_shouldQuerySkusInOneBatchCall() {
+        Spu s1 = new Spu();
+        s1.setId(1L);
+        s1.setCategoryId(1L);
+        s1.setStatus(1);
+        s1.setDeleteTime(0L);
+        Spu s2 = new Spu();
+        s2.setId(2L);
+        s2.setCategoryId(1L);
+        s2.setStatus(1);
+        s2.setDeleteTime(0L);
+        when(spuMapper.selectPage(any(), any())).thenAnswer(inv -> {
+            com.baomidou.mybatisplus.extension.plugins.pagination.Page<Spu> page = inv.getArgument(0);
+            page.setRecords(Arrays.asList(s1, s2));
+            page.setTotal(2);
+            return page;
+        });
+        when(skuService.getSkusBySpuIds(Arrays.asList(1L, 2L))).thenReturn(java.util.Collections.emptyMap());
+
+        spuService.getProductListVO(1L, null, 1, 10, 1);
+
+        verify(skuService, times(1)).getSkusBySpuIds(anyList());
+        verify(skuService, never()).getSkusBySpu(anyLong());
     }
 
     @Test

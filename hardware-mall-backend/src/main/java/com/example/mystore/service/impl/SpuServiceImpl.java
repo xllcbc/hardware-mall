@@ -194,10 +194,13 @@ public class SpuServiceImpl implements SpuService {
         Page<Spu> spuPage = getSpuPage(categoryId, keyword, page, limit, status);
         Page<ProductListVO> voPage = new Page<>(spuPage.getCurrent(), spuPage.getSize(), spuPage.getTotal());
 
+        List<Long> spuIds = spuPage.getRecords().stream().map(Spu::getId).collect(Collectors.toList());
+        Map<Long, List<Sku>> skusBySpu = skuService.getSkusBySpuIds(spuIds);
+
         List<ProductListVO> voList = spuPage.getRecords().stream().map(spu -> {
             ProductListVO vo = convertToProductListVO(spu);
-            List<Sku> skus = skuService.getSkusBySpu(spu.getId(), 1);
-            if (skus != null && !skus.isEmpty()) {
+            List<Sku> skus = skusBySpu.getOrDefault(spu.getId(), Collections.emptyList());
+            if (!skus.isEmpty()) {
                 BigDecimal minPrice = skus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(spu.getOriginalPrice());
                 BigDecimal maxPrice = skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice());
                 vo.setMinPrice(minPrice);
@@ -236,10 +239,12 @@ public class SpuServiceImpl implements SpuService {
         if (limit != null && spus.size() > limit) {
             spus = spus.subList(0, limit);
         }
+        List<Long> spuIds = spus.stream().map(Spu::getId).collect(Collectors.toList());
+        Map<Long, List<Sku>> skusBySpu = skuService.getSkusBySpuIds(spuIds);
         return spus.stream().map(spu -> {
             ProductListVO vo = convertToProductListVO(spu);
-            List<Sku> skus = skuService.getSkusBySpu(spu.getId(), 1);
-            if (skus != null && !skus.isEmpty()) {
+            List<Sku> skus = skusBySpu.getOrDefault(spu.getId(), Collections.emptyList());
+            if (!skus.isEmpty()) {
                 vo.setMinPrice(skus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
                 vo.setMaxPrice(skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
             } else {

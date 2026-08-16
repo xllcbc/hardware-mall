@@ -28,6 +28,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -100,6 +101,19 @@ public class SkuServiceImpl implements SkuService {
             wrapper.eq(Sku::getStatus, status);
         }
         return skuMapper.selectList(wrapper);
+    }
+
+    @Override
+    public Map<Long, List<Sku>> getSkusBySpuIds(List<Long> spuIds) {
+        if (spuIds == null || spuIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        LambdaQueryWrapper<Sku> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(Sku::getSpuId, spuIds)
+               .eq(Sku::getDeleteTime, 0)
+               .eq(Sku::getStatus, 1);
+        return skuMapper.selectList(wrapper).stream()
+                .collect(Collectors.groupingBy(Sku::getSpuId));
     }
 
     @Override

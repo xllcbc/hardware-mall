@@ -12,6 +12,7 @@ public interface SkuService {
     Integer getStockById(Long skuId);
     List<Sku> getSkusBySpu(Long spuId);
     List<Sku> getSkusBySpu(Long spuId, Integer status);
+    Map<Long, List<Sku>> getSkusBySpuIds(List<Long> spuIds);
     Map<Long, Long> countBySpuIds(List<Long> spuIds);
     Sku getSkuBySpecs(Long spuId, List<SpecVO> specs);
     Sku createSku(Sku sku);
