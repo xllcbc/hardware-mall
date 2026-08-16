@@ -6,6 +6,7 @@ import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.util.UserContext;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,7 +20,7 @@ public class OrderController {
     private final OrderService orderService;
 
     @PostMapping("/create")
-    public Result<OrderVO> createOrder(@RequestBody CreateOrderRequest request) {
+    public Result<OrderVO> createOrder(@Valid @RequestBody CreateOrderRequest request) {
         Long userId = UserContext.getUserId();
         return Result.success(orderService.createOrder(userId, request));
     }
