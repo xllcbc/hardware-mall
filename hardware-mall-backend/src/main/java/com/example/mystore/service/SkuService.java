@@ -9,6 +9,7 @@ import java.util.Map;
 public interface SkuService {
     Page<Sku> getSkuPage(Long spuId, Integer page, Integer limit);
     Sku getSkuById(Long id);
+    Integer getStockById(Long skuId);
     List<Sku> getSkusBySpu(Long spuId);
     List<Sku> getSkusBySpu(Long spuId, Integer status);
     Map<Long, Long> countBySpuIds(List<Long> spuIds);

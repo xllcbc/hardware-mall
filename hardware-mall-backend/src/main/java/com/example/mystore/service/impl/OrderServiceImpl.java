@@ -4,7 +4,6 @@ import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
@@ -88,16 +87,8 @@ public class OrderServiceImpl implements OrderService {
                 throw new RuntimeException("商品不存在或已下架: " + cartItem.getSkuId());
             }
 
-            // 【库存检查】优先读缓存，缓存 miss 则读 DB
-            // 注意：不再先扣缓存！只在事务内扣 DB，方法末尾统一 syncStockToCache()
-            Object cachedStock = redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + sku.getId());
-            long availableStock;
-            if (cachedStock != null && !redisUtil.isNull(cachedStock)) {
-                availableStock = Long.parseLong(cachedStock.toString());
-            } else {
-                availableStock = sku.getStock();
-            }
-            if (availableStock < cartItem.getQuantity()) {
+            // 【库存检查】getSkuById 已返回新鲜库存(读 sku:stock 缓存, miss 回源 DB)
+            if (sku.getStock() == null || sku.getStock() < cartItem.getQuantity()) {
                 throw new RuntimeException("库存不足: " + sku.getId());
             }
 

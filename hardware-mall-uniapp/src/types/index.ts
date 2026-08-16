@@ -100,6 +100,7 @@ export interface CartItem {
   maxPrice?: number
   quantity: number
   subtotal: number
+  stock?: number
   selected?: boolean
 }
 

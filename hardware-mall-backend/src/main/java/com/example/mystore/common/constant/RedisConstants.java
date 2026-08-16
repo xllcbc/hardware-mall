@@ -15,6 +15,7 @@ public class RedisConstants {
     public static final String PREFIX_PRODUCT_DETAIL = "product:detail:";
     public static final String PREFIX_PRODUCT_RECOMMEND = "product:recommend";
     public static final String PREFIX_SKU_STOCK = "sku:stock:";
+    public static final String PREFIX_SKU_INFO = "sku:info:";
     public static final String PREFIX_RATE_LIMIT = "rate:limit:";
 
     public static final long CACHE_TTL_HOUR = 3600L;

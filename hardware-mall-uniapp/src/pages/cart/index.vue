@@ -30,6 +30,7 @@
             <view class="item-content">
               <text class="item-name">{{ item.productName }}</text>
               <text v-if="item.spec" class="item-spec">{{ item.spec }}</text>
+              <text v-if="item.stock === 0" class="soldout-badge">已售罄</text>
               <view class="item-bottom">
                 <view class="item-price">
                   <text class="price-symbol">¥</text>
@@ -39,7 +40,8 @@
                   v-if="!manageMode"
                   :model-value="item.quantity"
                   :min="1"
-                  :max="item.stock || 99"
+                  :max="item.stock ?? 99"
+                  :disabled="item.stock === 0"
                   @update:model-value="updateQuantity(item, $event)"
                 />
               </view>
@@ -316,6 +318,17 @@ const goCheckout = () => {
   font-size: 20rpx;
   color: #999999;
   margin-top: 4rpx;
+}
+
+.soldout-badge {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 8rpx;
+  padding: 2rpx 12rpx;
+  font-size: 20rpx;
+  color: #E53935;
+  background: #FFEBEE;
+  border-radius: 6rpx;
 }
 
 .item-bottom {

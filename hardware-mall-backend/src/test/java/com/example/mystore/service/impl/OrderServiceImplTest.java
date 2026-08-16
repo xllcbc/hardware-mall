@@ -148,7 +148,6 @@ class OrderServiceImplTest {
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
         when(skuService.getSkuById(5L)).thenReturn(sku);
-        when(redisUtil.get(anyString())).thenReturn(null);
 
         CreateOrderRequest.CartItem item = new CreateOrderRequest.CartItem();
         item.setSkuId(5L);

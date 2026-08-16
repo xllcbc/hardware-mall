@@ -1,5 +1,5 @@
 <template>
-  <view class="count-stepper">
+  <view class="count-stepper" :class="{ disabled }">
     <view class="stepper-btn minus" :class="{ disabled: modelValue <= min }" @tap.stop="decrease">
       <text>-</text>
     </view>
@@ -23,12 +23,14 @@ interface Props {
   min?: number
   max?: number
   step?: number
+  disabled?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   min: 1,
   max: 999,
-  step: 1
+  step: 1,
+  disabled: false
 })
 
 const emit = defineEmits<{
@@ -36,18 +38,21 @@ const emit = defineEmits<{
 }>()
 
 const decrease = () => {
+  if (props.disabled) return
   if (props.modelValue > props.min) {
     emit('update:modelValue', props.modelValue - props.step)
   }
 }
 
 const increase = () => {
+  if (props.disabled) return
   if (props.modelValue < props.max) {
     emit('update:modelValue', props.modelValue + props.step)
   }
 }
 
 const onBlur = (e: any) => {
+  if (props.disabled) return
   let value = parseInt(e.detail.value) || props.min
   value = Math.max(props.min, Math.min(props.max, value))
   emit('update:modelValue', value)
@@ -62,6 +67,10 @@ const onBlur = (e: any) => {
   background: var(--color-bg-dark);
   border-radius: var(--radius-sm);
   overflow: hidden;
+
+  &.disabled {
+    opacity: 0.5;
+  }
 }
 
 .stepper-btn {

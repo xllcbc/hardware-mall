@@ -59,11 +59,31 @@ public class SkuServiceImpl implements SkuService {
 
     @Override
     public Sku getSkuById(Long id) {
-        Sku sku = skuMapper.selectById(id);
-        if (sku == null || sku.getDeleteTime() != 0) {
+        Sku sku = redisUtil.queryWithCache(
+                RedisConstants.PREFIX_SKU_INFO + id, Sku.class, RedisConstants.CACHE_TTL_HOUR,
+                () -> {
+                    Sku s = skuMapper.selectById(id);
+                    if (s == null || s.getDeleteTime() != 0) {
+                        return null;
+                    }
+                    s.setStock(null);
+                    return s;
+                });
+        if (sku == null) {
             throw new RuntimeException("SKU不存在");
         }
+        sku.setStock(getStockById(id));
         return sku;
+    }
+
+    @Override
+    public Integer getStockById(Long skuId) {
+        Object cached = redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + skuId);
+        if (cached != null && !redisUtil.isNull(cached)) {
+            return Integer.parseInt(cached.toString());
+        }
+        Sku sku = skuMapper.selectById(skuId);
+        return sku == null ? null : sku.getStock();
     }
 
     @Override
@@ -175,6 +195,7 @@ public class SkuServiceImpl implements SkuService {
         exist.setUpdateTime(LocalDateTime.now());
         skuMapper.updateById(exist);
         redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + exist.getSpuId());
+        redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + exist.getId());
         syncStockToCache(exist.getId());
         return exist;
     }
@@ -189,6 +210,7 @@ public class SkuServiceImpl implements SkuService {
         sku.setDeleteTime(System.currentTimeMillis());
         skuMapper.updateById(sku);
         redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + spuId);
+        redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + id);
     }
 
     @Override

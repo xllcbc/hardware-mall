@@ -254,9 +254,20 @@ public class SpuServiceImpl implements SpuService {
     public ProductDetailVO getProductDetailVO(Long id) {
         ProductDetailVO vo = redisUtil.queryWithCache(
                 RedisConstants.PREFIX_PRODUCT_DETAIL + id, ProductDetailVO.class, RedisConstants.CACHE_TTL_HOUR,
-                () -> buildProductDetailVO(id));
+                () -> {
+                    ProductDetailVO built = buildProductDetailVO(id);
+                    if (built != null && built.getSkus() != null) {
+                        built.getSkus().forEach(s -> s.setStock(null));
+                    }
+                    return built;
+                });
         if (vo == null) {
             throw new RuntimeException("商品不存在或已下架");
+        }
+        if (vo.getSkus() != null) {
+            for (Sku sku : vo.getSkus()) {
+                sku.setStock(skuService.getStockById(sku.getId()));
+            }
         }
         return vo;
     }

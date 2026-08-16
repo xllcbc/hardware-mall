@@ -61,6 +61,7 @@ public class CartServiceImpl implements CartService {
                 vo.setMaxPrice(allSkus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(sku.getPrice()));
                 vo.setQuantity(cart.getQuantity());
                 vo.setSubtotal(sku.getPrice().multiply(BigDecimal.valueOf(cart.getQuantity())));
+                vo.setStock(sku.getStock());
                 result.add(vo);
             }
         }
