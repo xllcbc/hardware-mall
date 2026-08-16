@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.entity.db.*;
 import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.OrderVO;
@@ -22,6 +23,7 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -97,13 +99,14 @@ class OrderServiceImplTest {
     @Test
     void testCreateOrder_AddressNotFound() {
         when(addressMapper.selectById(1L)).thenReturn(null);
+        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
 
         CreateOrderRequest request = new CreateOrderRequest();
         request.setAddressId(1L);
         request.setLogisticsId(1L);
         request.setItems(Collections.emptyList());
 
-        assertThatThrownBy(() -> orderService.createOrder(2L, request))
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "test-key"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("收货地址不存在");
     }
@@ -114,13 +117,14 @@ class OrderServiceImplTest {
         others.setId(1L);
         others.setUserId(99L); // 不属于当前用户
         when(addressMapper.selectById(1L)).thenReturn(others);
+        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
 
         CreateOrderRequest request = new CreateOrderRequest();
         request.setAddressId(1L);
         request.setLogisticsId(1L);
         request.setItems(Collections.emptyList());
 
-        assertThatThrownBy(() -> orderService.createOrder(2L, request))
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "test-key"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("收货地址不存在");
     }
@@ -132,13 +136,14 @@ class OrderServiceImplTest {
         disabled.setId(1L);
         disabled.setStatus(0);
         when(logisticsMapper.selectById(1L)).thenReturn(disabled);
+        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
 
         CreateOrderRequest request = new CreateOrderRequest();
         request.setAddressId(1L);
         request.setLogisticsId(1L);
         request.setItems(Collections.emptyList());
 
-        assertThatThrownBy(() -> orderService.createOrder(2L, request))
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "test-key"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("物流方式不存在或不可用");
     }
@@ -148,6 +153,7 @@ class OrderServiceImplTest {
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
         when(skuService.getSkuById(5L)).thenReturn(sku);
+        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
 
         CreateOrderRequest.CartItem item = new CreateOrderRequest.CartItem();
         item.setSkuId(5L);
@@ -158,9 +164,33 @@ class OrderServiceImplTest {
         request.setLogisticsId(1L);
         request.setItems(Collections.singletonList(item));
 
-        assertThatThrownBy(() -> orderService.createOrder(2L, request))
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "test-key"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("库存不足");
+    }
+
+    @Test
+    void createOrder_idempotentKeyReused_shouldThrow() {
+        when(redisUtil.setIfAbsent(eq(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "k1"),
+                any(), eq(RedisConstants.IDEMPOTENCY_TTL), eq(TimeUnit.SECONDS)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> orderService.createOrder(2L, stubValidRequest(), "k1"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("重复");
+
+        verify(orderMapper, never()).insert(any(Order.class));
+    }
+
+    private CreateOrderRequest stubValidRequest() {
+        CreateOrderRequest r = new CreateOrderRequest();
+        CreateOrderRequest.CartItem ci = new CreateOrderRequest.CartItem();
+        ci.setSkuId(1L);
+        ci.setQuantity(1);
+        r.setItems(java.util.List.of(ci));
+        r.setAddressId(1L);
+        r.setLogisticsId(1L);
+        return r;
     }
 
     @Test

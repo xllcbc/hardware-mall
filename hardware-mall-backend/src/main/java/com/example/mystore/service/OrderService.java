@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 public interface OrderService {
-    OrderVO createOrder(Long userId, CreateOrderRequest request);
+    OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey);
     Page<OrderVO> getOrderPage(Long userId, Integer status, Integer page, Integer limit);
     Page<OrderVO> getAdminOrderPage(Long userId, Integer status, Integer page, Integer limit);
     OrderVO getOrderById(Long userId, Long orderId);

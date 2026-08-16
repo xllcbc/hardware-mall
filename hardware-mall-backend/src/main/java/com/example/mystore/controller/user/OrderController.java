@@ -20,9 +20,16 @@ public class OrderController {
     private final OrderService orderService;
 
     @PostMapping("/create")
-    public Result<OrderVO> createOrder(@Valid @RequestBody CreateOrderRequest request) {
+    public Result<OrderVO> createOrder(
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idemKey,
+            @Valid @RequestBody CreateOrderRequest request) {
         Long userId = UserContext.getUserId();
-        return Result.success(orderService.createOrder(userId, request));
+        return Result.success(orderService.createOrder(userId, request, idemKey));
+    }
+
+    @GetMapping("/token")
+    public Result<String> getIdempotencyToken() {
+        return Result.success(java.util.UUID.randomUUID().toString().replace("-", ""));
     }
 
     @GetMapping("/list")

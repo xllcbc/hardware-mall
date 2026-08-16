@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.Sku;
@@ -60,8 +61,14 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
-    public OrderVO createOrder(Long userId, CreateOrderRequest request) {
-        log.info("创建订单开始, userId={}, request={}", userId, request);
+    public OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey) {
+        log.info("创建订单开始, userId={}, idemKey={}, request={}", userId, idempotencyKey, request);
+
+        if (idempotencyKey == null || !redisUtil.setIfAbsent(
+                RedisConstants.PREFIX_ORDER_IDEMPOTENCY + idempotencyKey,
+                userId, RedisConstants.IDEMPOTENCY_TTL, TimeUnit.SECONDS)) {
+            throw new RuntimeException("请勿重复下单");
+        }
 
         Address address = addressMapper.selectById(request.getAddressId());
         if (address == null || !address.getUserId().equals(userId)) {

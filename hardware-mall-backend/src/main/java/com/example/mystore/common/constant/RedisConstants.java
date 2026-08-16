@@ -17,11 +17,13 @@ public class RedisConstants {
     public static final String PREFIX_SKU_STOCK = "sku:stock:";
     public static final String PREFIX_SKU_INFO = "sku:info:";
     public static final String PREFIX_RATE_LIMIT = "rate:limit:";
+    public static final String PREFIX_ORDER_IDEMPOTENCY = "order:idem:";
 
     public static final long CACHE_TTL_HOUR = 3600L;
     public static final long CACHE_TTL_DAY = 86400L;
     public static final long WECHAT_SESSION_TTL = 7200L;
     public static final long RATE_LIMIT_TTL = 60L;
+    public static final long IDEMPOTENCY_TTL = 300L;
 
     public static final String CACHE_NULL = "NULL";
     public static final long CACHE_NULL_TTL = 300L;
