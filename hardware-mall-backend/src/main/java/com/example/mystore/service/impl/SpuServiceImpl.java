@@ -10,6 +10,7 @@ import com.example.mystore.entity.db.SpecItem;
 import com.example.mystore.entity.db.SpecTemplate;
 import com.example.mystore.entity.vo.ProductListVO;
 import com.example.mystore.entity.vo.ProductDetailVO;
+import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.SpuService;
 import com.example.mystore.service.SkuService;
@@ -105,6 +106,7 @@ public class SpuServiceImpl implements SpuService {
         if (spu.getIsRecommend() == 1) {
             redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
         }
+        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
         return spu;
     }
 
@@ -149,6 +151,7 @@ public class SpuServiceImpl implements SpuService {
         if (exist.getIsRecommend() == 1) {
             redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
         }
+        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
         return exist;
     }
 
@@ -164,6 +167,7 @@ public class SpuServiceImpl implements SpuService {
         if (spu.getIsRecommend() != null && spu.getIsRecommend() == 1) {
             redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
         }
+        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
     }
 
     @Override
@@ -179,6 +183,7 @@ public class SpuServiceImpl implements SpuService {
         if (spu.getIsRecommend() != null && spu.getIsRecommend() == 1) {
             redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
         }
+        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
     }
 
     @Override
@@ -191,6 +196,22 @@ public class SpuServiceImpl implements SpuService {
 
     @Override
     public Page<ProductListVO> getProductListVO(Long categoryId, String keyword, Integer page, Integer limit, Integer status) {
+        if (!StringUtils.hasText(keyword)) {
+            String key = RedisConstants.PREFIX_PRODUCT_LIST + (categoryId == null ? "all" : categoryId)
+                    + ":" + page + ":" + limit + ":" + status;
+            ProductListResult result = redisUtil.queryWithCache(key, ProductListResult.class, RedisConstants.CACHE_TTL_HOUR,
+                    () -> buildProductListResult(categoryId, null, page, limit, status));
+            if (result == null || result.getRecords() == null) {
+                return new Page<>(page, limit, 0);
+            }
+            Page<ProductListVO> voPage = new Page<>(page, limit, result.getTotal());
+            voPage.setRecords(result.getRecords());
+            return voPage;
+        }
+        return buildProductListPage(categoryId, keyword, page, limit, status);
+    }
+
+    private Page<ProductListVO> buildProductListPage(Long categoryId, String keyword, Integer page, Integer limit, Integer status) {
         Page<Spu> spuPage = getSpuPage(categoryId, keyword, page, limit, status);
         Page<ProductListVO> voPage = new Page<>(spuPage.getCurrent(), spuPage.getSize(), spuPage.getTotal());
 
@@ -214,6 +235,11 @@ public class SpuServiceImpl implements SpuService {
 
         voPage.setRecords(voList);
         return voPage;
+    }
+
+    private ProductListResult buildProductListResult(Long categoryId, String keyword, Integer page, Integer limit, Integer status) {
+        Page<ProductListVO> voPage = buildProductListPage(categoryId, keyword, page, limit, status);
+        return new ProductListResult(voPage.getRecords(), voPage.getTotal());
     }
 
     @Override

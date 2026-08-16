@@ -60,6 +60,31 @@ public class RedisUtil {
         redisTemplate.delete(keys);
     }
 
+    /**
+     * 按模式删除 key，使用 SCAN 避免阻塞（生产环境禁用 KEYS）
+     *
+     * @param pattern 匹配模式，如 "product:list:*"
+     * @return 删除的 key 数量
+     */
+    public long deleteByPattern(String pattern) {
+        Set<String> keys = redisTemplate.execute((org.springframework.data.redis.core.RedisCallback<Set<String>>) connection -> {
+            Set<String> matched = new java.util.HashSet<>();
+            try (org.springframework.data.redis.core.Cursor<byte[]> cursor =
+                         connection.scan(org.springframework.data.redis.core.ScanOptions.scanOptions()
+                                 .match(pattern).count(100).build())) {
+                while (cursor.hasNext()) {
+                    matched.add(new String(cursor.next(), java.nio.charset.StandardCharsets.UTF_8));
+                }
+            }
+            return matched;
+        });
+        if (keys == null || keys.isEmpty()) {
+            return 0;
+        }
+        Long deleted = redisTemplate.delete(keys);
+        return deleted == null ? 0 : deleted;
+    }
+
     public boolean hasKey(String key) {
         return Boolean.TRUE.equals(redisTemplate.hasKey(key));
     }

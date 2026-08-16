@@ -14,6 +14,7 @@ public class RedisConstants {
     public static final String PREFIX_LOGISTICS_ENABLED = "logistics:enabled";
     public static final String PREFIX_PRODUCT_DETAIL = "product:detail:";
     public static final String PREFIX_PRODUCT_RECOMMEND = "product:recommend";
+    public static final String PREFIX_PRODUCT_LIST = "product:list:";
     public static final String PREFIX_SKU_STOCK = "sku:stock:";
     public static final String PREFIX_SKU_INFO = "sku:info:";
     public static final String PREFIX_RATE_LIMIT = "rate:limit:";

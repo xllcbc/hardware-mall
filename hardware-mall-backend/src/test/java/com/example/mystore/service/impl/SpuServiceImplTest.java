@@ -6,6 +6,7 @@ import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.ProductDetailVO;
 import com.example.mystore.entity.vo.ProductListVO;
+import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.SpecItemService;
@@ -118,6 +119,11 @@ class SpuServiceImplTest {
 
     @Test
     void testGetProductListVO_PriceRange() {
+        when(redisUtil.queryWithCache(anyString(), eq(ProductListResult.class), anyLong(), any())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            java.util.function.Supplier<ProductListResult> s = inv.getArgument(3);
+            return s.get();
+        });
         when(spuMapper.selectPage(any(), any())).thenAnswer(inv -> {
             com.baomidou.mybatisplus.extension.plugins.pagination.Page<Spu> page = inv.getArgument(0);
             page.setRecords(Collections.singletonList(spu1));
@@ -137,6 +143,11 @@ class SpuServiceImplTest {
 
     @Test
     void getProductListVO_shouldQuerySkusInOneBatchCall() {
+        when(redisUtil.queryWithCache(anyString(), eq(ProductListResult.class), anyLong(), any())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            java.util.function.Supplier<ProductListResult> s = inv.getArgument(3);
+            return s.get();
+        });
         Spu s1 = new Spu();
         s1.setId(1L);
         s1.setCategoryId(1L);
