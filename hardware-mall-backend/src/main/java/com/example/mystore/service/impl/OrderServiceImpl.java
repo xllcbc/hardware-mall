@@ -174,21 +174,19 @@ public class OrderServiceImpl implements OrderService {
 
         for (OrderItem item : validated.orderItems()) {
             item.setOrderId(order.getId());
-            orderItemMapper.insert(item);
         }
+        orderItemMapper.insertBatch(validated.orderItems());
         log.info("订单明细插入成功");
 
-        for (CreateOrderRequest.CartItem cartItem : request.getItems()) {
-            LambdaQueryWrapper<Cart> cartWrapper = new LambdaQueryWrapper<>();
-            cartWrapper.eq(Cart::getUserId, userId)
-                       .eq(Cart::getSkuId, cartItem.getSkuId());
-            Cart cart = cartMapper.selectOne(cartWrapper);
-            if (cart != null) {
-                cart.setDeleteTime(System.currentTimeMillis());
-                cartMapper.updateById(cart);
-                log.info("删除购物车商品, cartId={}, skuId={}", cart.getId(), cartItem.getSkuId());
-            }
-        }
+        List<Long> cartSkuIds = request.getItems().stream()
+                .map(CreateOrderRequest.CartItem::getSkuId)
+                .collect(java.util.stream.Collectors.toList());
+        LambdaUpdateWrapper<Cart> cartWrapper = new LambdaUpdateWrapper<>();
+        cartWrapper.eq(Cart::getUserId, userId)
+                   .in(Cart::getSkuId, cartSkuIds)
+                   .set(Cart::getDeleteTime, System.currentTimeMillis());
+        cartMapper.update(null, cartWrapper);
+        log.info("删除购物车商品, userId={}, skuIds={}", userId, cartSkuIds);
 
         // 发布库存同步事件，事务提交后由监听器异步执行
         List<Long> skuIds = validated.orderItems().stream()
