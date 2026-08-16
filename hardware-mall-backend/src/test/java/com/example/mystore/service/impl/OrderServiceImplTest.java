@@ -284,4 +284,26 @@ class OrderServiceImplTest {
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("该订单状态不支持退款");
     }
+
+    @Test
+    void generateOrderNo_concurrent10000_allUnique() throws Exception {
+        int n = 10_000;
+        java.util.Set<String> nos = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(20);
+        java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(n);
+        for (int i = 0; i < n; i++) {
+            pool.submit(() -> {
+                try {
+                    nos.add(orderService.generateOrderNo());
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+        done.await();
+        pool.shutdown();
+
+        assertThat(nos).hasSize(n);
+        assertThat(orderService.generateOrderNo()).startsWith("SO").hasSizeLessThan(32);
+    }
 }

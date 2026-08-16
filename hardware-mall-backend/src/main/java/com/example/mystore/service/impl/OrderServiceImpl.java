@@ -2,6 +2,7 @@ package com.example.mystore.service.impl;
 
 import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.StatusConstants;
@@ -35,7 +36,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -57,8 +57,6 @@ public class OrderServiceImpl implements OrderService {
     private PayService payService;
     private final RedisUtil redisUtil;
     private final ApplicationEventPublisher applicationEventPublisher;
-
-    private static final DateTimeFormatter ORDER_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
     @Override
     @Transactional
@@ -542,11 +540,8 @@ public class OrderServiceImpl implements OrderService {
         };
     }
 
-    private String generateOrderNo() {
-        String date = LocalDateTime.now().format(ORDER_DATE_FORMAT);
-        // ThreadLocalRandom 比 Random 性能更好，无线程竞争
-        String random = String.format("%06d", java.util.concurrent.ThreadLocalRandom.current().nextInt(1_000_000));
-        return date + random;
+    String generateOrderNo() {
+        return "SO" + IdWorker.getIdStr();
     }
 
     private String getFirstImage(List<String> images) {
