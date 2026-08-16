@@ -9,6 +9,7 @@ import com.example.mystore.entity.db.Sku;
 import com.example.mystore.service.SpecTemplateService;
 import com.example.mystore.service.SpuService;
 import com.example.mystore.service.SkuService;
+import com.example.mystore.util.PageUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -30,7 +31,7 @@ public class UserProductController {
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "20") Integer limit) {
-        return Result.success(spuService.getProductListVO(categoryId, keyword, page, limit, 1));
+        return Result.success(spuService.getProductListVO(categoryId, keyword, page, PageUtil.clampLimit(limit, 20, 50), 1));
     }
 
 
@@ -38,7 +39,7 @@ public class UserProductController {
     @GetMapping("/recommend")
     public Result<List<ProductListVO>> getRecommendProducts(
             @RequestParam(defaultValue = "10") Integer limit) {
-        return Result.success(spuService.getRecommendProductListVO(limit));
+        return Result.success(spuService.getRecommendProductListVO(PageUtil.clampLimit(limit, 10, 20)));
     }
 
     @GetMapping("/{id}")

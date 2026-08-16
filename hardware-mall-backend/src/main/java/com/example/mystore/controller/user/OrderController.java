@@ -5,6 +5,7 @@ import com.example.mystore.common.result.Result;
 import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.service.OrderService;
+import com.example.mystore.util.PageUtil;
 import com.example.mystore.util.UserContext;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -38,7 +39,7 @@ public class OrderController {
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "20") Integer limit) {
         Long userId = UserContext.getUserId();
-        return Result.success(orderService.getOrderPage(userId, status, page, limit));
+        return Result.success(orderService.getOrderPage(userId, status, page, PageUtil.clampLimit(limit, 20, 50)));
     }
 
     @GetMapping("/{id}")
