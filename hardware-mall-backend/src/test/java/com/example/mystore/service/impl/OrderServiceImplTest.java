@@ -57,6 +57,8 @@ class OrderServiceImplTest {
     private RedisUtil redisUtil;
     @Mock
     private ApplicationEventPublisher applicationEventPublisher;
+    @Mock
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
 
     @InjectMocks
     private OrderServiceImpl orderService;

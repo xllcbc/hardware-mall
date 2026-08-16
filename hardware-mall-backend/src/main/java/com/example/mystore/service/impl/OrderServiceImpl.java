@@ -33,7 +33,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -58,9 +60,9 @@ public class OrderServiceImpl implements OrderService {
     private PayService payService;
     private final RedisUtil redisUtil;
     private final ApplicationEventPublisher applicationEventPublisher;
+    private final PlatformTransactionManager transactionManager;
 
     @Override
-    @Transactional
     public OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey) {
         log.info("创建订单开始, userId={}, idemKey={}, request={}", userId, idempotencyKey, request);
 
@@ -70,6 +72,18 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("请勿重复下单");
         }
 
+        // ① 事务外：只读校验 + 构建订单明细快照（不占用 DB 连接事务）
+        ValidatedOrder validated = validateAndBuildSnapshot(userId, request);
+
+        // ② 事务内：扣减库存 + 建单 + 明细 + 删购物车 + 发布事件
+        Long orderId = new TransactionTemplate(transactionManager)
+                .execute(status -> persistOrder(userId, request, validated));
+
+        // ③ 事务外：组装返回 VO
+        return getOrderVO(orderId, userId);
+    }
+
+    private ValidatedOrder validateAndBuildSnapshot(Long userId, CreateOrderRequest request) {
         Address address = addressMapper.selectById(request.getAddressId());
         if (address == null || !address.getUserId().equals(userId)) {
             throw new RuntimeException("收货地址不存在");
@@ -92,7 +106,7 @@ public class OrderServiceImpl implements OrderService {
                 throw new RuntimeException("商品不存在或已下架: " + cartItem.getSkuId());
             }
 
-            // 【库存检查】getSkuById 已返回新鲜库存(读 sku:stock 缓存, miss 回源 DB)
+            // 【库存软检查】getSkuById 已返回新鲜库存(读 sku:stock 缓存, miss 回源 DB)
             if (sku.getStock() == null || sku.getStock() < cartItem.getQuantity()) {
                 throw new RuntimeException("库存不足: " + sku.getId());
             }
@@ -109,9 +123,11 @@ public class OrderServiceImpl implements OrderService {
             List<SpecVO> specVOList = sku.getSpecs();
 
             StringBuilder specStr = new StringBuilder();
-            for (SpecVO specVO : specVOList) {
-                if (specVO.getValue() != null) {
-                    specStr.append(specVO.getValue()).append(" ");
+            if (specVOList != null) {
+                for (SpecVO specVO : specVOList) {
+                    if (specVO.getValue() != null) {
+                        specStr.append(specVO.getValue()).append(" ");
+                    }
                 }
             }
 
@@ -123,14 +139,19 @@ public class OrderServiceImpl implements OrderService {
             item.setSubtotal(subtotal);
             item.setCreateTime(LocalDateTime.now());
             orderItems.add(item);
+        }
 
-            // 【事务内】只扣 DB 库存
-            boolean deducted = skuService.deductStock(sku.getId(), cartItem.getQuantity());
+        return new ValidatedOrder(address, logistics, orderItems, totalAmount);
+    }
+
+    private Long persistOrder(Long userId, CreateOrderRequest request, ValidatedOrder validated) {
+        // 【事务内】只扣 DB 库存 + 销量自增
+        for (OrderItem item : validated.orderItems()) {
+            boolean deducted = skuService.deductStock(item.getSkuId(), item.getQuantity());
             if (!deducted) {
-                throw new RuntimeException("库存扣减失败: " + sku.getId());
+                throw new RuntimeException("库存扣减失败: " + item.getSkuId());
             }
-
-            spuMapper.incrementSalesCount(spu.getId(), cartItem.getQuantity());
+            spuMapper.incrementSalesCount(item.getSpuId(), item.getQuantity());
         }
 
         String orderNo = generateOrderNo();
@@ -139,19 +160,19 @@ public class OrderServiceImpl implements OrderService {
         Order order = new Order();
         order.setOrderNo(orderNo);
         order.setUserId(userId);
-        order.setAddressId(address.getId());
-        order.setLogisticsId(logistics.getId());
+        order.setAddressId(validated.address().getId());
+        order.setLogisticsId(validated.logistics().getId());
         order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-        order.setTotalAmount(totalAmount);
+        order.setTotalAmount(validated.totalAmount());
         order.setFreightAmount(BigDecimal.ZERO);
-        order.setPayAmount(totalAmount);
+        order.setPayAmount(validated.totalAmount());
         order.setBuyerRemark(request.getBuyerRemark());
         order.setCreateTime(LocalDateTime.now());
         order.setUpdateTime(LocalDateTime.now());
         orderMapper.insert(order);
         log.info("订单插入成功, orderId={}", order.getId());
 
-        for (OrderItem item : orderItems) {
+        for (OrderItem item : validated.orderItems()) {
             item.setOrderId(order.getId());
             orderItemMapper.insert(item);
         }
@@ -170,13 +191,15 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // 发布库存同步事件，事务提交后由监听器异步执行
-        List<Long> skuIds = orderItems.stream()
+        List<Long> skuIds = validated.orderItems().stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
         applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
 
-        return getOrderVO(order.getId(), userId);
+        return order.getId();
     }
+
+    private record ValidatedOrder(Address address, Logistics logistics, List<OrderItem> orderItems, BigDecimal totalAmount) {}
 
     @Override
     public Page<OrderVO> getOrderPage(Long userId, Integer status, Integer page, Integer limit) {
