@@ -96,22 +96,37 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("物流方式不存在或不可用");
         }
 
-        List<OrderItem> orderItems = new ArrayList<>();
-        BigDecimal totalAmount = BigDecimal.ZERO;
-
+        // ① 逐项校验 SKU 并收集（校验顺序与异常语义保持不变）
+        List<Sku> skus = new ArrayList<>();
         for (CreateOrderRequest.CartItem cartItem : request.getItems()) {
             Sku sku = skuService.getSkuById(cartItem.getSkuId());
             log.info("SKU查询结果, skuId={}, sku={}", cartItem.getSkuId(), sku);
             if (sku == null || sku.getStatus() != 1) {
                 throw new RuntimeException("商品不存在或已下架: " + cartItem.getSkuId());
             }
-
             // 【库存软检查】getSkuById 已返回新鲜库存(读 sku:stock 缓存, miss 回源 DB)
             if (sku.getStock() == null || sku.getStock() < cartItem.getQuantity()) {
                 throw new RuntimeException("库存不足: " + sku.getId());
             }
+            skus.add(sku);
+        }
 
-            Spu spu = spuMapper.selectById(sku.getSpuId());
+        // ② 一次性批量查询 SPU（N 次 selectById → 1 次 IN 查询，distinct 去重）
+        List<Long> spuIds = skus.stream().map(Sku::getSpuId).distinct().toList();
+        Map<Long, Spu> spuMap = spuIds.isEmpty() ? Map.of()
+                : spuMapper.selectBatchIds(spuIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(Spu::getId, spu -> spu));
+
+        // ③ 组装订单明细快照（spu 改从 map 取）
+        List<OrderItem> orderItems = new ArrayList<>();
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        for (int i = 0; i < request.getItems().size(); i++) {
+            CreateOrderRequest.CartItem cartItem = request.getItems().get(i);
+            Sku sku = skus.get(i);
+            Spu spu = spuMap.get(sku.getSpuId());
+            if (spu == null) {
+                throw new RuntimeException("商品不存在或已下架: " + cartItem.getSkuId());
+            }
             BigDecimal subtotal = sku.getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             totalAmount = totalAmount.add(subtotal);
 

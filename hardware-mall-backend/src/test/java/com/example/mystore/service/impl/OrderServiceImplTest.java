@@ -318,6 +318,34 @@ class OrderServiceImplTest {
     }
 
     @Test
+    void createOrder_spuMissingFromBatch_shouldThrow() {
+        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(skuService.getSkuById(5L)).thenReturn(sku);
+        when(spuMapper.selectBatchIds(any())).thenReturn(Collections.emptyList());
+
+        CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
+        i1.setSkuId(5L);
+        i1.setQuantity(1);
+        CreateOrderRequest.CartItem i2 = new CreateOrderRequest.CartItem();
+        i2.setSkuId(5L);
+        i2.setQuantity(2);
+        CreateOrderRequest request = new CreateOrderRequest();
+        request.setAddressId(1L);
+        request.setLogisticsId(1L);
+        request.setItems(java.util.List.of(i1, i2));
+
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "k"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("商品不存在或已下架");
+
+        verify(orderMapper, never()).insert(any(Order.class));
+        verify(spuMapper, times(1)).selectBatchIds(anyCollection());
+        verify(spuMapper, never()).selectById(any());
+    }
+
+    @Test
     void generateOrderNo_concurrent10000_allUnique() throws Exception {
         int n = 10_000;
         java.util.Set<String> nos = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
