@@ -81,6 +81,10 @@ http.interceptors.response.use(
       }
       return handle401(config).catch(() => forceLogout(error))
     }
+    if (error.response?.status === 413) {
+      ElMessage.error('图片过大，请压缩后重新上传')
+      return Promise.reject(error)
+    }
     ElMessage.error(error.message || '网络错误')
     return Promise.reject(error)
   }

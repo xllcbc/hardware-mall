@@ -6,6 +6,7 @@ import com.aliyun.oss.model.PutObjectRequest;
 import com.example.mystore.config.OssProperties;
 import com.example.mystore.service.OssService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -14,6 +15,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OssServiceImpl implements OssService {
@@ -53,5 +55,30 @@ public class OssServiceImpl implements OssService {
         }
 
         return ossProperties.getDomain() + "/" + objectName;
+    }
+
+    @Override
+    public void deleteFile(String url) {
+        if (url == null || url.isBlank()) {
+            return;
+        }
+        String prefix = ossProperties.getDomain() + "/";
+        if (!url.startsWith(prefix)) {
+            log.warn("OSS 删除跳过：URL 不属于当前域名, url={}", url);
+            return;
+        }
+        String objectName = url.substring(prefix.length());
+        OSS ossClient = new OSSClientBuilder().build(
+                "https://oss-" + ossProperties.getRegion() + ".aliyuncs.com",
+                ossProperties.getAccessKeyId(),
+                ossProperties.getAccessKeySecret()
+        );
+        try {
+            ossClient.deleteObject(ossProperties.getBucketName(), objectName);
+        } catch (Exception e) {
+            log.warn("OSS 删除失败, objectName={}, error={}", objectName, e.getMessage());
+        } finally {
+            ossClient.shutdown();
+        }
     }
 }

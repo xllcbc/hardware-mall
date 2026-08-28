@@ -13,6 +13,7 @@ import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpecItemMapper;
 import com.example.mystore.mapper.SpecTemplateMapper;
 import com.example.mystore.mapper.SpuMapper;
+import com.example.mystore.service.OssService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.SpecItemService;
 import com.example.mystore.service.SpecTemplateService;
@@ -46,6 +47,7 @@ public class SkuServiceImpl implements SkuService {
     private final SpecItemMapper specItemMapper;
     private final SpecTemplateService specTemplateService;
     private final SpecItemService specItemService;
+    private final OssService ossService;
     private final RedisUtil redisUtil;
 
     @Override
@@ -223,6 +225,9 @@ public class SkuServiceImpl implements SkuService {
         Long spuId = sku.getSpuId();
         sku.setDeleteTime(System.currentTimeMillis());
         skuMapper.updateById(sku);
+        if (sku.getImage() != null) {
+            ossService.deleteFile(sku.getImage());
+        }
         redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + spuId);
         redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + id);
     }

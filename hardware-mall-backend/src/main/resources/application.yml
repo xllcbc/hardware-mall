@@ -7,6 +7,10 @@ spring:
     name: hardware-mall
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 20MB
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:hardware_mall}?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai

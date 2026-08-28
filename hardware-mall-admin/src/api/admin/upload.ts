@@ -4,9 +4,12 @@ export interface UploadResult {
   url: string
 }
 
-export const uploadProductImage = (file: File) => {
+export const uploadProductImage = (file: File, categoryId?: number) => {
   const formData = new FormData()
   formData.append('file', file)
+  if (categoryId != null) {
+    formData.append('categoryId', String(categoryId))
+  }
   return request.post<UploadResult>('/admin/upload/product', formData, {
     headers: {
       'Content-Type': 'multipart/form-data'

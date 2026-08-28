@@ -596,9 +596,14 @@ const handleSkuImageUpload = (row: Sku) => {
   input.onchange = async (e: any) => {
     const file = e.target.files[0]
     if (!file) return
+    if (file.size > 10 * 1024 * 1024) {
+      ElMessage.error('图片过大，请上传 10MB 以内的图片')
+      return
+    }
     try {
-      const result = await uploadProductImage(file)
+      const result = await uploadProductImage(file, currentSpu.value?.categoryId)
       row.image = result.url
+      ElMessage.success('图片上传成功')
     } catch {
       ElMessage.error('图片上传失败')
     }
@@ -655,7 +660,7 @@ const handleImageUpload = async (options: any) => {
   const { file, onSuccess, onError } = options
 
   try {
-    const res = await uploadProductImage(file)
+    const res = await uploadProductImage(file, form.categoryId as number | undefined)
     form.images.push(res.url)
     ElMessage.success('图片上传成功')
     onSuccess()
