@@ -1,5 +1,8 @@
 package com.example.mystore.service.impl;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.entity.db.*;
@@ -10,9 +13,11 @@ import com.example.mystore.service.CartService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -67,6 +72,12 @@ class OrderServiceImplTest {
     private Logistics logistics;
     private Sku sku;
     private Spu spu;
+
+    @BeforeAll
+    static void initTableInfo() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Cart.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), OrderItem.class);
+    }
 
     @BeforeEach
     void setUp() {
@@ -343,6 +354,96 @@ class OrderServiceImplTest {
         verify(orderMapper, never()).insert(any(Order.class));
         verify(spuMapper, times(1)).selectBatchIds(anyCollection());
         verify(spuMapper, never()).selectById(any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void createOrder_buildsItemsFromBatchSpuMap() {
+        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+
+        Sku skuA = new Sku();
+        skuA.setId(5L);
+        skuA.setSpuId(1L);
+        skuA.setPrice(new BigDecimal("219.00"));
+        skuA.setStock(40);
+        skuA.setStatus(1);
+
+        Spu spuA = new Spu();
+        spuA.setId(1L);
+        spuA.setName("防盗门锁 C级");
+        spuA.setImages(java.util.List.of("img-a.jpg"));
+
+        Sku skuB = new Sku();
+        skuB.setId(6L);
+        skuB.setSpuId(2L);
+        skuB.setPrice(new BigDecimal("99.00"));
+        skuB.setStock(10);
+        skuB.setStatus(1);
+
+        Spu spuB = new Spu();
+        spuB.setId(2L);
+        spuB.setName("不锈钢合页");
+        spuB.setImages(java.util.List.of("img-b.jpg"));
+
+        when(skuService.getSkuById(5L)).thenReturn(skuA);
+        when(skuService.getSkuById(6L)).thenReturn(skuB);
+        when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(spuA, spuB));
+        when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+        when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+            inv.getArgument(0, Order.class).setId(100L);
+            return 1;
+        });
+        when(orderMapper.selectById(100L)).thenAnswer(inv -> {
+            Order o = new Order();
+            o.setId(100L);
+            o.setUserId(2L);
+            o.setOrderNo("SO1");
+            o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+            o.setAddressId(1L);
+            o.setLogisticsId(1L);
+            return o;
+        });
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
+        i1.setSkuId(5L);
+        i1.setQuantity(2);
+        CreateOrderRequest.CartItem i2 = new CreateOrderRequest.CartItem();
+        i2.setSkuId(6L);
+        i2.setQuantity(3);
+        CreateOrderRequest request = new CreateOrderRequest();
+        request.setAddressId(1L);
+        request.setLogisticsId(1L);
+        request.setItems(java.util.List.of(i1, i2));
+
+        OrderVO vo = orderService.createOrder(2L, request, "k");
+
+        assertThat(vo).isNotNull();
+        verify(spuMapper, times(1)).selectBatchIds(anyCollection());
+        verify(spuMapper, never()).selectById(any());
+
+        ArgumentCaptor<java.util.List<OrderItem>> captor = ArgumentCaptor.forClass(java.util.List.class);
+        verify(orderItemMapper).insertBatch(captor.capture());
+        java.util.List<OrderItem> items = captor.getValue();
+
+        assertThat(items).hasSize(2);
+        OrderItem first = items.get(0);
+        assertThat(first.getSkuId()).isEqualTo(5L);
+        assertThat(first.getSpuId()).isEqualTo(1L);
+        assertThat(first.getProductName()).isEqualTo("防盗门锁 C级");
+        assertThat(first.getProductImage()).isEqualTo("img-a.jpg");
+        assertThat(first.getQuantity()).isEqualTo(2);
+        assertThat(first.getSubtotal()).isEqualByComparingTo("438.00");
+
+        OrderItem second = items.get(1);
+        assertThat(second.getSkuId()).isEqualTo(6L);
+        assertThat(second.getSpuId()).isEqualTo(2L);
+        assertThat(second.getProductName()).isEqualTo("不锈钢合页");
+        assertThat(second.getProductImage()).isEqualTo("img-b.jpg");
+        assertThat(second.getQuantity()).isEqualTo(3);
+        assertThat(second.getSubtotal()).isEqualByComparingTo("297.00");
     }
 
     @Test
