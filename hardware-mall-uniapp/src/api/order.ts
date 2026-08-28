@@ -15,8 +15,12 @@ export interface CreateOrderData {
   buyerRemark?: string
 }
 
-export const createOrder = (data: CreateOrderData) => {
-  return request.post<Order>('/user/order/create', data)
+export const createOrder = (data: CreateOrderData, idemKey: string) => {
+  return request.post<Order>('/user/order/create', data, { 'X-Idempotency-Key': idemKey })
+}
+
+export const getIdempotencyToken = () => {
+  return request.get<string>('/user/order/token')
 }
 
 export const getOrderList = (params: {

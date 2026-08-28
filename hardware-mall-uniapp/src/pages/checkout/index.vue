@@ -85,7 +85,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { useCartStore } from '@/stores/cart'
 import { usePreOrderStore } from '@/stores/preOrder'
 import { getAddressList } from '@/api/address'
-import { createOrder, getOrderDetail } from '@/api/order'
+import { createOrder, getOrderDetail, getIdempotencyToken } from '@/api/order'
 import { prepayOrder } from '@/api/pay'
 import type { Address } from '@/types'
 
@@ -95,6 +95,7 @@ const addresses = ref<Address[]>([])
 const selectedAddress = ref<Address | null>(null)
 const buyerRemark = ref('')
 const submitted = ref(false)
+const idemKey = ref('')
 
 const isDirectBuy = computed(() => preOrderStore.item !== null)
 
@@ -192,7 +193,11 @@ const submitOrder = async () => {
       buyerRemark: buyerRemark.value
     }
 
-    const order = await createOrder(orderData)
+    if (!idemKey.value) {
+      idemKey.value = await getIdempotencyToken()
+    }
+    const order = await createOrder(orderData, idemKey.value)
+    idemKey.value = ''
 
     if (isDirectBuy.value) {
       preOrderStore.clearItem()

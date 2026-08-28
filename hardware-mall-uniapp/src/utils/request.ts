@@ -122,8 +122,8 @@ async function request<T = any>(options: RequestOptions): Promise<T> {
 export const get = <T = any>(url: string, params?: any) =>
   request<T>({ url, method: 'GET', data: params })
 
-export const post = <T = any>(url: string, data?: any) =>
-  request<T>({ url, method: 'POST', data })
+export const post = <T = any>(url: string, data?: any, header?: Record<string, string>) =>
+  request<T>({ url, method: 'POST', data, header })
 
 export const put = <T = any>(url: string, data?: any) =>
   request<T>({ url, method: 'PUT', data })
