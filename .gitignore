@@ -30,3 +30,8 @@ markdown-resume-*.json
 
 # 真实数据文件
 # seed_real_products.sql
+
+# Load-test generated data and JMeter runtime
+scripts/loadtest/apache-jmeter-*/
+scripts/loadtest/results/
+scripts/loadtest/__pycache__/
