@@ -395,6 +395,7 @@ const submitLoading = ref(false)
 const skuSubmitLoading = ref(false)
 const tableData = ref<any[]>([])
 const skuList = ref<Sku[]>([])
+const deletedSkuIds = ref<number[]>([])
 const categoryList = ref<any[]>([])
 const currentSpu = ref<Spu | null>(null)
 const skuCountMap = ref<Record<number, number>>({})
@@ -557,6 +558,7 @@ const handleConfigSku = async (row: any) => {
   currentSpu.value = row
   skuDialogVisible.value = true
   skuSubmitLoading.value = true
+  deletedSkuIds.value = []
   try {
     const res = await getSkusBySpu(row.id)
     skuList.value = res || []
@@ -571,32 +573,19 @@ const handleGenerateSkus = async () => {
   if (!currentSpu.value) return
   const spuId = currentSpu.value.id as number
   try {
-    await ElMessageBox.confirm('将根据分类规格模板自动生成所有规格组合，确定继续吗？', '提示')
-    await generateSkus(spuId)
-    ElMessage.success('SKU生成成功')
-    const res = await getSkusBySpu(spuId)
+    const res = await generateSkus(spuId)
     skuList.value = res || []
-    skuCountMap.value[spuId] = skuList.value.length
+    deletedSkuIds.value = []
+    ElMessage.success('已生成预览，点击保存配置提交')
   } catch {
     // error handled by interceptor
   }
 }
 
-const handleDeleteSku = async (row: Sku) => {
-  if (!row.id) {
-    skuList.value = skuList.value.filter(s => s !== row)
-    return
-  }
-  try {
-    await ElMessageBox.confirm('确定要删除该SKU吗？', '提示')
-    await deleteSku(row.id)
-    ElMessage.success('删除成功')
-    skuList.value = skuList.value.filter(s => s.id !== row.id)
-    if (currentSpu.value) {
-      skuCountMap.value[currentSpu.value.id as number] = skuList.value.length
-    }
-  } catch {
-    // error handled by interceptor
+const handleDeleteSku = (row: Sku) => {
+  skuList.value = skuList.value.filter(s => s !== row)
+  if (row.id) {
+    deletedSkuIds.value.push(row.id)
   }
 }
 
@@ -633,6 +622,9 @@ const confirmSkuSubmit = async () => {
           status: sku.status || 1
         })
       }
+    }
+    for (const id of deletedSkuIds.value) {
+      await deleteSku(id)
     }
     ElMessage.success('保存成功')
     skuDialogVisible.value = false

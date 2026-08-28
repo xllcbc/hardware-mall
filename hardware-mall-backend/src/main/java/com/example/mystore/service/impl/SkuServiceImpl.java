@@ -241,8 +241,7 @@ public class SkuServiceImpl implements SkuService {
     }
 
     @Override
-    @Transactional
-    public void generateSkusByTemplate(Long spuId) {
+    public List<Sku> previewSkusByTemplate(Long spuId) {
         Spu spu = spuMapper.selectById(spuId);
         if (spu == null) {
             throw new RuntimeException("商品不存在");
@@ -250,7 +249,7 @@ public class SkuServiceImpl implements SkuService {
 
         List<SpecTemplate> templates = specTemplateService.getTemplatesByCategory(spu.getCategoryId());
         if (templates.isEmpty()) {
-            return;
+            return Collections.emptyList();
         }
 
         List<List<SpecItem>> specItemLists = new ArrayList<>();
@@ -259,9 +258,15 @@ public class SkuServiceImpl implements SkuService {
             specItemLists.add(items);
         }
 
-        List<List<SpecItem>> combinations = cartesianProduct(specItemLists);
+        Map<String, Sku> existingByHash = new HashMap<>();
+        for (Sku existing : getSkusBySpu(spuId)) {
+            if (existing.getSpecHash() != null) {
+                existingByHash.put(existing.getSpecHash(), existing);
+            }
+        }
 
-        for (List<SpecItem> combination : combinations) {
+        List<Sku> result = new ArrayList<>();
+        for (List<SpecItem> combination : cartesianProduct(specItemLists)) {
             List<SpecVO> specs = new ArrayList<>();
             for (SpecItem item : combination) {
                 SpecVO specVO = new SpecVO();
@@ -272,14 +277,23 @@ public class SkuServiceImpl implements SkuService {
                 specs.add(specVO);
             }
 
+            String specHash = computeSpecHash(specs);
+            Sku exist = existingByHash.get(specHash);
+            if (exist != null) {
+                result.add(exist);
+                continue;
+            }
+
             Sku sku = new Sku();
             sku.setSpuId(spuId);
             sku.setSpecs(specs);
+            sku.setSpecHash(specHash);
             sku.setPrice(spu.getOriginalPrice() != null ? spu.getOriginalPrice() : BigDecimal.ZERO);
             sku.setStock(0);
             sku.setStatus(1);
-            createSku(sku);
+            result.add(sku);
         }
+        return result;
     }
 
     @Override

@@ -20,6 +20,6 @@ public interface SkuService {
     void deleteSku(Long id);
     boolean deductStock(Long skuId, Integer quantity);
     void restoreStock(Long skuId, Integer quantity);
-    void generateSkusByTemplate(Long spuId);
+    List<Sku> previewSkusByTemplate(Long spuId);
     boolean syncStockToCache(Long skuId);
 }

@@ -62,8 +62,7 @@ public class AdminSkuController {
     }
 
     @PostMapping("/generate/{spuId}")
-    public Result<Void> generateSkus(@PathVariable Long spuId) {
-        skuService.generateSkusByTemplate(spuId);
-        return Result.success();
+    public Result<List<Sku>> generateSkus(@PathVariable Long spuId) {
+        return Result.success(skuService.previewSkusByTemplate(spuId));
     }
 }

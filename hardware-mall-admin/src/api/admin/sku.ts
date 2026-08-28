@@ -51,5 +51,5 @@ export const deleteSku = (id: number) => {
 }
 
 export const generateSkus = (spuId: number) => {
-  return request.post(`/admin/sku/generate/${spuId}`)
+  return request.post<Sku[]>(`/admin/sku/generate/${spuId}`)
 }
