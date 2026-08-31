@@ -91,6 +91,11 @@ cache:
     # 每轮随机休眠时长上限(毫秒)，实际取 [lock-sleep-ms/2, lock-sleep-ms]
     lock-sleep-ms: 100
 
+order:
+  auto-receive:
+    # 发货后自动收货天数：已发货超过该天数未确认收货的订单由定时任务自动置为已完成
+    days: 7
+
 dingtalk:
   webhook: ${DINGTALK_WEBHOOK:}
   secret: ${DINGTALK_SECRET:}

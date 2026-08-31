@@ -538,6 +538,35 @@ public class OrderServiceImpl implements OrderService {
         return true;
     }
 
+    @Override
+    @Transactional
+    public boolean autoConfirmReceive(Long orderId) {
+        Order order = orderMapper.selectById(orderId);
+        if (order == null) {
+            log.warn("订单不存在, orderId={}", orderId);
+            return false;
+        }
+        // 幂等性检查：只有已发货状态的订单才需要自动收货
+        if (order.getStatus() != StatusConstants.ORDER_SHIPPED) {
+            log.info("订单已处理，无需自动收货, orderId={}, status={}", orderId, order.getStatus());
+            return false;
+        }
+        // CAS 条件更新：仅当状态仍为已发货时置为已完成，避免与并发退款(3→6)互相覆盖
+        int affected = orderMapper.update(null,
+                new LambdaUpdateWrapper<Order>()
+                        .eq(Order::getId, orderId)
+                        .eq(Order::getStatus, StatusConstants.ORDER_SHIPPED)
+                        .set(Order::getStatus, StatusConstants.ORDER_COMPLETED)
+                        .set(Order::getReceiveTime, LocalDateTime.now())
+                        .set(Order::getUpdateTime, LocalDateTime.now()));
+        if (affected > 0) {
+            log.info("订单自动收货成功, orderId={}", orderId);
+            return true;
+        }
+        log.info("自动收货跳过（CAS 未命中，订单状态已变更）, orderId={}", orderId);
+        return false;
+    }
+
     private OrderVO getOrderVO(Long orderId, Long userId) {
         Order order = orderMapper.selectById(orderId);
         Address address = addressMapper.selectById(order.getAddressId());

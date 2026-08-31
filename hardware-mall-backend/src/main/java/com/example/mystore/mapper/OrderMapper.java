@@ -34,4 +34,18 @@ public interface OrderMapper extends BaseMapper<Order> {
     List<Order> selectStalePendingOrders(@Param("status") Integer status,
                                           @Param("beforeTime") LocalDateTime beforeTime,
                                           @Param("limit") Integer limit);
+
+    /**
+     * 查询发货超期未收货的订单（用于自动收货定时任务）
+     * @param status 订单状态（已发货）
+     * @param beforeTime 发货时间小于此时间的订单
+     * @param limit 单次查询上限
+     */
+    @Select("SELECT * FROM shop_order " +
+            "WHERE status = #{status} AND ship_time < #{beforeTime} " +
+            "ORDER BY ship_time ASC " +
+            "LIMIT #{limit}")
+    List<Order> selectStaleShippedOrders(@Param("status") Integer status,
+                                          @Param("beforeTime") LocalDateTime beforeTime,
+                                          @Param("limit") Integer limit);
 }

@@ -34,5 +34,13 @@ public interface OrderService {
      */
     boolean autoCancelOrder(Long orderId, String cancelReason);
 
+    /**
+     * 发货超期自动确认收货（幂等、CAS 安全）
+     * 供定时任务调用，将已发货超期订单置为已完成
+     * @param orderId 订单ID
+     * @return true-成功收货；false-订单不存在/已非已发货状态/CAS 未命中
+     */
+    boolean autoConfirmReceive(Long orderId);
+
     OrderVO getAdminOrderById(Long orderId);
 }

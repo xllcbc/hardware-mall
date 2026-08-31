@@ -96,4 +96,34 @@ class OrderMapperTest {
         List<Order> result = orderMapper.selectStalePendingOrders(1, LocalDateTime.now(), 10);
         assertThat(result).hasSize(2);
     }
+
+    @Test
+    void testSelectStaleShippedOrders() {
+        LocalDateTime now = LocalDateTime.now();
+        // 已发货未超期：3 天前发货
+        insertShippedOrder("20260507000001", now.minusDays(3));
+        // 已发货已超期：8 天前发货
+        insertShippedOrder("20260507000002", now.minusDays(8));
+
+        List<Order> result = orderMapper.selectStaleShippedOrders(3, now.minusDays(7), 10);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getOrderNo()).isEqualTo("20260507000002");
+    }
+
+    private void insertShippedOrder(String orderNo, LocalDateTime shipTime) {
+        Order order = new Order();
+        order.setOrderNo(orderNo);
+        order.setUserId(1L);
+        order.setAddressId(1L);
+        order.setLogisticsId(1L);
+        order.setStatus(3);
+        order.setTotalAmount(new BigDecimal("100.00"));
+        order.setFreightAmount(BigDecimal.ZERO);
+        order.setPayAmount(new BigDecimal("100.00"));
+        order.setPayTime(shipTime.minusDays(1));
+        order.setShipTime(shipTime);
+        order.setCreateTime(shipTime.minusDays(1));
+        order.setUpdateTime(LocalDateTime.now());
+        orderMapper.insert(order);
+    }
 }

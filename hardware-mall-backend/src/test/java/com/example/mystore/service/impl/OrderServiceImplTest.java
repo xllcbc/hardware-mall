@@ -467,4 +467,59 @@ class OrderServiceImplTest {
         assertThat(nos).hasSize(n);
         assertThat(orderService.generateOrderNo()).startsWith("SO").hasSizeLessThan(32);
     }
+
+    @Test
+    void testAutoConfirmReceive_Success() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_SHIPPED);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+
+        boolean result = orderService.autoConfirmReceive(1L);
+
+        assertThat(result).isTrue();
+        verify(orderMapper).update(isNull(), any());
+    }
+
+    @Test
+    void testAutoConfirmReceive_OrderNotExist() {
+        when(orderMapper.selectById(999L)).thenReturn(null);
+
+        boolean result = orderService.autoConfirmReceive(999L);
+
+        assertThat(result).isFalse();
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void testAutoConfirmReceive_NotShipped() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_COMPLETED); // 已完成，无需自动收货
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+
+        boolean result = orderService.autoConfirmReceive(1L);
+
+        assertThat(result).isFalse();
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void testAutoConfirmReceive_CasMiss_ShouldSkip() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_SHIPPED);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        // CAS 未命中：读取后状态被并发操作改走（如退款 3→6），条件更新 0 行命中
+        when(orderMapper.update(isNull(), any())).thenReturn(0);
+
+        boolean result = orderService.autoConfirmReceive(1L);
+
+        assertThat(result).isFalse();
+        verify(orderMapper).update(isNull(), any());
+    }
 }
