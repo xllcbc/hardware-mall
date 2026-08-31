@@ -2,9 +2,13 @@ package com.example.mystore.service;
 
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Order;
+import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.PaymentRecord;
+import com.example.mystore.entity.db.Sku;
+import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.mapper.PaymentRecordMapper;
+import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.service.impl.DingTalkAlertService;
 import com.example.mystore.service.impl.PayServiceImpl;
 import com.wechat.pay.java.core.Config;
@@ -48,6 +52,8 @@ class PayServiceImplTest {
 
     @Autowired PaymentRecordMapper paymentRecordMapper;
     @Autowired OrderMapper orderMapper;
+    @Autowired SkuMapper skuMapper;
+    @Autowired OrderItemMapper orderItemMapper;
 
     @SpyBean
     PayServiceImpl payService;
@@ -214,7 +220,63 @@ class PayServiceImplTest {
         assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
     }
 
+    @Test
+    void refundCallback_shouldRestoreStock_whenRefundSuccessWins() {
+        String outTradeNo = uniqueOutTradeNo();
+        mockNotificationParser(outTradeNo, "SUCCESS");
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, outTradeNo);
+        Long skuId = setupSku(10);
+        setupOrderItem(orderId, skuId, 3);
+
+        Map<String, String> result = payService.refundCallback("body", "sig", "nonce", "ts", "serial");
+
+        assertThat(result).containsEntry("code", "SUCCESS");
+        // 6→7 赢得跳变 → 还库存: 10 + 3 = 13
+        assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(13);
+    }
+
+    @Test
+    void refundCallback_shouldNotRestoreStock_whenOrderNotInRefunding() {
+        String outTradeNo = uniqueOutTradeNo();
+        mockNotificationParser(outTradeNo, "SUCCESS");
+        // 已取消单(5)自动退款场景: 订单非 6, 6→7 CAS 0 行 → 不还库存(取消时已还)
+        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, outTradeNo);
+        Long skuId = setupSku(10);
+        setupOrderItem(orderId, skuId, 3);
+
+        Map<String, String> result = payService.refundCallback("body", "sig", "nonce", "ts", "serial");
+
+        assertThat(result).containsEntry("code", "SUCCESS");
+        assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(10);
+    }
+
     // ==================== helper ====================
+
+    private Long setupSku(int stock) {
+        Sku sku = new Sku();
+        sku.setSpuId(1L);
+        sku.setSpecs(new java.util.ArrayList<>());
+        sku.setSpecHash("HASH_" + System.nanoTime());
+        sku.setPrice(new BigDecimal("100.00"));
+        sku.setStock(stock);
+        sku.setStatus(1);
+        skuMapper.insert(sku);
+        return sku.getId();
+    }
+
+    private void setupOrderItem(Long orderId, Long skuId, int quantity) {
+        OrderItem item = new OrderItem();
+        item.setOrderId(orderId);
+        item.setSkuId(skuId);
+        item.setSpuId(1L);
+        item.setProductName("测试商品");
+        item.setQuantity(quantity);
+        item.setPrice(new BigDecimal("100.00"));
+        item.setSubtotal(new BigDecimal("300.00"));
+        orderItemMapper.insert(item);
+    }
 
     private static String uniqueOutTradeNo() {
         return "OUT_UNIQUE_" + System.nanoTime();

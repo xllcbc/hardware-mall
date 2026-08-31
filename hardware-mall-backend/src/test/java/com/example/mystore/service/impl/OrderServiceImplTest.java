@@ -10,7 +10,9 @@ import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
+import com.example.mystore.service.PayService;
 import com.example.mystore.service.SkuService;
+import com.example.mystore.event.StockSyncEvent;
 import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
 import org.junit.jupiter.api.BeforeAll;
@@ -18,10 +20,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -57,6 +61,8 @@ class OrderServiceImplTest {
     @Mock
     private SkuService skuService;
     @Mock
+    private PayService payService;
+    @Mock
     private RedisLockUtil redisLockUtil;
     @Mock
     private RedisUtil redisUtil;
@@ -83,6 +89,10 @@ class OrderServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // payService 在实现类中是 @Autowired(required=false) 字段注入,
+        // @InjectMocks 走构造器注入不会覆盖它, 需手动注入
+        ReflectionTestUtils.setField(orderService, "payService", payService);
+
         address = new Address();
         address.setId(1L);
         address.setUserId(2L);
@@ -523,5 +533,112 @@ class OrderServiceImplTest {
 
         assertThat(result).isFalse();
         verify(orderMapper).update(isNull(), any());
+    }
+
+    // ==================== refundOrder claim-first 重构 ====================
+
+    @Test
+    void refundOrder_claimFirst_casBeforeRefund() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_SHIPPED);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        lenient().when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        orderService.refundOrder(1L, "质量问题");
+
+        InOrder inOrder = inOrder(orderMapper, payService);
+        inOrder.verify(orderMapper).update(isNull(), any());   // 先 CAS 占位
+        inOrder.verify(payService).refund(1L, "质量问题");      // 后调微信退款
+    }
+
+    @Test
+    void refundOrder_casMiss_throwsAndNoRefund() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_SHIPPED);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(0); // 竞态输了
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "质量问题"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("状态已变更");
+
+        verify(payService, never()).refund(any(), any()); // 未占位成功绝不退款
+    }
+
+    @Test
+    void refundOrder_noStockRestore() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_SHIPPED);
+
+        OrderItem item = new OrderItem();
+        item.setSkuId(5L);
+        item.setQuantity(2);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        lenient().when(orderItemMapper.selectList(any())).thenReturn(java.util.List.of(item));
+
+        orderService.refundOrder(1L, "质量问题");
+
+        // 库存恢复已迁到退款回调(6→7 确认成功后), refundOrder 不再还库存不发事件
+        verify(skuService, never()).restoreStock(any(), any());
+        verify(applicationEventPublisher, never()).publishEvent(any(StockSyncEvent.class));
+    }
+
+    @Test
+    void refundOrder_refundThrows_propagatesButClaimed() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_SHIPPED);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        lenient().when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+        doThrow(new RuntimeException("wechat error")).when(payService).refund(any(), any());
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "质量问题"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("wechat error");
+
+        verify(orderMapper).update(isNull(), any()); // claim 已提交, status 保持 6
+    }
+
+    // ==================== confirmReceive CAS 加固 ====================
+
+    @Test
+    void confirmReceive_casSuccess_neverBlindWrite() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setUserId(2L);
+        order.setStatus(StatusConstants.ORDER_SHIPPED);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+
+        orderService.confirmReceive(2L, 1L);
+
+        verify(orderMapper).update(isNull(), any());
+        verify(orderMapper, never()).updateById(any(Order.class)); // 不再盲写
+    }
+
+    @Test
+    void confirmReceive_casMiss_throws() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setUserId(2L);
+        order.setStatus(StatusConstants.ORDER_SHIPPED);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(0); // 竞态: 退款刚占位 6
+
+        assertThatThrownBy(() -> orderService.confirmReceive(2L, 1L))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("状态已变更");
     }
 }

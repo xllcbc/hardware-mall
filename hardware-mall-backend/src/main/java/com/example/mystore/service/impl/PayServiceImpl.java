@@ -4,12 +4,16 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Order;
+import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.entity.db.User;
+import com.example.mystore.event.StockSyncEvent;
+import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.mapper.PaymentRecordMapper;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.PayService;
+import com.example.mystore.service.SkuService;
 import com.wechat.pay.java.core.Config;
 import com.wechat.pay.java.core.notification.NotificationParser;
 import com.wechat.pay.java.core.notification.RequestParam;
@@ -27,6 +31,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,10 +47,13 @@ public class PayServiceImpl implements PayService {
 
     private final PaymentRecordMapper paymentRecordMapper;
     private final OrderMapper orderMapper;
+    private final OrderItemMapper orderItemMapper;
     private final UserMapper userMapper;
     private final Config wechatPayConfig;
     private final NotificationParser notificationParser;
     private final DingTalkAlertService dingTalkAlertService;
+    private final SkuService skuService;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     @Value("${wechat.appid}")
     private String appId;
@@ -232,12 +240,27 @@ public class PayServiceImpl implements PayService {
                             .set(PaymentRecord::getUpdateTime, now));
 
             // 订单状态推进 6(退款中) -> 7(已退款), WHERE status=6 防并发
-            orderMapper.update(null,
+            // affected>0 才还库存: 防重复回调双还; 已取消单(5)自动退款回调 6→7 不命中也不误还
+            int orderRows = orderMapper.update(null,
                     new LambdaUpdateWrapper<Order>()
                             .eq(Order::getId, record.getOrderId())
                             .eq(Order::getStatus, StatusConstants.ORDER_REFUNDING)
                             .set(Order::getStatus, StatusConstants.ORDER_REFUNDED)
                             .set(Order::getUpdateTime, now));
+
+            if (orderRows > 0) {
+                List<OrderItem> items = orderItemMapper.selectList(
+                        new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, record.getOrderId()));
+                List<Long> skuIds = new ArrayList<>();
+                for (OrderItem item : items) {
+                    skuService.restoreStock(item.getSkuId(), item.getQuantity());
+                    skuIds.add(item.getSkuId());
+                }
+                applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
+                log.info("退款成功并恢复库存, orderId={}, outRefundNo={}", record.getOrderId(), outRefundNo);
+            } else {
+                log.info("退款回调 6→7 未命中, 跳过库存恢复, orderId={}, outRefundNo={}", record.getOrderId(), outRefundNo);
+            }
 
             log.info("退款成功, orderId={}, outRefundNo={}", record.getOrderId(), outRefundNo);
             return Map.of("code", "SUCCESS", "message", "成功");

@@ -354,10 +354,17 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("只能确认收货已发货的订单");
         }
 
-        order.setStatus(StatusConstants.ORDER_COMPLETED);
-        order.setReceiveTime(LocalDateTime.now());
-        order.setUpdateTime(LocalDateTime.now());
-        orderMapper.updateById(order);
+        // CAS 条件更新: 仅当仍为已发货时置为已完成, 防与并发退款(3→6)互相覆盖
+        int affected = orderMapper.update(null,
+                new LambdaUpdateWrapper<Order>()
+                        .eq(Order::getId, orderId)
+                        .eq(Order::getStatus, StatusConstants.ORDER_SHIPPED)
+                        .set(Order::getStatus, StatusConstants.ORDER_COMPLETED)
+                        .set(Order::getReceiveTime, LocalDateTime.now())
+                        .set(Order::getUpdateTime, LocalDateTime.now()));
+        if (affected == 0) {
+            throw new RuntimeException("订单状态已变更，请刷新后重试");
+        }
     }
 
     @Override
@@ -455,30 +462,20 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @Transactional
     public void refundOrder(Long orderId, String reason) {
         Order order = orderMapper.selectById(orderId);
         if (order == null) {
             throw new RuntimeException("订单不存在");
         }
+        // 预检: 明显错状态直接报错 (CAS 才是权威并发守卫, 预检仅为友好提示)
         if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT && order.getStatus() != StatusConstants.ORDER_SHIPPED) {
             throw new RuntimeException("该订单状态不支持退款");
         }
 
-        if (payService != null) {
-            payService.refund(orderId, reason);
-        }
-
-        LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
-        itemWrapper.eq(OrderItem::getOrderId, orderId);
-        List<OrderItem> items = orderItemMapper.selectList(itemWrapper);
-        for (OrderItem item : items) {
-            skuService.restoreStock(item.getSkuId(), item.getQuantity());
-        }
-
-        // 退款是异步: payService.refund() 已受理, 此处置 6(退款中) 等 PayCallback 回调确认成功再置 7(已退款)
-        // 用条件 update 防并发, WHERE id=? AND status IN (2,3)
-        orderMapper.update(null,
+        // claim-first: 先 CAS 占位 6(退款中), 命中 0 行说明状态被并发改走, 中止 (不退款不还库存)
+        // 此处不加 @Transactional: claim 是本方法唯一 DB 写(库存恢复已迁至退款回调), 单条 UPDATE 自动提交;
+        // 事务外的微信退款调用失败时 claim 已提交, status 保持 6 等回调自愈或人工对账
+        int affected = orderMapper.update(null,
                 new LambdaUpdateWrapper<Order>()
                         .eq(Order::getId, orderId)
                         .in(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT, StatusConstants.ORDER_SHIPPED)
@@ -486,13 +483,14 @@ public class OrderServiceImpl implements OrderService {
                         .set(Order::getCancelReason, reason)
                         .set(Order::getCancelTime, LocalDateTime.now())
                         .set(Order::getUpdateTime, LocalDateTime.now()));
-
+        if (affected == 0) {
+            throw new RuntimeException("订单状态已变更，请刷新后重试");
+        }
         log.info("订单置退款中, orderId={}, 等待微信退款回调确认", orderId);
 
-        List<Long> skuIds = items.stream()
-                .map(OrderItem::getSkuId)
-                .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
+        if (payService != null) {
+            payService.refund(orderId, reason);
+        }
     }
 
     @Override
