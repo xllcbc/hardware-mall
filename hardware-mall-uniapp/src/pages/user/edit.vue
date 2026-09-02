@@ -180,10 +180,9 @@ const handleSave = async () => {
   saving.value = true
 
   try {
-    await updateUserInfo({
-      nickname: formData.value.nickname,
-      avatarUrl: formData.value.avatarUrl
-    })
+    const payload: { nickname: string; avatarUrl?: string } = { nickname: formData.value.nickname }
+    if (formData.value.avatarUrl?.startsWith('http')) payload.avatarUrl = formData.value.avatarUrl
+    await updateUserInfo(payload)
 
     userStore.setUserInfo({
       ...userStore.userInfo,

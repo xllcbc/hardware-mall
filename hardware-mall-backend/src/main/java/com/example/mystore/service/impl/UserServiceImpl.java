@@ -93,12 +93,13 @@ public class UserServiceImpl implements UserService {
         if (user.getNickname() != null) {
             existUser.setNickname(user.getNickname());
         }
-        if (user.getAvatarUrl() != null) {
+        if (StringUtils.hasText(user.getAvatarUrl())) {
             String expectedPrefix = ossProperties.getDomain() + "/";
             if (!user.getAvatarUrl().startsWith(expectedPrefix)) {
-                throw new RuntimeException("头像地址不合法");
+                log.warn("拒绝非法头像地址, userId={}, url={}", user.getId(), user.getAvatarUrl());
+            } else {
+                existUser.setAvatarUrl(user.getAvatarUrl());
             }
-            existUser.setAvatarUrl(user.getAvatarUrl());
         }
         if (user.getPhone() != null) {
             existUser.setPhone(user.getPhone());

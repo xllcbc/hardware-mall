@@ -118,10 +118,9 @@ const onGetPhoneNumber = async (e: any) => {
       }
     }
 
-    await updateUserInfo({
-      nickname: nickname.value,
-      avatarUrl: avatarUrl.value
-    })
+    const payload: { nickname: string; avatarUrl?: string } = { nickname: nickname.value }
+    if (avatarUrl.value) payload.avatarUrl = avatarUrl.value
+    await updateUserInfo(payload)
 
     let finalUserInfo = {
       ...result.userInfo,

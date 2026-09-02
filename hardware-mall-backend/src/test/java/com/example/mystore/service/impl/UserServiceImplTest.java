@@ -127,7 +127,7 @@ class UserServiceImplTest {
     }
 
     @Test
-    void testUpdateUserInfo_InvalidAvatarUrl_ThrowsException() {
+    void testUpdateUserInfo_InvalidAvatarUrl_Ignored() {
         when(userMapper.selectById(2L)).thenReturn(user);
         when(ossProperties.getDomain()).thenReturn("https://java0251014.oss-cn-beijing.aliyuncs.com");
 
@@ -135,11 +135,24 @@ class UserServiceImplTest {
         update.setId(2L);
         update.setAvatarUrl("wxfile://tmp_abc123.jpeg");
 
-        assertThatThrownBy(() -> userService.updateUserInfo(update))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("头像地址不合法");
+        User result = userService.updateUserInfo(update);
 
-        verify(userMapper, never()).updateById(any(User.class));
+        assertThat(result.getAvatarUrl()).isNull();
+        verify(userMapper).updateById(any(User.class));
+    }
+
+    @Test
+    void testUpdateUserInfo_BlankAvatarUrl_SkipsValidation() {
+        when(userMapper.selectById(2L)).thenReturn(user);
+
+        User update = new User();
+        update.setId(2L);
+        update.setAvatarUrl("");
+
+        User result = userService.updateUserInfo(update);
+
+        assertThat(result.getAvatarUrl()).isNull();
+        verify(userMapper).updateById(any(User.class));
     }
 
     @Test
