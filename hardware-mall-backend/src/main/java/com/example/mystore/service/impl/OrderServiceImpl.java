@@ -323,6 +323,7 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("只能取消待付款的订单");
         }
 
+        // 先恢复库存
         LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
         itemWrapper.eq(OrderItem::getOrderId, orderId);
         List<OrderItem> items = orderItemMapper.selectList(itemWrapper);
@@ -330,11 +331,18 @@ public class OrderServiceImpl implements OrderService {
             skuService.restoreStock(item.getSkuId(), item.getQuantity());
         }
 
-        order.setStatus(StatusConstants.ORDER_CANCELLED);
-        order.setCancelReason(reason);
-        order.setCancelTime(LocalDateTime.now());
-        order.setUpdateTime(LocalDateTime.now());
-        orderMapper.updateById(order);
+        // CAS 最终确认：仅当状态仍为待付款时置为已取消，防与并发支付回调(1→2)互相覆盖
+        int affected = orderMapper.update(null,
+                new LambdaUpdateWrapper<Order>()
+                        .eq(Order::getId, orderId)
+                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
+                        .set(Order::getStatus, StatusConstants.ORDER_CANCELLED)
+                        .set(Order::getCancelReason, reason)
+                        .set(Order::getCancelTime, LocalDateTime.now())
+                        .set(Order::getUpdateTime, LocalDateTime.now()));
+        if (affected == 0) {
+            throw new RuntimeException("订单状态已变更，请刷新后重试");
+        }
 
         // 发布库存同步事件，事务提交后由监听器异步执行
         List<Long> skuIds = items.stream()
@@ -516,7 +524,8 @@ public class OrderServiceImpl implements OrderService {
             log.info("订单已处理，无需取消, orderId={}, status={}", orderId, order.getStatus());
             return false;
         }
-        // 【事务内】只恢复 DB 库存，缓存由方法末尾统一同步
+
+        // 先恢复库存
         LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
         itemWrapper.eq(OrderItem::getOrderId, orderId);
         List<OrderItem> items = orderItemMapper.selectList(itemWrapper);
@@ -524,12 +533,21 @@ public class OrderServiceImpl implements OrderService {
             skuService.restoreStock(item.getSkuId(), item.getQuantity());
             log.info("恢复DB库存, orderId={}, skuId={}, quantity={}", orderId, item.getSkuId(), item.getQuantity());
         }
-        // 更新订单状态为已取消
-        order.setStatus(StatusConstants.ORDER_CANCELLED);
-        order.setCancelReason(cancelReason);
-        order.setCancelTime(LocalDateTime.now());
-        order.setUpdateTime(LocalDateTime.now());
-        orderMapper.updateById(order);
+
+        // CAS 最终确认：仅当状态仍为待付款时置为已取消，防与并发支付回调(1→2)互相覆盖
+        int affected = orderMapper.update(null,
+                new LambdaUpdateWrapper<Order>()
+                        .eq(Order::getId, orderId)
+                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
+                        .set(Order::getStatus, StatusConstants.ORDER_CANCELLED)
+                        .set(Order::getCancelReason, cancelReason)
+                        .set(Order::getCancelTime, LocalDateTime.now())
+                        .set(Order::getUpdateTime, LocalDateTime.now()));
+        if (affected == 0) {
+            log.info("自动取消跳过（CAS 未命中，订单状态已变更）, orderId={}", orderId);
+            return false;
+        }
+
         log.info("订单自动取消成功, orderId={}", orderId);
 
         // 发布库存同步事件，事务提交后由监听器异步执行
