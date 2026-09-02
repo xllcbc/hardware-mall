@@ -66,7 +66,7 @@
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { updateUserInfo, bindPhone } from '@/api/user'
-import { BASE_URL } from '@/utils/request'
+import { uploadAvatar } from '@/utils/upload'
 
 const userStore = useUserStore()
 const saving = ref(false)
@@ -87,8 +87,19 @@ const handleClose = () => {
   uni.navigateBack()
 }
 
-const onChooseAvatar = (e: any) => {
-  formData.value.avatarUrl = e.detail.avatarUrl || ''
+const onChooseAvatar = async (e: any) => {
+  const tempUrl = e.detail.avatarUrl
+  if (!tempUrl) return
+  uni.showLoading({ title: '上传中...' })
+  try {
+    formData.value.avatarUrl = await uploadAvatar(tempUrl)
+    uni.showToast({ title: '上传成功', icon: 'success' })
+  } catch (err: any) {
+    console.error('头像上传失败:', err)
+    uni.showToast({ title: err.message || '头像上传失败', icon: 'none' })
+  } finally {
+    uni.hideLoading()
+  }
 }
 
 const onNicknameBlur = () => {
@@ -101,7 +112,7 @@ const handleChooseImage = async () => {
       uni.chooseImage({
         count: 1,
         sizeType: ['compressed'],
-        sourceType: ['album'],
+        sourceType: ['album', 'camera'],
         success: resolve,
         fail: reject
       })
@@ -109,32 +120,15 @@ const handleChooseImage = async () => {
 
     if (res.tempFilePaths && res.tempFilePaths.length > 0) {
       uni.showLoading({ title: '上传中...' })
-
-      const token = uni.getStorageSync('token')
-
-      uni.uploadFile({
-        url: `${BASE_URL}/user/upload/avatar`,
-        filePath: res.tempFilePaths[0],
-        name: 'file',
-        header: {
-          'Authorization': token ? `Bearer ${token}` : ''
-        },
-        success: (uploadRes) => {
-          const data = JSON.parse(uploadRes.data)
-          if (data.code === 200 && data.data) {
-            formData.value.avatarUrl = data.data.url
-            uni.showToast({ title: '上传成功', icon: 'success' })
-          } else {
-            uni.showToast({ title: data.message || '上传失败', icon: 'none' })
-          }
-        },
-        fail: () => {
-          uni.showToast({ title: '上传失败', icon: 'none' })
-        },
-        complete: () => {
-          uni.hideLoading()
-        }
-      })
+      try {
+        formData.value.avatarUrl = await uploadAvatar(res.tempFilePaths[0])
+        uni.showToast({ title: '上传成功', icon: 'success' })
+      } catch (err: any) {
+        console.error('头像上传失败:', err)
+        uni.showToast({ title: err.message || '头像上传失败', icon: 'none' })
+      } finally {
+        uni.hideLoading()
+      }
     }
   } catch (e: any) {
     console.error('选择图片失败:', e)

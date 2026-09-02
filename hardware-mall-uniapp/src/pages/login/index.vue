@@ -57,6 +57,7 @@
 import { ref, computed } from 'vue'
 import { login, bindPhone, updateUserInfo } from '@/api/user'
 import { useUserStore } from '@/stores/user'
+import { uploadAvatar } from '@/utils/upload'
 
 const loginLoading = ref(false)
 const avatarUrl = ref('')
@@ -106,6 +107,16 @@ const onGetPhoneNumber = async (e: any) => {
     const result = await login({ code })
 
     uni.setStorageSync('token', result.token)
+
+    if (avatarUrl.value) {
+      try {
+        avatarUrl.value = await uploadAvatar(avatarUrl.value)
+      } catch (err) {
+        console.error('头像上传失败:', err)
+        uni.showToast({ title: '头像上传失败，已使用默认头像', icon: 'none' })
+        avatarUrl.value = ''
+      }
+    }
 
     await updateUserInfo({
       nickname: nickname.value,

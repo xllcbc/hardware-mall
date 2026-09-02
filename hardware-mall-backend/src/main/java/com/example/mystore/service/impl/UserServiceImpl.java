@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
+import com.example.mystore.config.OssProperties;
 import com.example.mystore.entity.db.User;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.UserService;
@@ -31,6 +32,7 @@ public class UserServiceImpl implements UserService {
     private final WechatUtil wechatUtil;
     private final JwtUtil jwtUtil;
     private final RedisUtil redisUtil;
+    private final OssProperties ossProperties;
 
     @Override
     public User login(String code) {
@@ -92,6 +94,10 @@ public class UserServiceImpl implements UserService {
             existUser.setNickname(user.getNickname());
         }
         if (user.getAvatarUrl() != null) {
+            String expectedPrefix = ossProperties.getDomain() + "/";
+            if (!user.getAvatarUrl().startsWith(expectedPrefix)) {
+                throw new RuntimeException("头像地址不合法");
+            }
             existUser.setAvatarUrl(user.getAvatarUrl());
         }
         if (user.getPhone() != null) {

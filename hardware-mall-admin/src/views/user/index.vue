@@ -28,9 +28,8 @@
         <el-table-column label="用户信息" min-width="200">
           <template #default="{ row }">
             <div class="user-info-cell">
-              <el-avatar :size="40" class="user-avatar">
-                <el-icon v-if="!row.avatarUrl"><User /></el-icon>
-                <img v-else :src="row.avatarUrl" />
+              <el-avatar :size="40" class="user-avatar" :src="row.avatarUrl">
+                <el-icon><User /></el-icon>
               </el-avatar>
               <div class="user-detail">
                 <span class="user-name">{{ row.nickname || '未设置昵称' }}</span>

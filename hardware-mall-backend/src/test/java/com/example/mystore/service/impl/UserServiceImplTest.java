@@ -3,6 +3,7 @@ package com.example.mystore.service.impl;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
+import com.example.mystore.config.OssProperties;
 import com.example.mystore.entity.db.User;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.util.JwtUtil;
@@ -41,6 +42,9 @@ class UserServiceImplTest {
 
     @Mock
     private RedisUtil redisUtil;
+
+    @Mock
+    private OssProperties ossProperties;
 
     @InjectMocks
     private UserServiceImpl userService;
@@ -105,6 +109,37 @@ class UserServiceImplTest {
         assertThatThrownBy(() -> userService.updateUserInfo(update))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("用户不存在");
+    }
+
+    @Test
+    void testUpdateUserInfo_ValidAvatarUrl() {
+        when(userMapper.selectById(2L)).thenReturn(user);
+        when(ossProperties.getDomain()).thenReturn("https://java0251014.oss-cn-beijing.aliyuncs.com");
+
+        User update = new User();
+        update.setId(2L);
+        update.setAvatarUrl("https://java0251014.oss-cn-beijing.aliyuncs.com/avatars/test.jpg");
+
+        User result = userService.updateUserInfo(update);
+
+        assertThat(result.getAvatarUrl()).isEqualTo("https://java0251014.oss-cn-beijing.aliyuncs.com/avatars/test.jpg");
+        verify(userMapper).updateById(any(User.class));
+    }
+
+    @Test
+    void testUpdateUserInfo_InvalidAvatarUrl_ThrowsException() {
+        when(userMapper.selectById(2L)).thenReturn(user);
+        when(ossProperties.getDomain()).thenReturn("https://java0251014.oss-cn-beijing.aliyuncs.com");
+
+        User update = new User();
+        update.setId(2L);
+        update.setAvatarUrl("wxfile://tmp_abc123.jpeg");
+
+        assertThatThrownBy(() -> userService.updateUserInfo(update))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("头像地址不合法");
+
+        verify(userMapper, never()).updateById(any(User.class));
     }
 
     @Test
