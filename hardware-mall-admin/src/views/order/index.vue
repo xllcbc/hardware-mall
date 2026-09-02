@@ -160,6 +160,7 @@
           <span class="amount">¥{{ Number(currentOrder.totalAmount).toFixed(2) }}</span>
         </el-descriptions-item>
         <el-descriptions-item label="下单时间">{{ currentOrder.createTime }}</el-descriptions-item>
+        <el-descriptions-item label="买家备注" :span="2">{{ currentOrder.buyerRemark || '-' }}</el-descriptions-item>
       </el-descriptions>
       
       <el-divider>商品明细</el-divider>

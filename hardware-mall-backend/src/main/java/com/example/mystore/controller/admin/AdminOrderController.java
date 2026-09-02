@@ -2,9 +2,11 @@ package com.example.mystore.controller.admin;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.result.Result;
+import com.example.mystore.entity.dto.ShipOrderRequest;
 import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.annotation.RequireAdmin;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -42,8 +44,8 @@ public class AdminOrderController {
     @PutMapping("/{id}/ship")
     public Result<Void> shipOrder(
             @PathVariable Long id,
-            @RequestBody Map<String, String> params) {
-        orderService.shipOrder(id, params.get("logisticsNo"));
+            @RequestBody @Valid ShipOrderRequest request) {
+        orderService.shipOrder(id, request.getLogisticsId(), request.getLogisticsNo());
         return Result.success();
     }
 

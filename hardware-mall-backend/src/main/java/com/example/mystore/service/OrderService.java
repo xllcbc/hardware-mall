@@ -22,7 +22,7 @@ public interface OrderService {
     DashboardStatsVO getDashboardStats();
     List<RecentOrderVO> getRecentOrders(Integer limit);
     
-    void shipOrder(Long orderId, String logisticsNo);
+    void shipOrder(Long orderId, Long logisticsId, String logisticsNo);
     void refundOrder(Long orderId, String reason);
     
     /**

@@ -445,7 +445,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
-    public void shipOrder(Long orderId, String logisticsNo) {
+    public void shipOrder(Long orderId, Long logisticsId, String logisticsNo) {
         Order order = orderMapper.selectById(orderId);
         if (order == null) {
             throw new RuntimeException("订单不存在");
@@ -453,8 +453,13 @@ public class OrderServiceImpl implements OrderService {
         if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT) {
             throw new RuntimeException("只能发货待发货的订单");
         }
+        Logistics logistics = logisticsMapper.selectById(logisticsId);
+        if (logistics == null) {
+            throw new RuntimeException("物流公司不存在");
+        }
 
         order.setStatus(StatusConstants.ORDER_SHIPPED);
+        order.setLogisticsId(logisticsId);
         order.setLogisticsNo(logisticsNo);
         order.setShipTime(LocalDateTime.now());
         order.setUpdateTime(LocalDateTime.now());

@@ -53,6 +53,20 @@
         </view>
       </view>
 
+      <view v-if="order.logisticsNo" class="card info-card">
+        <view class="info-row">
+          <text class="info-label">物流公司</text>
+          <text class="info-value">{{ order.logisticsName || '-' }}</text>
+        </view>
+        <view class="info-row">
+          <text class="info-label">物流单号</text>
+          <view class="info-value-row">
+            <text class="info-value">{{ order.logisticsNo }}</text>
+            <view class="copy-btn" @tap="copyLogisticsNo">复制</view>
+          </view>
+        </view>
+      </view>
+
       <view class="card items-card">
         <view class="items-header">商品清单</view>
         <view class="item" v-for="(item, index) in order.items" :key="item.id">
@@ -199,6 +213,15 @@ const formatTime = (time: string) => {
 const copyOrderNo = () => {
   uni.setClipboardData({
     data: order.value.orderNo!,
+    success: () => {
+      uni.showToast({ title: '已复制', icon: 'success' })
+    }
+  })
+}
+
+const copyLogisticsNo = () => {
+  uni.setClipboardData({
+    data: order.value.logisticsNo!,
     success: () => {
       uni.showToast({ title: '已复制', icon: 'success' })
     }

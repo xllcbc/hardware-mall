@@ -253,14 +253,30 @@ class OrderServiceImplTest {
         order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
 
         when(orderMapper.selectById(1L)).thenReturn(order);
+        when(logisticsMapper.selectById(2L)).thenReturn(logistics);
 
-        orderService.shipOrder(1L, "SF123456789");
+        orderService.shipOrder(1L, 2L, "SF123456789");
 
         verify(orderMapper).updateById(org.mockito.Mockito.<Order>argThat(o ->
                 o.getStatus() == StatusConstants.ORDER_SHIPPED &&
+                o.getLogisticsId() == 2L &&
                 "SF123456789".equals(o.getLogisticsNo()) &&
                 o.getShipTime() != null
         ));
+    }
+
+    @Test
+    void testShipOrder_LogisticsNotFound() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(logisticsMapper.selectById(999L)).thenReturn(null);
+
+        assertThatThrownBy(() -> orderService.shipOrder(1L, 999L, "SF123456789"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("物流公司不存在");
     }
 
     @Test
