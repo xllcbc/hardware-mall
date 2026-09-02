@@ -50,7 +50,6 @@
           <view class="order-actions">
             <view class="action-btn secondary" @tap.stop="goOrderDetail(order.id)">查看详情</view>
             <view v-if="order.status === 1" class="action-btn secondary" @tap.stop="cancelOrder(order)">取消订单</view>
-            <view v-if="order.status === 3 || order.status === 4" class="action-btn secondary" @tap.stop="goOrderDetail(order.id)">查看物流</view>
             <view v-if="order.status === 3" class="action-btn primary" @tap.stop="confirmReceive(order)">确认收货</view>
             <view v-if="order.status === 4 || order.status === 5" class="action-btn secondary" @tap.stop="deleteOrder(order)">删除订单</view>
           </view>
