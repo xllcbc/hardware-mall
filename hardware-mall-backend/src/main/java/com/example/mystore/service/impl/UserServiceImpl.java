@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.User;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.UserService;
@@ -48,6 +49,9 @@ public class UserServiceImpl implements UserService {
             user.setCreateTime(LocalDateTime.now());
             userMapper.insert(user);
         } else {
+            if (user.getStatus() == StatusConstants.USER_STATUS_DISABLED) {
+                throw new BusinessException("账号已被禁用");
+            }
             user.setLastLoginTime(LocalDateTime.now());
             userMapper.updateById(user);
         }
@@ -127,10 +131,29 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public String refreshToken(Long userId) {
+    public String refreshToken(Long userId, String oldToken) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        if (user.getStatus() == StatusConstants.USER_STATUS_DISABLED) {
+            throw new BusinessException("账号已被禁用");
+        }
+
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);
-        return jwtUtil.generateToken(claims);
+        claims.put("role", user.getRole());
+        String newToken = jwtUtil.generateToken(claims);
+
+        redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + userId, newToken);
+        redisUtil.sRemove(RedisConstants.PREFIX_USER_TOKENS + userId, oldToken);
+
+        long ttl = (jwtUtil.getExpirationFromToken(oldToken) - System.currentTimeMillis()) / 1000;
+        if (ttl > 0) {
+            redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + oldToken, "1", ttl, TimeUnit.SECONDS);
+        }
+
+        return newToken;
     }
 
     @Override
@@ -156,13 +179,19 @@ public class UserServiceImpl implements UserService {
         if (user == null) {
             throw new RuntimeException("用户不存在");
         }
+        if (user.getRole() == StatusConstants.USER_ROLE_ADMIN) {
+            throw new BusinessException("管理员账号不允许封禁");
+        }
         user.setStatus(status);
         userMapper.updateById(user);
         if (status == StatusConstants.USER_STATUS_DISABLED) {
             java.util.Set<String> tokens = redisUtil.sMembers(RedisConstants.PREFIX_USER_TOKENS + id, String.class);
             if (tokens != null && !tokens.isEmpty()) {
                 for (String token : tokens) {
-                    redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + token, "1");
+                    long ttl = (jwtUtil.getExpirationFromToken(token) - System.currentTimeMillis()) / 1000;
+                    if (ttl > 0) {
+                        redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + token, "1", ttl, TimeUnit.SECONDS);
+                    }
                 }
                 redisUtil.delete(RedisConstants.PREFIX_USER_TOKENS + id);
             }

@@ -60,9 +60,10 @@ public class UserController {
     }
 
     @PostMapping("/refresh")
-    public Result<String> refreshToken() {
+    public Result<String> refreshToken(@RequestHeader("Authorization") String authHeader) {
         Long userId = UserContext.getUserId();
-        return Result.success(userService.refreshToken(userId));
+        String oldToken = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+        return Result.success(userService.refreshToken(userId, oldToken));
     }
 
     @PostMapping("/phone")

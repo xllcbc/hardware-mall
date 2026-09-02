@@ -66,18 +66,26 @@ public class AdminAuthController {
     }
 
     @PostMapping("/refresh")
-    public Result<String> refresh() {
+    public Result<String> refresh(@RequestHeader("Authorization") String authHeader) {
         Long userId = UserContext.getUserId();
         User admin = userService.getUserInfo(userId);
         if (admin == null) {
             return Result.error("管理员账号不存在");
         }
 
+        String oldToken = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", admin.getId());
         claims.put("role", admin.getRole());
         claims.put("username", admin.getNickname());
         String newToken = jwtUtil.generateToken(claims);
+
+        long ttl = (jwtUtil.getExpirationFromToken(oldToken) - System.currentTimeMillis()) / 1000;
+        if (ttl > 0) {
+            redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + oldToken, "1", ttl, TimeUnit.SECONDS);
+        }
+
         return Result.success(newToken);
     }
 

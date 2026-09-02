@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.User;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.util.JwtUtil;
@@ -120,15 +121,40 @@ class UserServiceImplTest {
     }
 
     @Test
+    void testUpdateUserStatus_AdminCannotBeDisabled() {
+        User admin = new User();
+        admin.setId(99L);
+        admin.setRole(StatusConstants.USER_ROLE_ADMIN);
+        admin.setStatus(StatusConstants.USER_STATUS_NORMAL);
+        when(userMapper.selectById(99L)).thenReturn(admin);
+
+        assertThatThrownBy(() -> userService.updateUserStatus(99L, StatusConstants.USER_STATUS_DISABLED))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("管理员账号不允许封禁");
+
+        verify(userMapper, never()).updateById(any(User.class));
+        verifyNoInteractions(redisUtil);
+    }
+
+    @Test
     void testRefreshToken() {
-        when(jwtUtil.generateToken(anyMap())).thenReturn("mock_token_123");
+        User user = new User();
+        user.setId(2L);
+        user.setStatus(1);
+        user.setRole(1);
+        when(userMapper.selectById(2L)).thenReturn(user);
+        when(jwtUtil.generateToken(anyMap())).thenReturn("new_token");
+        when(jwtUtil.getExpirationFromToken("old_token")).thenReturn(System.currentTimeMillis() + 3600000);
 
-        String token = userService.refreshToken(2L);
+        String token = userService.refreshToken(2L, "old_token");
 
-        assertThat(token).isEqualTo("mock_token_123");
+        assertThat(token).isEqualTo("new_token");
         verify(jwtUtil).generateToken(argThat(claims ->
                 claims.containsKey("userId") && claims.get("userId").equals(2L)
+                        && claims.containsKey("role")
         ));
+        verify(redisUtil).sAdd("user:tokens:" + 2L, "new_token");
+        verify(redisUtil).sRemove("user:tokens:" + 2L, "old_token");
     }
 
     @Test

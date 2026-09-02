@@ -9,7 +9,7 @@ public interface UserService {
     User getUserByOpenid(String openid);
     User updateUserInfo(User user);
     User updatePhone(Long userId, String phoneCode);
-    String refreshToken(Long userId);
+    String refreshToken(Long userId, String oldToken);
     Page<User> getUserPage(Integer page, Integer limit, String province, String city, Integer status);
     void updateUserStatus(Long id, Integer status);
     void updateUserRegion(Long id, String province, String city);
