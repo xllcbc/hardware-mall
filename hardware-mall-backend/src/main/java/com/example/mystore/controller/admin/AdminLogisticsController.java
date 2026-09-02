@@ -8,6 +8,8 @@ import com.example.mystore.annotation.RequireAdmin;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/admin/logistics")
 @RequiredArgsConstructor
@@ -49,7 +51,10 @@ public class AdminLogisticsController {
     }
 
     @PutMapping("/{id}/status")
-    public Result<Void> updateStatus(@PathVariable Long id, @RequestParam Integer status) {
+    public Result<Void> updateStatus(
+            @PathVariable Long id,
+            @RequestBody Map<String, Integer> params) {
+        Integer status = params.get("status");
         logisticsService.updateStatus(id, status);
         return Result.success();
     }

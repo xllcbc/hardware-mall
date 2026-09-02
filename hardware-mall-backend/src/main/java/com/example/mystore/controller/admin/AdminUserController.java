@@ -29,7 +29,10 @@ public class AdminUserController {
     }
 
     @PutMapping("/{id}/status")
-    public Result<Void> updateUserStatus(@PathVariable Long id, @RequestParam Integer status) {
+    public Result<Void> updateUserStatus(
+            @PathVariable Long id,
+            @RequestBody Map<String, Integer> params) {
+        Integer status = params.get("status");
         userService.updateUserStatus(id, status);
         return Result.success();
     }
