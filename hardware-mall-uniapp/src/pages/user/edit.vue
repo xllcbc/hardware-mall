@@ -122,7 +122,7 @@ const handleChooseImage = async () => {
         success: (uploadRes) => {
           const data = JSON.parse(uploadRes.data)
           if (data.code === 200 && data.data) {
-            formData.value.avatarUrl = data.data
+            formData.value.avatarUrl = data.data.url
             uni.showToast({ title: '上传成功', icon: 'success' })
           } else {
             uni.showToast({ title: data.message || '上传失败', icon: 'none' })
