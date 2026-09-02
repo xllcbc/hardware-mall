@@ -11,6 +11,7 @@ import com.example.mystore.service.UserService;
 import com.example.mystore.util.JwtUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.WechatUtil;
+import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -188,9 +189,14 @@ public class UserServiceImpl implements UserService {
             java.util.Set<String> tokens = redisUtil.sMembers(RedisConstants.PREFIX_USER_TOKENS + id, String.class);
             if (tokens != null && !tokens.isEmpty()) {
                 for (String token : tokens) {
-                    long ttl = (jwtUtil.getExpirationFromToken(token) - System.currentTimeMillis()) / 1000;
-                    if (ttl > 0) {
-                        redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + token, "1", ttl, TimeUnit.SECONDS);
+                    try {
+                        long ttl = (jwtUtil.getExpirationFromToken(token) - System.currentTimeMillis()) / 1000;
+                        if (ttl > 0) {
+                            redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + token, "1", ttl, TimeUnit.SECONDS);
+                        }
+                    } catch (JwtException e) {
+                        // 已自然过期或损坏的死 token 无需拉黑（拦截器本就会 401），跳过继续
+                        log.info("封禁扫荡: 登记集中存在无效 token，跳过拉黑, userId={}", id);
                     }
                 }
                 redisUtil.delete(RedisConstants.PREFIX_USER_TOKENS + id);

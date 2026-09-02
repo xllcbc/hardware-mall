@@ -1,5 +1,6 @@
 package com.example.mystore.service.impl;
 
+import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.User;
@@ -7,6 +8,7 @@ import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.util.JwtUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.WechatUtil;
+import io.jsonwebtoken.ExpiredJwtException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -15,7 +17,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -134,6 +139,34 @@ class UserServiceImplTest {
 
         verify(userMapper, never()).updateById(any(User.class));
         verifyNoInteractions(redisUtil);
+    }
+
+    @Test
+    void testUpdateUserStatus_DisableSweepSkipsExpiredTokens() {
+        User user = new User();
+        user.setId(2L);
+        user.setRole(StatusConstants.USER_ROLE_REGULAR);
+        user.setStatus(StatusConstants.USER_STATUS_NORMAL);
+        when(userMapper.selectById(2L)).thenReturn(user);
+
+        Set<String> tokens = new HashSet<>();
+        tokens.add("expired_token");
+        tokens.add("live_token");
+        when(redisUtil.sMembers("user:tokens:2", String.class)).thenReturn(tokens);
+
+        when(jwtUtil.getExpirationFromToken("expired_token"))
+                .thenThrow(new ExpiredJwtException(null, null, "JWT expired"));
+        when(jwtUtil.getExpirationFromToken("live_token"))
+                .thenReturn(System.currentTimeMillis() + 3600_000L);
+
+        userService.updateUserStatus(2L, StatusConstants.USER_STATUS_DISABLED);
+
+        verify(userMapper).updateById(argThat((User u) -> u.getStatus() == StatusConstants.USER_STATUS_DISABLED));
+        verify(redisUtil).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
+                eq("1"), anyLong(), eq(TimeUnit.SECONDS));
+        verify(redisUtil, never()).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "expired_token"),
+                any(), anyLong(), any(TimeUnit.class));
+        verify(redisUtil).delete("user:tokens:2");
     }
 
     @Test
