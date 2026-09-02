@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.SpecVO;
@@ -124,6 +125,62 @@ class SkuServiceImplTest {
         assertThatThrownBy(() -> skuService.getSkuById(3L))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("SKU不存在");
+    }
+
+    @Test
+    void testCreateSku_DuplicateSpecCombo_SeedHashFormat_Throws() {
+        sku2.setSpecHash("auto_c1_i1");
+        when(spuMapper.selectById(1L)).thenReturn(new Spu());
+        when(skuMapper.selectList(any())).thenReturn(Collections.singletonList(sku2));
+
+        Sku incoming = new Sku();
+        incoming.setSpuId(1L);
+        SpecVO dupSpec = new SpecVO();
+        dupSpec.setTemplateId(1L);
+        dupSpec.setItemId(1L);
+        incoming.setSpecs(Arrays.asList(dupSpec));
+
+        assertThatThrownBy(() -> skuService.createSku(incoming))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已存在");
+        verify(skuMapper, never()).insert(any(Sku.class));
+    }
+
+    @Test
+    void testCreateSku_NewCombo_Inserts() {
+        when(spuMapper.selectById(1L)).thenReturn(new Spu());
+        when(skuMapper.selectList(any())).thenReturn(Collections.singletonList(sku2));
+
+        Sku incoming = new Sku();
+        incoming.setSpuId(1L);
+        SpecVO freshSpec = new SpecVO();
+        freshSpec.setTemplateId(1L);
+        freshSpec.setItemId(2L);
+        incoming.setSpecs(Arrays.asList(freshSpec));
+
+        Sku result = skuService.createSku(incoming);
+
+        verify(skuMapper).insert(any(Sku.class));
+        assertThat(result.getSpecHash()).hasSize(32).matches("[0-9a-f]{32}");
+        verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
+    }
+
+    @Test
+    void testUpdateSku_DuplicateSpecCombo_Throws() {
+        when(skuMapper.selectById(1L)).thenReturn(sku1);
+        when(skuMapper.selectList(any())).thenReturn(Arrays.asList(sku1, sku2));
+
+        Sku incoming = new Sku();
+        incoming.setId(1L);
+        SpecVO collidingSpec = new SpecVO();
+        collidingSpec.setTemplateId(1L);
+        collidingSpec.setItemId(1L);
+        incoming.setSpecs(Arrays.asList(collidingSpec));
+
+        assertThatThrownBy(() -> skuService.updateSku(incoming))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已存在");
+        verify(skuMapper, never()).updateById(any(Sku.class));
     }
 
     @Test

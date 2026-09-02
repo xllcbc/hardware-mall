@@ -1,9 +1,9 @@
 package com.example.mystore.service.impl;
 
-import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.db.SpecItem;
@@ -30,7 +30,6 @@ import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -169,6 +168,7 @@ public class SkuServiceImpl implements SkuService {
         if (spu == null) {
             throw new RuntimeException("商品不存在");
         }
+        checkSpecComboUnique(sku.getSpuId(), null, sku.getSpecs());
 
         sku.setSpecHash(computeSpecHash(sku.getSpecs()));
         sku.setCreateTime(LocalDateTime.now());
@@ -193,6 +193,7 @@ public class SkuServiceImpl implements SkuService {
         }
 
         if (sku.getSpecs() != null) {
+            checkSpecComboUnique(exist.getSpuId(), exist.getId(), sku.getSpecs());
             exist.setSpecs(sku.getSpecs());
             exist.setSpecHash(computeSpecHash(sku.getSpecs()));
         }
@@ -263,11 +264,9 @@ public class SkuServiceImpl implements SkuService {
             specItemLists.add(items);
         }
 
-        Map<String, Sku> existingByHash = new HashMap<>();
-        for (Sku existing : getSkusBySpu(spuId)) {
-            if (existing.getSpecHash() != null) {
-                existingByHash.put(existing.getSpecHash(), existing);
-            }
+        Map<String, Sku> existingByKey = new HashMap<>();
+        for (Sku existing : getSkusBySpu(spuId, null)) {
+            existingByKey.put(normalizeSpecKey(existing.getSpecs()), existing);
         }
 
         List<Sku> result = new ArrayList<>();
@@ -282,8 +281,7 @@ public class SkuServiceImpl implements SkuService {
                 specs.add(specVO);
             }
 
-            String specHash = computeSpecHash(specs);
-            Sku exist = existingByHash.get(specHash);
+            Sku exist = existingByKey.get(normalizeSpecKey(specs));
             if (exist != null) {
                 result.add(exist);
                 continue;
@@ -292,7 +290,7 @@ public class SkuServiceImpl implements SkuService {
             Sku sku = new Sku();
             sku.setSpuId(spuId);
             sku.setSpecs(specs);
-            sku.setSpecHash(specHash);
+            sku.setSpecHash(computeSpecHash(specs));
             sku.setPrice(spu.getOriginalPrice() != null ? spu.getOriginalPrice() : BigDecimal.ZERO);
             sku.setStock(0);
             sku.setStatus(1);
@@ -329,13 +327,38 @@ public class SkuServiceImpl implements SkuService {
     }
 
     private String computeSpecHash(List<SpecVO> specs) {
+        return md5(normalizeSpecKey(specs));
+    }
+
+    private String normalizeSpecKey(List<SpecVO> specs) {
         if (specs == null || specs.isEmpty()) {
             return "";
         }
-        List<SpecVO> sortedSpecs = new ArrayList<>(specs);
-        sortedSpecs.sort(Comparator.comparingLong(SpecVO::getTemplateId));
-        String json = JSON.toJSONString(sortedSpecs);
-        return md5(json);
+        List<String> entries = new ArrayList<>();
+        for (SpecVO spec : specs) {
+            if (spec == null) {
+                continue;
+            }
+            if (spec.getTemplateId() == null) {
+                entries.add("default");
+            } else {
+                entries.add(spec.getTemplateId() + ":" + spec.getItemId());
+            }
+        }
+        Collections.sort(entries);
+        return String.join("|", entries);
+    }
+
+    private void checkSpecComboUnique(Long spuId, Long excludeSkuId, List<SpecVO> specs) {
+        String specKey = normalizeSpecKey(specs);
+        for (Sku existing : getSkusBySpu(spuId, null)) {
+            if (excludeSkuId != null && excludeSkuId.equals(existing.getId())) {
+                continue;
+            }
+            if (normalizeSpecKey(existing.getSpecs()).equals(specKey)) {
+                throw new BusinessException("该规格组合的SKU已存在");
+            }
+        }
     }
 
     private String md5(String input) {
