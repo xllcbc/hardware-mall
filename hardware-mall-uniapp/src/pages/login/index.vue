@@ -1,7 +1,7 @@
 <template>
   <view class="login-container">
     <view class="login-header">
-      <image class="logo" src="/static/images/placeholder.svg" mode="aspectFill" />
+      <image class="logo" src="/static/images/logo.jpg" mode="aspectFill" />
       <text class="app-name">五金商城</text>
       <text class="app-slogan">品质五金 畅心购</text>
     </view>
