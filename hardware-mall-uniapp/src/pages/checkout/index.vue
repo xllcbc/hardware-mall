@@ -54,10 +54,6 @@
           <text class="summary-value">¥{{ formatPrice(goodsAmount) }}</text>
         </view>
         <view class="summary-row">
-          <text class="summary-label">配送方式</text>
-          <text class="summary-value">{{ selectedLogistics ? selectedLogistics.name : '暂无可用配送方式' }}</text>
-        </view>
-        <view class="summary-row">
           <text class="summary-label">运费</text>
           <text class="summary-value">{{ freightAmount > 0 ? '¥' + formatPrice(freightAmount) : '免运费' }}</text>
         </view>
