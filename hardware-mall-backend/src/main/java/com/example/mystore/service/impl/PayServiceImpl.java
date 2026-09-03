@@ -33,7 +33,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -53,6 +55,7 @@ public class PayServiceImpl implements PayService {
     private final DingTalkAlertService dingTalkAlertService;
     private final SkuService skuService;
     private final ApplicationEventPublisher applicationEventPublisher;
+    private final PlatformTransactionManager transactionManager;
 
     @Value("${wechat.appid}")
     private String appId;
@@ -64,8 +67,44 @@ public class PayServiceImpl implements PayService {
     private String notifyUrl;
 
     @Override
-    @Transactional
     public Map<String, String> prepay(Long userId, Long orderId) {
+        // M7: 事务分段 —— 校验+建记录在事务内, 微信 HTTP 在事务外,
+        // 避免秒级外呼占死 DB 连接(连接池全站共享)
+        PendingPrepay prep = new TransactionTemplate(transactionManager)
+                .execute(status -> preparePrepay(userId, orderId));
+
+        try {
+            PrepayWithRequestPaymentResponse response =
+                    callWechatPrepay(prep.outTradeNo(), prep.amount(), prep.openid());
+            Map<String, String> params = new HashMap<>();
+            params.put("appId", response.getAppId());
+            params.put("timeStamp", response.getTimeStamp());
+            params.put("nonceStr", response.getNonceStr());
+            params.put("packageValue", response.getPackageVal());
+            params.put("signType", response.getSignType());
+            params.put("paySign", response.getPaySign());
+            return params;
+        } catch (Exception e) {
+            log.error("微信统一下单失败, orderId={}, outTradeNo={}", orderId, prep.outTradeNo(), e);
+            if (prep.created()) {
+                // 本次新建的记录标 CLOSED(独立小事务保证落库)
+                // 旧实现在 @Transactional 方法内 catch 后标 CLOSED 再 rethrow, 被整体回滚, 是死代码
+                new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                        paymentRecordMapper.update(null,
+                                new LambdaUpdateWrapper<PaymentRecord>()
+                                        .eq(PaymentRecord::getOutTradeNo, prep.outTradeNo())
+                                        .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_PENDING)
+                                        .set(PaymentRecord::getStatus, PaymentRecord.STATUS_CLOSED)
+                                        .set(PaymentRecord::getUpdateTime, LocalDateTime.now())));
+            }
+            throw new BusinessException("创建支付订单失败，请重试");
+        }
+    }
+
+    /**
+     * prepay 段1（事务内）: 校验订单归属/状态 + 查或建 PENDING 支付记录
+     */
+    private PendingPrepay preparePrepay(Long userId, Long orderId) {
         Order order = orderMapper.selectById(orderId);
         if (order == null) {
             throw new BusinessException("订单不存在");
@@ -87,49 +126,29 @@ public class PayServiceImpl implements PayService {
                .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_PENDING);
         PaymentRecord existingRecord = paymentRecordMapper.selectOne(wrapper);
 
-        String outTradeNo;
         if (existingRecord != null) {
-            outTradeNo = existingRecord.getOutTradeNo();
-        } else {
-            outTradeNo = generateOutTradeNo(orderId);
-            PaymentRecord record = new PaymentRecord();
-            record.setOrderId(orderId);
-            record.setOutTradeNo(outTradeNo);
-            record.setAmount(order.getPayAmount());
-            record.setStatus(PaymentRecord.STATUS_PENDING);
-            record.setCreateTime(LocalDateTime.now());
-            record.setUpdateTime(LocalDateTime.now());
-            paymentRecordMapper.insert(record);
+            // 复用既有 PENDING 记录(上次 prepay HTTP 失败可重试), 失败时不标 CLOSED
+            return new PendingPrepay(existingRecord.getOutTradeNo(), user.getOpenid(), order.getPayAmount(), false);
         }
 
-        try {
-            PrepayWithRequestPaymentResponse response = callWechatPrepay(outTradeNo, order.getPayAmount(), user.getOpenid());
-            Map<String, String> params = new HashMap<>();
-            params.put("appId", response.getAppId());
-            params.put("timeStamp", response.getTimeStamp());
-            params.put("nonceStr", response.getNonceStr());
-            params.put("packageValue", response.getPackageVal());
-            params.put("signType", response.getSignType());
-            params.put("paySign", response.getPaySign());
-            return params;
-        } catch (Exception e) {
-            log.error("微信统一下单失败, orderId={}, outTradeNo={}", orderId, outTradeNo, e);
-            if (existingRecord == null) {
-                PaymentRecord record = paymentRecordMapper.selectOne(
-                        new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOutTradeNo, outTradeNo));
-                if (record != null) {
-                    record.setStatus(PaymentRecord.STATUS_CLOSED);
-                    record.setUpdateTime(LocalDateTime.now());
-                    paymentRecordMapper.updateById(record);
-                }
-            }
-            throw new BusinessException("创建支付订单失败，请重试");
-        }
+        String outTradeNo = generateOutTradeNo(orderId);
+        PaymentRecord record = new PaymentRecord();
+        record.setOrderId(orderId);
+        record.setOutTradeNo(outTradeNo);
+        record.setAmount(order.getPayAmount());
+        record.setStatus(PaymentRecord.STATUS_PENDING);
+        record.setCreateTime(LocalDateTime.now());
+        record.setUpdateTime(LocalDateTime.now());
+        paymentRecordMapper.insert(record);
+        return new PendingPrepay(outTradeNo, user.getOpenid(), order.getPayAmount(), true);
     }
 
+    private record PendingPrepay(String outTradeNo, String openid, BigDecimal amount, boolean created) {}
+
     @Override
-    @Transactional
     public Map<String, String> callback(String body, String signature, String nonce, String timestamp, String serial) {
+        // M7: 事务只包 processPaymentSuccess 的 DB 原子单元, catch 移到事务外 ——
+        // 否则内层异常给共享事务打 rollback-only 标记后, catch 也拦不住提交时的 UnexpectedRollbackException
         try {
             RequestParam requestParam = new RequestParam.Builder()
                     .serialNumber(serial)
@@ -165,8 +184,9 @@ public class PayServiceImpl implements PayService {
                 return Map.of("code", "FAIL", "message", "支付金额不一致");
             }
 
-            boolean processed = processPaymentSuccess(outTradeNo, transactionId);
-            if (!processed) {
+            Boolean processed = new TransactionTemplate(transactionManager)
+                    .execute(status -> processPaymentSuccess(outTradeNo, transactionId));
+            if (!Boolean.TRUE.equals(processed)) {
                 // processPaymentSuccess 返回 false 涵盖三种情况:
                 //   - 无支付记录(理论上前面已拦截, 兜底)
                 //   - 已被并发处理(回调重试/lazy sync) → 幂等 Ack 微信
@@ -182,8 +202,9 @@ public class PayServiceImpl implements PayService {
     }
 
     @Override
-    @Transactional
     public Map<String, String> refundCallback(String body, String signature, String nonce, String timestamp, String serial) {
+        // M7: REFUNDED 翻转 + 订单 6→7 + 还库存是必须同生共死的原子单元, 包进同一事务;
+        // catch 必须在事务外 —— 事务方法内部 catch 会把"半成品"当正常返回提交进库
         try {
             RequestParam requestParam = new RequestParam.Builder()
                     .serialNumber(serial)
@@ -228,38 +249,40 @@ public class PayServiceImpl implements PayService {
                 return Map.of("code", "SUCCESS", "message", "成功");
             }
 
-            // 退款成功: payment_record 置 REFUNDED, 设 refundTime
-            LocalDateTime now = LocalDateTime.now();
-            paymentRecordMapper.update(null,
-                    new LambdaUpdateWrapper<PaymentRecord>()
-                            .eq(PaymentRecord::getId, record.getId())
-                            .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_REFUNDING)
-                            .set(PaymentRecord::getStatus, PaymentRecord.STATUS_REFUNDED)
-                            .set(PaymentRecord::getRefundTime, now)
-                            .set(PaymentRecord::getUpdateTime, now));
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                LocalDateTime now = LocalDateTime.now();
+                // 退款成功: payment_record 置 REFUNDED, 设 refundTime
+                paymentRecordMapper.update(null,
+                        new LambdaUpdateWrapper<PaymentRecord>()
+                                .eq(PaymentRecord::getId, record.getId())
+                                .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_REFUNDING)
+                                .set(PaymentRecord::getStatus, PaymentRecord.STATUS_REFUNDED)
+                                .set(PaymentRecord::getRefundTime, now)
+                                .set(PaymentRecord::getUpdateTime, now));
 
-            // 订单状态推进 6(退款中) -> 7(已退款), WHERE status=6 防并发
-            // affected>0 才还库存: 防重复回调双还; 已取消单(5)自动退款回调 6→7 不命中也不误还
-            int orderRows = orderMapper.update(null,
-                    new LambdaUpdateWrapper<Order>()
-                            .eq(Order::getId, record.getOrderId())
-                            .eq(Order::getStatus, StatusConstants.ORDER_REFUNDING)
-                            .set(Order::getStatus, StatusConstants.ORDER_REFUNDED)
-                            .set(Order::getUpdateTime, now));
+                // 订单状态推进 6(退款中) -> 7(已退款), WHERE status=6 防并发
+                // affected>0 才还库存: 防重复回调双还; 已取消单(5)自动退款回调 6→7 不命中也不误还
+                int orderRows = orderMapper.update(null,
+                        new LambdaUpdateWrapper<Order>()
+                                .eq(Order::getId, record.getOrderId())
+                                .eq(Order::getStatus, StatusConstants.ORDER_REFUNDING)
+                                .set(Order::getStatus, StatusConstants.ORDER_REFUNDED)
+                                .set(Order::getUpdateTime, now));
 
-            if (orderRows > 0) {
-                List<OrderItem> items = orderItemMapper.selectList(
-                        new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, record.getOrderId()));
-                List<Long> skuIds = new ArrayList<>();
-                for (OrderItem item : items) {
-                    skuService.restoreStock(item.getSkuId(), item.getQuantity());
-                    skuIds.add(item.getSkuId());
+                if (orderRows > 0) {
+                    List<OrderItem> items = orderItemMapper.selectList(
+                            new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, record.getOrderId()));
+                    List<Long> skuIds = new ArrayList<>();
+                    for (OrderItem item : items) {
+                        skuService.restoreStock(item.getSkuId(), item.getQuantity());
+                        skuIds.add(item.getSkuId());
+                    }
+                    applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
+                    log.info("退款成功并恢复库存, orderId={}, outRefundNo={}", record.getOrderId(), outRefundNo);
+                } else {
+                    log.info("退款回调 6→7 未命中, 跳过库存恢复, orderId={}, outRefundNo={}", record.getOrderId(), outRefundNo);
                 }
-                applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
-                log.info("退款成功并恢复库存, orderId={}, outRefundNo={}", record.getOrderId(), outRefundNo);
-            } else {
-                log.info("退款回调 6→7 未命中, 跳过库存恢复, orderId={}, outRefundNo={}", record.getOrderId(), outRefundNo);
-            }
+            });
 
             log.info("退款成功, orderId={}, outRefundNo={}", record.getOrderId(), outRefundNo);
             return Map.of("code", "SUCCESS", "message", "成功");
@@ -309,6 +332,9 @@ public class PayServiceImpl implements PayService {
     /**
      * 支付成功核心处理: payment_record 翻转 PAID + 订单状态 1→2(待发货)
      * 三处复用: 回调 callback / ⑥ OrderCancelStaleJob 微信查单补单 / ⑦ getOrderById lazy sync
+     *
+     * 事务来源(M7): callback 经 TransactionTemplate 包裹调用(内部 this-call 不走代理, 由模板提供事务);
+     * ⑥⑦ 为外部调用, @Transactional 经代理生效
      *
      * 幂等保证:
      *   - 已 PAID 直接返回 false(已被处理过)
@@ -387,8 +413,15 @@ public class PayServiceImpl implements PayService {
         return true;
     }
 
+    /**
+     * 退款受理: 读记录 → 微信 HTTP → CAS PAID→REFUNDING, 三步各自自动提交（M7 去 @Transactional）
+     * 并发安全: outRefundNo 相同微信侧幂等; 双请求下第二个 CAS affect=0 无害
+     *
+     * 注意: processPaymentSuccess 的 ④ 自动退款路径在事务内 this-调用本方法, HTTP 仍短暂占用外层事务连接 ——
+     * 不套 REQUIRES_NEW 是有意的: 挂起外层事务后新连接读不到未提交的 PAID, 会直接抛"未找到已支付的支付记录";
+     * 该路径罕见(回调迟到兜底)且有钉钉告警兜底, 保持现状
+     */
     @Override
-    @Transactional
     public void refund(Long orderId, String reason) {
         LambdaQueryWrapper<PaymentRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(PaymentRecord::getOrderId, orderId)
@@ -418,7 +451,8 @@ public class PayServiceImpl implements PayService {
             refundService.create(refundRequest);
 
             // 微信退款是异步: create() 受理成功不代表钱已到用户账上
-            // 先置 REFUNDING(4) 等退款回调确认成功后才置 REFUNDED(3), 期间允许退款失败回滚/重试
+            // 先置 REFUNDING(4) 等退款回调确认成功后才置 REFUNDED(3), 期间允许退款失败重试
+            // 单条 CAS 自动提交
             paymentRecordMapper.update(null,
                     new LambdaUpdateWrapper<PaymentRecord>()
                             .eq(PaymentRecord::getId, record.getId())

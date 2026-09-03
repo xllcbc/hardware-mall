@@ -1,14 +1,18 @@
 package com.example.mystore.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.entity.db.Sku;
+import com.example.mystore.entity.db.User;
 import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.mapper.PaymentRecordMapper;
 import com.example.mystore.mapper.SkuMapper;
+import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.impl.DingTalkAlertService;
 import com.example.mystore.service.impl.PayServiceImpl;
 import com.wechat.pay.java.core.Config;
@@ -30,6 +34,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -54,14 +59,19 @@ class PayServiceImplTest {
     @Autowired OrderMapper orderMapper;
     @Autowired SkuMapper skuMapper;
     @Autowired OrderItemMapper orderItemMapper;
+    @Autowired UserMapper userMapper;
 
     @SpyBean
     PayServiceImpl payService;
 
     private Long setupOrder(int orderStatus) {
+        return setupOrder(orderStatus, 1L);
+    }
+
+    private Long setupOrder(int orderStatus, Long userId) {
         Order order = new Order();
         order.setOrderNo("TEST_" + System.nanoTime());
-        order.setUserId(1L);
+        order.setUserId(userId);
         order.setAddressId(1L);
         order.setLogisticsId(1L);
         order.setStatus(orderStatus);
@@ -252,10 +262,45 @@ class PayServiceImplTest {
         assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(10);
     }
 
+    // ==================== M7 事务分段 ====================
+
+    @Test
+    void callback_shouldReturnFail_whenNotificationInvalid() {
+        // M7: catch 在事务外 —— 解析/处理抛异常必须得到干净的 FAIL, 而非 UnexpectedRollbackException 500
+        when(notificationParser.parse(any(RequestParam.class), any()))
+                .thenThrow(new RuntimeException("bad signature"));
+
+        Map<String, String> result = payService.callback("body", "sig", "nonce", "ts", "serial");
+
+        assertThat(result).containsEntry("code", "FAIL");
+        verify(dingTalkAlertService).alert(eq("PAY_CALLBACK_FAIL"), anyString());
+    }
+
+    @Test
+    void prepay_shouldMarkClosed_whenWechatPrepayFails() {
+        // M7: HTTP 失败后, 本次新建的 PENDING 记录必须真的落库为 CLOSED
+        // （旧实现写在外层 @Transactional 事务内, 随 rethrow 被整体回滚, 是死代码）
+        User user = new User();
+        user.setOpenid("o-test-prepay");
+        user.setRole(1);
+        user.setStatus(1);
+        userMapper.insert(user);
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+
+        // wechatPayConfig 为 @MockBean: SDK 构建服务/发起调用时必然抛异常, 模拟微信下单失败
+        assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("创建支付订单失败");
+
+        PaymentRecord pr = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(pr).isNotNull();
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_CLOSED);
+    }
+
     // ==================== helper ====================
 
-    private Long setupSku(int stock) {
-        Sku sku = new Sku();
+    private Long setupSku(int stock) {        Sku sku = new Sku();
         sku.setSpuId(1L);
         sku.setSpecs(new java.util.ArrayList<>());
         sku.setSpecHash("HASH_" + System.nanoTime());
