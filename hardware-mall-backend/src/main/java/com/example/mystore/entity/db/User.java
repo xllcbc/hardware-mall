@@ -1,6 +1,7 @@
 package com.example.mystore.entity.db;
 
 import com.baomidou.mybatisplus.annotation.*;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 import java.time.LocalDateTime;
 
@@ -14,6 +15,7 @@ public class User {
     
     private String unionid;
     
+    @Size(max = 50, message = "昵称最多 50 字")
     private String nickname;
     
     private String avatarUrl;

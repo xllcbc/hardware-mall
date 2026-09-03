@@ -7,6 +7,7 @@ import com.example.mystore.entity.db.SpecTemplate;
 import com.example.mystore.service.SpecItemService;
 import com.example.mystore.service.SpecTemplateService;
 import com.example.mystore.annotation.RequireAdmin;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -41,12 +42,12 @@ public class AdminSpecController {
     }
 
     @PostMapping("/template")
-    public Result<SpecTemplate> createTemplate(@RequestBody SpecTemplate template) {
+    public Result<SpecTemplate> createTemplate(@Valid @RequestBody SpecTemplate template) {
         return Result.success(specTemplateService.createTemplate(template));
     }
 
     @PutMapping("/template/{id}")
-    public Result<SpecTemplate> updateTemplate(@PathVariable Long id, @RequestBody SpecTemplate template) {
+    public Result<SpecTemplate> updateTemplate(@PathVariable Long id, @Valid @RequestBody SpecTemplate template) {
         template.setId(id);
         return Result.success(specTemplateService.updateTemplate(template));
     }

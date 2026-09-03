@@ -6,6 +6,7 @@ import com.example.mystore.entity.vo.RecentOrderVO;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.SpuService;
 import com.example.mystore.annotation.RequireAdmin;
+import com.example.mystore.util.PageUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,6 +31,6 @@ public class DashboardController {
     @GetMapping("/recent-orders")
     public Result<List<RecentOrderVO>> getRecentOrders(
             @RequestParam(defaultValue = "5") Integer limit) {
-        return Result.success(orderService.getRecentOrders(limit));
+        return Result.success(orderService.getRecentOrders(PageUtil.clampLimit(limit, 5, 50)));
     }
 }

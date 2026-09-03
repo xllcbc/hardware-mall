@@ -5,6 +5,7 @@ import com.example.mystore.common.result.Result;
 import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.service.LogisticsService;
 import com.example.mystore.annotation.RequireAdmin;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -34,12 +35,12 @@ public class AdminLogisticsController {
     }
 
     @PostMapping
-    public Result<Logistics> createLogistics(@RequestBody Logistics logistics) {
+    public Result<Logistics> createLogistics(@Valid @RequestBody Logistics logistics) {
         return Result.success(logisticsService.createLogistics(logistics));
     }
 
     @PutMapping("/{id}")
-    public Result<Logistics> updateLogistics(@PathVariable Long id, @RequestBody Logistics logistics) {
+    public Result<Logistics> updateLogistics(@PathVariable Long id, @Valid @RequestBody Logistics logistics) {
         logistics.setId(id);
         return Result.success(logisticsService.updateLogistics(logistics));
     }

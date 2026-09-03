@@ -2,6 +2,7 @@ package com.example.mystore.entity.db;
 
 import com.baomidou.mybatisplus.annotation.*;
 import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -12,6 +13,7 @@ public class Logistics {
     @TableId(type = IdType.AUTO)
     private Long id;
     
+    @Size(max = 50, message = "物流公司名称最多 50 字")
     private String name;
     
     private String code;

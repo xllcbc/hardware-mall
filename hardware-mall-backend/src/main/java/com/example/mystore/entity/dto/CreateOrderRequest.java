@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 import java.io.Serializable;
 import java.util.List;
@@ -21,6 +22,7 @@ public class CreateOrderRequest implements Serializable {
     @NotNull(message = "物流方式不能为空")
     private Long logisticsId;
 
+    @Size(max = 500, message = "订单备注最多 500 字")
     private String buyerRemark;
 
     @Data

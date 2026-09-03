@@ -1,6 +1,7 @@
 package com.example.mystore.entity.db;
 
 import com.baomidou.mybatisplus.annotation.*;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 import java.time.LocalDateTime;
 
@@ -12,6 +13,7 @@ public class Category {
     
     private Long parentId;
     
+    @Size(max = 50, message = "分类名称最多 50 字")
     private String name;
     
     private String icon;

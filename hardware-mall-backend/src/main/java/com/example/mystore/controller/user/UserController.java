@@ -8,6 +8,7 @@ import com.example.mystore.service.UserService;
 import com.example.mystore.util.JwtUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.UserContext;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -53,7 +54,7 @@ public class UserController {
     }
 
     @PutMapping("/info")
-    public Result<User> updateUserInfo(@RequestBody User user) {
+    public Result<User> updateUserInfo(@Valid @RequestBody User user) {
         Long userId = UserContext.getUserId();
         user.setId(userId);
         return Result.success(userService.updateUserInfo(user));

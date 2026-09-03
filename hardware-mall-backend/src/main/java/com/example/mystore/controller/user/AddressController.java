@@ -4,6 +4,7 @@ import com.example.mystore.common.result.Result;
 import com.example.mystore.entity.db.Address;
 import com.example.mystore.service.AddressService;
 import com.example.mystore.util.UserContext;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -31,13 +32,13 @@ public class AddressController {
     }
 
     @PostMapping
-    public Result<Address> createAddress(@RequestBody Address address) {
+    public Result<Address> createAddress(@Valid @RequestBody Address address) {
         Long userId = UserContext.getUserId();
         return Result.success(addressService.createAddress(userId, address));
     }
 
     @PutMapping("/{id}")
-    public Result<Address> updateAddress(@PathVariable Long id, @RequestBody Address address) {
+    public Result<Address> updateAddress(@PathVariable Long id, @Valid @RequestBody Address address) {
         Long userId = UserContext.getUserId();
         return Result.success(addressService.updateAddress(userId, id, address));
     }

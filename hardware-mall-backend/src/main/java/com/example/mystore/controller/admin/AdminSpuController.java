@@ -7,6 +7,7 @@ import com.example.mystore.entity.db.Spu;
 import com.example.mystore.service.CategoryService;
 import com.example.mystore.service.SpuService;
 import com.example.mystore.annotation.RequireAdmin;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -38,12 +39,12 @@ public class AdminSpuController {
     }
 
     @PostMapping("/category")
-    public Result<Category> createCategory(@RequestBody Category category) {
+    public Result<Category> createCategory(@Valid @RequestBody Category category) {
         return Result.success(categoryService.createCategory(category));
     }
 
     @PutMapping("/category/{id}")
-    public Result<Category> updateCategory(@PathVariable Long id, @RequestBody Category category) {
+    public Result<Category> updateCategory(@PathVariable Long id, @Valid @RequestBody Category category) {
         category.setId(id);
         return Result.success(categoryService.updateCategory(category));
     }
@@ -70,12 +71,12 @@ public class AdminSpuController {
     }
 
     @PostMapping
-    public Result<Spu> createSpu(@RequestBody Spu spu) {
+    public Result<Spu> createSpu(@Valid @RequestBody Spu spu) {
         return Result.success(spuService.createSpu(spu));
     }
 
     @PutMapping("/{id}")
-    public Result<Spu> updateSpu(@PathVariable Long id, @RequestBody Spu spu) {
+    public Result<Spu> updateSpu(@PathVariable Long id, @Valid @RequestBody Spu spu) {
         spu.setId(id);
         return Result.success(spuService.updateSpu(spu));
     }
