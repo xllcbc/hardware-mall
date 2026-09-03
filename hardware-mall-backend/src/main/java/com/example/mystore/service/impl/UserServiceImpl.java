@@ -87,7 +87,7 @@ public class UserServiceImpl implements UserService {
     public User updateUserInfo(User user) {
         User existUser = userMapper.selectById(user.getId());
         if (existUser == null) {
-            throw new RuntimeException("用户不存在");
+            throw new BusinessException("用户不存在");
         }
 
         if (user.getNickname() != null) {
@@ -114,7 +114,7 @@ public class UserServiceImpl implements UserService {
         String phone = wechatUtil.getPhoneNumber(phoneCode);
         User user = userMapper.selectById(userId);
         if (user == null) {
-            throw new RuntimeException("用户不存在");
+            throw new BusinessException("用户不存在");
         }
         user.setPhone(phone);
         user.setUpdateTime(LocalDateTime.now());
@@ -130,7 +130,7 @@ public class UserServiceImpl implements UserService {
     public void updateUserRegion(Long id, String province, String city) {
         User user = userMapper.selectById(id);
         if (user == null) {
-            throw new RuntimeException("用户不存在");
+            throw new BusinessException("用户不存在");
         }
         user.setProvince(province);
         user.setCity(city);
@@ -185,7 +185,7 @@ public class UserServiceImpl implements UserService {
     public void updateUserStatus(Long id, Integer status) {
         User user = userMapper.selectById(id);
         if (user == null) {
-            throw new RuntimeException("用户不存在");
+            throw new BusinessException("用户不存在");
         }
         if (user.getRole() == StatusConstants.USER_ROLE_ADMIN) {
             throw new BusinessException("管理员账号不允许封禁");

@@ -3,6 +3,7 @@ package com.example.mystore.service.impl;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.model.PutObjectRequest;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.config.OssProperties;
 import com.example.mystore.service.OssService;
 import lombok.RequiredArgsConstructor;
@@ -49,7 +50,7 @@ public class OssServiceImpl implements OssService {
                     new ByteArrayInputStream(file.getBytes())
             ));
         } catch (Exception e) {
-            throw new RuntimeException("文件上传失败: " + e.getMessage());
+            throw new BusinessException("文件上传失败: " + e.getMessage());
         } finally {
             ossClient.shutdown();
         }

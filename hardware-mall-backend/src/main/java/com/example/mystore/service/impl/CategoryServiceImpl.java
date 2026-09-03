@@ -3,6 +3,7 @@ package com.example.mystore.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Category;
 import com.example.mystore.mapper.CategoryMapper;
 import com.example.mystore.service.CategoryService;
@@ -75,7 +76,7 @@ public class CategoryServiceImpl implements CategoryService {
     public Category updateCategory(Category category) {
         Category exist = categoryMapper.selectById(category.getId());
         if (exist == null) {
-            throw new RuntimeException("分类不存在");
+            throw new BusinessException("分类不存在");
         }
 
         if (StringUtils.hasText(category.getName())) {
@@ -101,7 +102,7 @@ public class CategoryServiceImpl implements CategoryService {
     public void deleteCategory(Long id) {
         Category category = categoryMapper.selectById(id);
         if (category == null) {
-            throw new RuntimeException("分类不存在");
+            throw new BusinessException("分类不存在");
         }
         category.setDeleteTime(System.currentTimeMillis());
         categoryMapper.updateById(category);

@@ -2,6 +2,7 @@ package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.SpecTemplate;
 import com.example.mystore.mapper.SpecTemplateMapper;
@@ -41,7 +42,7 @@ public class SpecTemplateServiceImpl implements SpecTemplateService {
     public SpecTemplate getTemplateById(Long id) {
         SpecTemplate template = specTemplateMapper.selectById(id);
         if (template == null || template.getDeleteTime() != 0) {
-            throw new RuntimeException("规格模板不存在");
+            throw new BusinessException("规格模板不存在");
         }
         return template;
     }
@@ -77,7 +78,7 @@ public class SpecTemplateServiceImpl implements SpecTemplateService {
     public SpecTemplate updateTemplate(SpecTemplate template) {
         SpecTemplate exist = specTemplateMapper.selectById(template.getId());
         if (exist == null) {
-            throw new RuntimeException("规格模板不存在");
+            throw new BusinessException("规格模板不存在");
         }
 
         if (StringUtils.hasText(template.getName())) {
@@ -104,7 +105,7 @@ public class SpecTemplateServiceImpl implements SpecTemplateService {
     public void deleteTemplate(Long id) {
         SpecTemplate template = specTemplateMapper.selectById(id);
         if (template == null) {
-            throw new RuntimeException("规格模板不存在");
+            throw new BusinessException("规格模板不存在");
         }
         template.setDeleteTime(System.currentTimeMillis());
         specTemplateMapper.updateById(template);

@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.Sku;
@@ -69,7 +70,7 @@ public class OrderServiceImpl implements OrderService {
         if (idempotencyKey == null || !redisUtil.setIfAbsent(
                 RedisConstants.PREFIX_ORDER_IDEMPOTENCY + idempotencyKey,
                 userId, RedisConstants.IDEMPOTENCY_TTL, TimeUnit.SECONDS)) {
-            throw new RuntimeException("请勿重复下单");
+            throw new BusinessException("请勿重复下单");
         }
 
         // ① 事务外：只读校验 + 构建订单明细快照（不占用 DB 连接事务）
@@ -86,14 +87,14 @@ public class OrderServiceImpl implements OrderService {
     private ValidatedOrder validateAndBuildSnapshot(Long userId, CreateOrderRequest request) {
         Address address = addressMapper.selectById(request.getAddressId());
         if (address == null || !address.getUserId().equals(userId)) {
-            throw new RuntimeException("收货地址不存在");
+            throw new BusinessException("收货地址不存在");
         }
         log.info("地址验证通过, addressId={}", address.getId());
 
         Logistics logistics = logisticsMapper.selectById(request.getLogisticsId());
         log.info("物流查询结果, logistics={}", logistics);
         if (logistics == null || logistics.getStatus() != StatusConstants.LOGISTICS_STATUS_ENABLED) {
-            throw new RuntimeException("物流方式不存在或不可用");
+            throw new BusinessException("物流方式不存在或不可用");
         }
 
         // ① 逐项校验 SKU 并收集（校验顺序与异常语义保持不变）
@@ -102,11 +103,11 @@ public class OrderServiceImpl implements OrderService {
             Sku sku = skuService.getSkuById(cartItem.getSkuId());
             log.info("SKU查询结果, skuId={}, sku={}", cartItem.getSkuId(), sku);
             if (sku == null || sku.getStatus() != 1) {
-                throw new RuntimeException("商品不存在或已下架: " + cartItem.getSkuId());
+                throw new BusinessException("商品不存在或已下架: " + cartItem.getSkuId());
             }
             // 【库存软检查】getSkuById 已返回新鲜库存(读 sku:stock 缓存, miss 回源 DB)
             if (sku.getStock() == null || sku.getStock() < cartItem.getQuantity()) {
-                throw new RuntimeException("库存不足: " + sku.getId());
+                throw new BusinessException("库存不足: " + sku.getId());
             }
             skus.add(sku);
         }
@@ -125,7 +126,7 @@ public class OrderServiceImpl implements OrderService {
             Sku sku = skus.get(i);
             Spu spu = spuMap.get(sku.getSpuId());
             if (spu == null) {
-                throw new RuntimeException("商品不存在或已下架: " + cartItem.getSkuId());
+                throw new BusinessException("商品不存在或已下架: " + cartItem.getSkuId());
             }
             BigDecimal subtotal = sku.getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             totalAmount = totalAmount.add(subtotal);
@@ -164,7 +165,7 @@ public class OrderServiceImpl implements OrderService {
         for (OrderItem item : validated.orderItems()) {
             boolean deducted = skuService.deductStock(item.getSkuId(), item.getQuantity());
             if (!deducted) {
-                throw new RuntimeException("库存扣减失败: " + item.getSkuId());
+                throw new BusinessException("库存扣减失败: " + item.getSkuId());
             }
             spuMapper.incrementSalesCount(item.getSpuId(), item.getQuantity());
         }
@@ -266,7 +267,7 @@ public class OrderServiceImpl implements OrderService {
     public OrderVO getOrderById(Long userId, Long orderId) {
         Order order = orderMapper.selectById(orderId);
         if (order == null || !order.getUserId().equals(userId)) {
-            throw new RuntimeException("订单不存在");
+            throw new BusinessException("订单不存在");
         }
 
         // ⑦ lazy sync: 用户打开待付款订单详情时自动核查支付状态, 兜底回调丢失
@@ -307,7 +308,7 @@ public class OrderServiceImpl implements OrderService {
         wrapper.eq(Order::getOrderNo, orderNo);
         Order order = orderMapper.selectOne(wrapper);
         if (order == null) {
-            throw new RuntimeException("订单不存在");
+            throw new BusinessException("订单不存在");
         }
         return getOrderVO(order.getId(), order.getUserId());
     }
@@ -317,10 +318,10 @@ public class OrderServiceImpl implements OrderService {
     public void cancelOrder(Long userId, Long orderId, String reason) {
         Order order = orderMapper.selectById(orderId);
         if (order == null || !order.getUserId().equals(userId)) {
-            throw new RuntimeException("订单不存在");
+            throw new BusinessException("订单不存在");
         }
         if (order.getStatus() != StatusConstants.ORDER_PENDING_PAYMENT) {
-            throw new RuntimeException("只能取消待付款的订单");
+            throw new BusinessException("只能取消待付款的订单");
         }
 
         // 先恢复库存
@@ -341,7 +342,7 @@ public class OrderServiceImpl implements OrderService {
                         .set(Order::getCancelTime, LocalDateTime.now())
                         .set(Order::getUpdateTime, LocalDateTime.now()));
         if (affected == 0) {
-            throw new RuntimeException("订单状态已变更，请刷新后重试");
+            throw new BusinessException("订单状态已变更，请刷新后重试");
         }
 
         // 发布库存同步事件，事务提交后由监听器异步执行
@@ -356,10 +357,10 @@ public class OrderServiceImpl implements OrderService {
     public void confirmReceive(Long userId, Long orderId) {
         Order order = orderMapper.selectById(orderId);
         if (order == null || !order.getUserId().equals(userId)) {
-            throw new RuntimeException("订单不存在");
+            throw new BusinessException("订单不存在");
         }
         if (order.getStatus() != StatusConstants.ORDER_SHIPPED) {
-            throw new RuntimeException("只能确认收货已发货的订单");
+            throw new BusinessException("只能确认收货已发货的订单");
         }
 
         // CAS 条件更新: 仅当仍为已发货时置为已完成, 防与并发退款(3→6)互相覆盖
@@ -371,7 +372,7 @@ public class OrderServiceImpl implements OrderService {
                         .set(Order::getReceiveTime, LocalDateTime.now())
                         .set(Order::getUpdateTime, LocalDateTime.now()));
         if (affected == 0) {
-            throw new RuntimeException("订单状态已变更，请刷新后重试");
+            throw new BusinessException("订单状态已变更，请刷新后重试");
         }
     }
 
@@ -379,11 +380,11 @@ public class OrderServiceImpl implements OrderService {
     public void deleteOrder(Long userId, Long orderId) {
         Order order = orderMapper.selectById(orderId);
         if (order == null || !order.getUserId().equals(userId)) {
-            throw new RuntimeException("订单不存在");
+            throw new BusinessException("订单不存在");
         }
         if (order.getStatus() != StatusConstants.ORDER_COMPLETED
             && order.getStatus() != StatusConstants.ORDER_CANCELLED) {
-            throw new RuntimeException("该订单不可删除");
+            throw new BusinessException("该订单不可删除");
         }
 
         order.setUserDeleteTime(System.currentTimeMillis());
@@ -456,14 +457,14 @@ public class OrderServiceImpl implements OrderService {
     public void shipOrder(Long orderId, Long logisticsId, String logisticsNo) {
         Order order = orderMapper.selectById(orderId);
         if (order == null) {
-            throw new RuntimeException("订单不存在");
+            throw new BusinessException("订单不存在");
         }
         if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT) {
-            throw new RuntimeException("只能发货待发货的订单");
+            throw new BusinessException("只能发货待发货的订单");
         }
         Logistics logistics = logisticsMapper.selectById(logisticsId);
         if (logistics == null) {
-            throw new RuntimeException("物流公司不存在");
+            throw new BusinessException("物流公司不存在");
         }
 
         order.setStatus(StatusConstants.ORDER_SHIPPED);
@@ -478,11 +479,11 @@ public class OrderServiceImpl implements OrderService {
     public void refundOrder(Long orderId, String reason) {
         Order order = orderMapper.selectById(orderId);
         if (order == null) {
-            throw new RuntimeException("订单不存在");
+            throw new BusinessException("订单不存在");
         }
         // 预检: 明显错状态直接报错 (CAS 才是权威并发守卫, 预检仅为友好提示)
         if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT && order.getStatus() != StatusConstants.ORDER_SHIPPED) {
-            throw new RuntimeException("该订单状态不支持退款");
+            throw new BusinessException("该订单状态不支持退款");
         }
 
         // claim-first: 先 CAS 占位 6(退款中), 命中 0 行说明状态被并发改走, 中止 (不退款不还库存)
@@ -497,7 +498,7 @@ public class OrderServiceImpl implements OrderService {
                         .set(Order::getCancelTime, LocalDateTime.now())
                         .set(Order::getUpdateTime, LocalDateTime.now()));
         if (affected == 0) {
-            throw new RuntimeException("订单状态已变更，请刷新后重试");
+            throw new BusinessException("订单状态已变更，请刷新后重试");
         }
         log.info("订单置退款中, orderId={}, 等待微信退款回调确认", orderId);
 

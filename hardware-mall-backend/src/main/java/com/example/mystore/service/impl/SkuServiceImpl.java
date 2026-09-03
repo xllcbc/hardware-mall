@@ -72,7 +72,7 @@ public class SkuServiceImpl implements SkuService {
                     return s;
                 });
         if (sku == null) {
-            throw new RuntimeException("SKU不存在");
+            throw new BusinessException("SKU不存在");
         }
         sku.setStock(getStockById(id));
         return sku;
@@ -166,7 +166,7 @@ public class SkuServiceImpl implements SkuService {
     public Sku createSku(Sku sku) {
         Spu spu = spuMapper.selectById(sku.getSpuId());
         if (spu == null) {
-            throw new RuntimeException("商品不存在");
+            throw new BusinessException("商品不存在");
         }
         Sku comboConflict = findSpecComboRow(sku.getSpuId(), null, sku.getSpecs());
         if (comboConflict != null) {
@@ -195,7 +195,7 @@ public class SkuServiceImpl implements SkuService {
     public Sku updateSku(Sku sku) {
         Sku exist = skuMapper.selectById(sku.getId());
         if (exist == null) {
-            throw new RuntimeException("SKU不存在");
+            throw new BusinessException("SKU不存在");
         }
 
         if (sku.getSpecs() != null) {
@@ -233,7 +233,7 @@ public class SkuServiceImpl implements SkuService {
     public void deleteSku(Long id) {
         Sku sku = skuMapper.selectById(id);
         if (sku == null) {
-            throw new RuntimeException("SKU不存在");
+            throw new BusinessException("SKU不存在");
         }
         Long spuId = sku.getSpuId();
         sku.setDeleteTime(System.currentTimeMillis());
@@ -262,7 +262,7 @@ public class SkuServiceImpl implements SkuService {
     public List<Sku> previewSkusByTemplate(Long spuId) {
         Spu spu = spuMapper.selectById(spuId);
         if (spu == null) {
-            throw new RuntimeException("商品不存在");
+            throw new BusinessException("商品不存在");
         }
 
         List<SpecTemplate> templates = specTemplateService.getTemplatesByCategory(spu.getCategoryId());

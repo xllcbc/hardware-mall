@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.SpecItem;
 import com.example.mystore.mapper.SpecItemMapper;
 import com.example.mystore.service.SpecItemService;
@@ -52,7 +53,7 @@ public class SpecItemServiceImpl implements SpecItemService {
     public SpecItem updateItem(SpecItem item) {
         SpecItem exist = specItemMapper.selectById(item.getId());
         if (exist == null) {
-            throw new RuntimeException("规格项不存在");
+            throw new BusinessException("规格项不存在");
         }
 
         if (item.getValue() != null) {
@@ -70,7 +71,7 @@ public class SpecItemServiceImpl implements SpecItemService {
     public void deleteItem(Long id) {
         SpecItem item = specItemMapper.selectById(id);
         if (item == null) {
-            throw new RuntimeException("规格项不存在");
+            throw new BusinessException("规格项不存在");
         }
         item.setDeleteTime(System.currentTimeMillis());
         specItemMapper.updateById(item);

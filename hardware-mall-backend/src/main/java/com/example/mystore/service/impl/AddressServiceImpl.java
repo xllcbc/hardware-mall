@@ -2,6 +2,7 @@ package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Address;
 import com.example.mystore.entity.db.User;
 import com.example.mystore.mapper.AddressMapper;
@@ -35,10 +36,10 @@ public class AddressServiceImpl implements AddressService {
     public Address getAddressById(Long userId, Long addressId) {
         Address address = addressMapper.selectById(addressId);
         if (address == null || !address.getUserId().equals(userId)) {
-            throw new RuntimeException("地址不存在");
+            throw new BusinessException("地址不存在");
         }
         if (address.getDeleteTime() != 0) {
-            throw new RuntimeException("地址不存在");
+            throw new BusinessException("地址不存在");
         }
         return address;
     }
@@ -73,7 +74,7 @@ public class AddressServiceImpl implements AddressService {
     public Address updateAddress(Long userId, Long addressId, Address address) {
         Address exist = addressMapper.selectById(addressId);
         if (exist == null || !exist.getUserId().equals(userId)) {
-            throw new RuntimeException("地址不存在");
+            throw new BusinessException("地址不存在");
         }
         
         if (address.getConsignee() != null) {
@@ -117,10 +118,10 @@ public class AddressServiceImpl implements AddressService {
     public void deleteAddress(Long userId, Long addressId) {
         Address address = addressMapper.selectById(addressId);
         if (address == null || !address.getUserId().equals(userId)) {
-            throw new RuntimeException("地址不存在");
+            throw new BusinessException("地址不存在");
         }
         if (address.getDeleteTime() != 0) {
-            throw new RuntimeException("地址不存在");
+            throw new BusinessException("地址不存在");
         }
 
         boolean wasDefault = address.getIsDefault() == 1;
@@ -138,7 +139,7 @@ public class AddressServiceImpl implements AddressService {
     public void setDefaultAddress(Long userId, Long addressId) {
         Address address = addressMapper.selectById(addressId);
         if (address == null || !address.getUserId().equals(userId)) {
-            throw new RuntimeException("地址不存在");
+            throw new BusinessException("地址不存在");
         }
         
         clearDefaultAddress(userId);

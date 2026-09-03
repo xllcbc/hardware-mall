@@ -3,6 +3,7 @@ package com.example.mystore.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.mapper.LogisticsMapper;
 import com.example.mystore.service.LogisticsService;
@@ -86,7 +87,7 @@ public class LogisticsServiceImpl implements LogisticsService {
     public Logistics updateLogistics(Logistics logistics) {
         Logistics exist = logisticsMapper.selectById(logistics.getId());
         if (exist == null) {
-            throw new RuntimeException("物流方式不存在");
+            throw new BusinessException("物流方式不存在");
         }
 
         if (StringUtils.hasText(logistics.getName())) {
@@ -127,7 +128,7 @@ public class LogisticsServiceImpl implements LogisticsService {
     public void deleteLogistics(Long id) {
         Logistics logistics = logisticsMapper.selectById(id);
         if (logistics == null) {
-            throw new RuntimeException("物流公司不存在");
+            throw new BusinessException("物流公司不存在");
         }
         logistics.setDeleteTime(System.currentTimeMillis());
         logisticsMapper.updateById(logistics);
@@ -138,7 +139,7 @@ public class LogisticsServiceImpl implements LogisticsService {
     public void updateStatus(Long id, Integer status) {
         Logistics logistics = logisticsMapper.selectById(id);
         if (logistics == null) {
-            throw new RuntimeException("物流方式不存在");
+            throw new BusinessException("物流方式不存在");
         }
         logistics.setStatus(status);
         logistics.setUpdateTime(LocalDateTime.now());

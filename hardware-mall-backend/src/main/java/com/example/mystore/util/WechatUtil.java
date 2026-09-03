@@ -1,6 +1,7 @@
 package com.example.mystore.util;
 
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,7 +32,7 @@ public class WechatUtil {
     public Map<String, String> getSessionKey(String code) {
         Map<String, String> result = new HashMap<>();
         if (!StringUtils.hasText(code)) {
-            throw new RuntimeException("微信授权码不能为空");
+            throw new BusinessException("微信授权码不能为空");
         }
 
         if (code.startsWith("test_")) {
@@ -53,7 +54,7 @@ public class WechatUtil {
             Map<String, Object> resultMap = JsonUtil.parse(response);
 
             if (resultMap.containsKey("errcode") && !"0".equals(resultMap.get("errcode").toString())) {
-                throw new RuntimeException("微信登录失败: " + resultMap.get("errmsg"));
+                throw new BusinessException("微信登录失败: " + resultMap.get("errmsg"));
             }
 
             result.put("openid", resultMap.get("openid").toString());
@@ -61,7 +62,7 @@ public class WechatUtil {
             return result;
         } catch (Exception e) {
             log.error("微信登录失败", e);
-            throw new RuntimeException("微信登录失败");
+            throw new BusinessException("微信登录失败");
         }
     }
 
@@ -82,7 +83,7 @@ public class WechatUtil {
             Map<String, Object> resultMap = JsonUtil.parse(response);
 
             if (resultMap.containsKey("errcode") && !"0".equals(resultMap.get("errcode").toString())) {
-                throw new RuntimeException("获取access_token失败: " + resultMap.get("errmsg"));
+                throw new BusinessException("获取access_token失败: " + resultMap.get("errmsg"));
             }
 
             String accessToken = resultMap.get("access_token").toString();
@@ -91,13 +92,13 @@ public class WechatUtil {
             return accessToken;
         } catch (Exception e) {
             log.error("获取access_token失败", e);
-            throw new RuntimeException("获取access_token失败");
+            throw new BusinessException("获取access_token失败");
         }
     }
 
     public String getPhoneNumber(String phoneCode) {
         if (!StringUtils.hasText(phoneCode)) {
-            throw new RuntimeException("手机号授权码不能为空");
+            throw new BusinessException("手机号授权码不能为空");
         }
 
         if (phoneCode.startsWith("test_")) {
@@ -114,18 +115,18 @@ public class WechatUtil {
             Map<String, Object> resultMap = JsonUtil.parse(response);
 
             if (resultMap.containsKey("errcode") && !"0".equals(resultMap.get("errcode").toString())) {
-                throw new RuntimeException("获取手机号失败: " + resultMap.get("errmsg"));
+                throw new BusinessException("获取手机号失败: " + resultMap.get("errmsg"));
             }
 
             @SuppressWarnings("unchecked")
             Map<String, Object> phoneInfo = (Map<String, Object>) resultMap.get("phone_info");
             if (phoneInfo == null) {
-                throw new RuntimeException("获取手机号失败: phone_info为空");
+                throw new BusinessException("获取手机号失败: phone_info为空");
             }
             return phoneInfo.get("purePhoneNumber").toString();
         } catch (Exception e) {
             log.error("获取手机号失败", e);
-            throw new RuntimeException("获取手机号失败");
+            throw new BusinessException("获取手机号失败");
         }
     }
 }

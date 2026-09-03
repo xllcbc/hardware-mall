@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.SpecItem;
@@ -85,7 +86,7 @@ public class SpuServiceImpl implements SpuService {
     public Spu getSpuById(Long id) {
         Spu spu = spuMapper.selectById(id);
         if (spu == null || spu.getDeleteTime() != 0) {
-            throw new RuntimeException("商品不存在或已下架");
+            throw new BusinessException("商品不存在或已下架");
         }
         return spu;
     }
@@ -114,7 +115,7 @@ public class SpuServiceImpl implements SpuService {
     public Spu updateSpu(Spu spu) {
         Spu exist = spuMapper.selectById(spu.getId());
         if (exist == null) {
-            throw new RuntimeException("商品不存在");
+            throw new BusinessException("商品不存在");
         }
 
         if (StringUtils.hasText(spu.getName())) {
@@ -159,7 +160,7 @@ public class SpuServiceImpl implements SpuService {
     public void deleteSpu(Long id) {
         Spu spu = spuMapper.selectById(id);
         if (spu == null) {
-            throw new RuntimeException("商品不存在");
+            throw new BusinessException("商品不存在");
         }
         spu.setDeleteTime(System.currentTimeMillis());
         spuMapper.updateById(spu);
@@ -174,7 +175,7 @@ public class SpuServiceImpl implements SpuService {
     public void updateStatus(Long id, Integer status) {
         Spu spu = spuMapper.selectById(id);
         if (spu == null) {
-            throw new RuntimeException("商品不存在");
+            throw new BusinessException("商品不存在");
         }
         spu.setStatus(status);
         spu.setUpdateTime(LocalDateTime.now());
@@ -293,7 +294,7 @@ public class SpuServiceImpl implements SpuService {
                     return built;
                 });
         if (vo == null) {
-            throw new RuntimeException("商品不存在或已下架");
+            throw new BusinessException("商品不存在或已下架");
         }
         if (vo.getSkus() != null) {
             for (Sku sku : vo.getSkus()) {

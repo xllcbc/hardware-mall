@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
@@ -73,11 +74,11 @@ public class CartServiceImpl implements CartService {
     public Cart addToCart(Long userId, Long skuId, Integer quantity) {
         Sku sku = skuService.getSkuById(skuId);
         if (sku == null || sku.getStatus() != 1) {
-            throw new RuntimeException("商品不存在或已下架");
+            throw new BusinessException("商品不存在或已下架");
         }
 
         if (sku.getStock() < quantity) {
-            throw new RuntimeException("库存不足");
+            throw new BusinessException("库存不足");
         }
 
         cartMapper.insertOrUpdateQuantity(userId, skuId, quantity);
@@ -94,7 +95,7 @@ public class CartServiceImpl implements CartService {
     public Cart updateQuantity(Long userId, Long cartId, Integer quantity) {
         Cart cart = cartMapper.selectById(cartId);
         if (cart == null || !cart.getUserId().equals(userId)) {
-            throw new RuntimeException("购物车记录不存在");
+            throw new BusinessException("购物车记录不存在");
         }
 
         if (quantity <= 0) {
@@ -105,7 +106,7 @@ public class CartServiceImpl implements CartService {
 
         Sku sku = skuService.getSkuById(cart.getSkuId());
         if (sku.getStock() < quantity) {
-            throw new RuntimeException("库存不足");
+            throw new BusinessException("库存不足");
         }
 
         cart.setQuantity(quantity);
@@ -118,7 +119,7 @@ public class CartServiceImpl implements CartService {
     public void removeFromCart(Long userId, Long cartId) {
         Cart cart = cartMapper.selectById(cartId);
         if (cart == null || !cart.getUserId().equals(userId)) {
-            throw new RuntimeException("购物车记录不存在");
+            throw new BusinessException("购物车记录不存在");
         }
         cart.setDeleteTime(System.currentTimeMillis());
         cartMapper.updateById(cart);

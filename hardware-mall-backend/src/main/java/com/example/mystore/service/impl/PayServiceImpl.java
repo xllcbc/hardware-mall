@@ -3,6 +3,7 @@ package com.example.mystore.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.PaymentRecord;
@@ -69,18 +70,18 @@ public class PayServiceImpl implements PayService {
     public Map<String, String> prepay(Long userId, Long orderId) {
         Order order = orderMapper.selectById(orderId);
         if (order == null) {
-            throw new RuntimeException("订单不存在");
+            throw new BusinessException("订单不存在");
         }
         if (!order.getUserId().equals(userId)) {
-            throw new RuntimeException("无权操作该订单");
+            throw new BusinessException("无权操作该订单");
         }
         if (order.getStatus() != StatusConstants.ORDER_PENDING_PAYMENT) {
-            throw new RuntimeException("订单状态不允许支付");
+            throw new BusinessException("订单状态不允许支付");
         }
 
         User user = userMapper.selectById(userId);
         if (user == null || user.getOpenid() == null) {
-            throw new RuntimeException("用户信息异常，请重新登录");
+            throw new BusinessException("用户信息异常，请重新登录");
         }
 
         LambdaQueryWrapper<PaymentRecord> wrapper = new LambdaQueryWrapper<>();
@@ -124,7 +125,7 @@ public class PayServiceImpl implements PayService {
                     paymentRecordMapper.updateById(record);
                 }
             }
-            throw new RuntimeException("创建支付订单失败，请重试");
+            throw new BusinessException("创建支付订单失败，请重试");
         }
     }
 
@@ -397,7 +398,7 @@ public class PayServiceImpl implements PayService {
         PaymentRecord record = paymentRecordMapper.selectOne(wrapper);
 
         if (record == null) {
-            throw new RuntimeException("未找到已支付的支付记录");
+            throw new BusinessException("未找到已支付的支付记录");
         }
 
         try {
@@ -433,7 +434,7 @@ public class PayServiceImpl implements PayService {
             log.error("退款失败, orderId={}", orderId, e);
             dingTalkAlertService.alert("REFUND_FAIL",
                     "退款受理失败, orderId=" + orderId + ", error=" + e.getMessage());
-            throw new RuntimeException("退款失败: " + e.getMessage());
+            throw new BusinessException("退款失败: " + e.getMessage());
         }
     }
 
