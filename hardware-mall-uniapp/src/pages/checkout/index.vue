@@ -54,6 +54,10 @@
           <text class="summary-value">¥{{ formatPrice(goodsAmount) }}</text>
         </view>
         <view class="summary-row">
+          <text class="summary-label">配送方式</text>
+          <text class="summary-value">{{ selectedLogistics ? selectedLogistics.name : '暂无可用配送方式' }}</text>
+        </view>
+        <view class="summary-row">
           <text class="summary-label">运费</text>
           <text class="summary-value">{{ freightAmount > 0 ? '¥' + formatPrice(freightAmount) : '免运费' }}</text>
         </view>
@@ -85,14 +89,17 @@ import { onShow } from '@dcloudio/uni-app'
 import { useCartStore } from '@/stores/cart'
 import { usePreOrderStore } from '@/stores/preOrder'
 import { getAddressList } from '@/api/address'
+import { getLogisticsList } from '@/api/logistics'
 import { createOrder, getOrderDetail, getIdempotencyToken } from '@/api/order'
 import { prepayOrder } from '@/api/pay'
-import type { Address } from '@/types'
+import type { Address, Logistics } from '@/types'
 
 const cartStore = useCartStore()
 const preOrderStore = usePreOrderStore()
 const addresses = ref<Address[]>([])
 const selectedAddress = ref<Address | null>(null)
+const logisticsList = ref<Logistics[]>([])
+const selectedLogistics = ref<Logistics | null>(null)
 const buyerRemark = ref('')
 const submitted = ref(false)
 const idemKey = ref('')
@@ -154,8 +161,20 @@ const loadAddresses = async () => {
   }
 }
 
+const loadLogistics = async () => {
+  try {
+    const data = await getLogisticsList()
+    logisticsList.value = data || []
+    // M10: 自动选第一个启用的物流, 不再硬编码 logisticsId: 1
+    selectedLogistics.value = logisticsList.value[0] || null
+  } catch (e) {
+    console.error('Failed to load logistics:', e)
+  }
+}
+
 onShow(() => {
   loadAddresses()
+  loadLogistics()
 })
 
 const selectAddress = () => {
@@ -179,6 +198,10 @@ const submitOrder = async () => {
     }, 1500)
     return
   }
+  if (!selectedLogistics.value) {
+    uni.showToast({ title: '暂无可用配送方式', icon: 'none' })
+    return
+  }
 
   submitted.value = true
   try {
@@ -189,7 +212,7 @@ const submitOrder = async () => {
     const orderData = {
       items,
       addressId: selectedAddress.value.id,
-      logisticsId: 1,
+      logisticsId: selectedLogistics.value.id,
       buyerRemark: buyerRemark.value
     }
 

@@ -489,8 +489,9 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException("只能发货待发货的订单");
         }
         Logistics logistics = logisticsMapper.selectById(logisticsId);
-        if (logistics == null) {
-            throw new BusinessException("物流公司不存在");
+        // M10: 只校验"存在"不够, 停用的物流公司不允许再被选用于发货
+        if (logistics == null || logistics.getStatus() != StatusConstants.LOGISTICS_STATUS_ENABLED) {
+            throw new BusinessException("物流公司不存在或已停用");
         }
 
         order.setStatus(StatusConstants.ORDER_SHIPPED);

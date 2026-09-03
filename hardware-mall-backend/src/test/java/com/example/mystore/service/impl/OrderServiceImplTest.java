@@ -341,6 +341,26 @@ class OrderServiceImplTest {
     }
 
     @Test
+    void testShipOrder_LogisticsDisabled_Throws() {
+        // M10: 停用的物流公司不允许被选用于发货
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
+
+        Logistics disabled = new Logistics();
+        disabled.setId(3L);
+        disabled.setStatus(0);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(logisticsMapper.selectById(3L)).thenReturn(disabled);
+
+        assertThatThrownBy(() -> orderService.shipOrder(1L, 3L, "SF123456789"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("物流公司不存在或已停用");
+
+        verify(orderMapper, never()).updateById(any(Order.class));
+    }
+
+    @Test
     void testAutoCancelOrder_Idempotent_AlreadyCancelled() {
         Order order = new Order();
         order.setId(1L);
