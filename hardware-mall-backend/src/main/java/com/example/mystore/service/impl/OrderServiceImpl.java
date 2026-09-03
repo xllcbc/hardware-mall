@@ -477,6 +477,10 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public void refundOrder(Long orderId, String reason) {
+        // null 守卫必须在 CAS claim 之前: claim 是单条 UPDATE 自动提交, 事后报错回滚不了"退款中"状态
+        if (payService == null) {
+            throw new BusinessException("支付服务未启用，无法退款");
+        }
         Order order = orderMapper.selectById(orderId);
         if (order == null) {
             throw new BusinessException("订单不存在");
@@ -502,9 +506,7 @@ public class OrderServiceImpl implements OrderService {
         }
         log.info("订单置退款中, orderId={}, 等待微信退款回调确认", orderId);
 
-        if (payService != null) {
-            payService.refund(orderId, reason);
-        }
+        payService.refund(orderId, reason);
     }
 
     @Override

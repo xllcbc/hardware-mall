@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.*;
 import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.OrderVO;
@@ -623,6 +624,18 @@ class OrderServiceImplTest {
                 .hasMessageContaining("wechat error");
 
         verify(orderMapper).update(isNull(), any()); // claim 已提交, status 保持 6
+    }
+
+    @Test
+    void refundOrder_payServiceMissing_throwsBeforeCasClaim() {
+        // M6: payService 缺失时必须明确报错, 不得静默跳过; 且守卫在 CAS claim 之前, 订单不会卡"退款中"
+        ReflectionTestUtils.setField(orderService, "payService", null);
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "质量问题"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("支付服务未启用，无法退款");
+
+        verifyNoInteractions(orderMapper); // 连 selectById 都未发生, 任何 DB 写都不允许
     }
 
     // ==================== confirmReceive CAS 加固 ====================
