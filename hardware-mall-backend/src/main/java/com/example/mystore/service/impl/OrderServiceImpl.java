@@ -445,15 +445,35 @@ public class OrderServiceImpl implements OrderService {
         DashboardStatsVO stats = new DashboardStatsVO();
 
         LocalDateTime todayStart = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0).withNano(0);
+        LocalDateTime yesterdayStart = todayStart.minusDays(1);
 
-        stats.setTodayOrders(orderMapper.countTodayPaidOrders(todayStart));
+        long todayOrders = nvl(orderMapper.countTodayPaidOrders(todayStart));
+        stats.setTodayOrders(todayOrders);
         stats.setTodaySales(orderMapper.sumTodaySales(todayStart));
 
         LambdaQueryWrapper<Order> shipWrapper = new LambdaQueryWrapper<>();
         shipWrapper.eq(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT);
         stats.setPendingShip(orderMapper.selectCount(shipWrapper));
 
+        // M11: 涨幅 = 今日 vs 昨日, 口径与今日统计一致
+        DashboardStatsVO.Trend trend = new DashboardStatsVO.Trend();
+        trend.setOrdersTrend(DashboardStatsVO.percentTrend(todayOrders, nvl(orderMapper.countPaidOrdersBetween(yesterdayStart, todayStart))));
+        trend.setSalesTrend(DashboardStatsVO.percentTrend(
+                toCents(stats.getTodaySales()), toCents(orderMapper.sumSalesBetween(yesterdayStart, todayStart))));
+        trend.setShipTrend(DashboardStatsVO.percentTrend(
+                nvl(orderMapper.countShippedBetween(todayStart, todayStart.plusDays(1))),
+                nvl(orderMapper.countShippedBetween(yesterdayStart, todayStart))));
+        stats.setTrend(trend);
+
         return stats;
+    }
+
+    private static long nvl(Long value) {
+        return value == null ? 0L : value;
+    }
+
+    private static long toCents(BigDecimal amount) {
+        return amount == null ? 0L : amount.movePointRight(2).longValue();
     }
 
     @Override

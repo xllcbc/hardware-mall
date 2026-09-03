@@ -196,6 +196,16 @@ public class SpuServiceImpl implements SpuService {
     }
 
     @Override
+    public Long countCreatedBetween(LocalDateTime start, LocalDateTime end) {
+        // M11: 上新量 —— 按创建时间统计, 含未上架商品
+        LambdaQueryWrapper<Spu> wrapper = new LambdaQueryWrapper<>();
+        wrapper.ge(Spu::getCreateTime, start)
+               .lt(Spu::getCreateTime, end)
+               .eq(Spu::getDeleteTime, 0);
+        return spuMapper.selectCount(wrapper);
+    }
+
+    @Override
     public Page<ProductListVO> getProductListVO(Long categoryId, String keyword, Integer page, Integer limit, Integer status) {
         if (!StringUtils.hasText(keyword)) {
             String key = RedisConstants.PREFIX_PRODUCT_LIST + (categoryId == null ? "all" : categoryId)

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.ProductListVO;
 import com.example.mystore.entity.vo.ProductDetailVO;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface SpuService {
@@ -15,6 +16,8 @@ public interface SpuService {
     void deleteSpu(Long id);
     void updateStatus(Long id, Integer status);
     Long getTotalCount();
+    /** M11: 区间新建商品数(上新量统计, 含未上架) */
+    Long countCreatedBetween(LocalDateTime start, LocalDateTime end);
 
     Page<ProductListVO> getProductListVO(Long categoryId, String keyword, Integer page, Integer limit, Integer status);
     List<ProductListVO> getRecommendProductListVO(Integer limit);

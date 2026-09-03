@@ -21,6 +21,19 @@ public interface OrderMapper extends BaseMapper<Order> {
             "AND status NOT IN (1, 5, 7)")
     BigDecimal sumTodaySales(@Param("todayStart") LocalDateTime todayStart);
 
+    // ===== M11: Dashboard 涨幅统计(口径与上方今日统计一致) =====
+
+    @Select("SELECT COUNT(*) FROM shop_order WHERE pay_time >= #{start} AND pay_time < #{end} " +
+            "AND status NOT IN (1, 5, 7)")
+    Long countPaidOrdersBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    @Select("SELECT COALESCE(SUM(total_amount), 0) FROM shop_order WHERE pay_time >= #{start} AND pay_time < #{end} " +
+            "AND status NOT IN (1, 5, 7)")
+    BigDecimal sumSalesBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    @Select("SELECT COUNT(*) FROM shop_order WHERE ship_time >= #{start} AND ship_time < #{end}")
+    Long countShippedBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
     /**
      * 查询超期的待付款订单（用于兜底定时任务）
      * @param status 订单状态（待付款）

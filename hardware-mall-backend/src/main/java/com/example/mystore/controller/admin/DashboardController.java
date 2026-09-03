@@ -10,6 +10,8 @@ import com.example.mystore.util.PageUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
@@ -25,6 +27,13 @@ public class DashboardController {
     public Result<DashboardStatsVO> getStats() {
         DashboardStatsVO stats = orderService.getDashboardStats();
         stats.setTotalProducts(spuService.getTotalCount());
+
+        // M11: 上新涨幅(今日 vs 昨日新建商品数)
+        LocalDateTime todayStart = LocalDate.now().atStartOfDay();
+        long todayCreated = spuService.countCreatedBetween(todayStart, todayStart.plusDays(1));
+        long yesterdayCreated = spuService.countCreatedBetween(todayStart.minusDays(1), todayStart);
+        stats.getTrend().setProductTrend(DashboardStatsVO.percentTrend(todayCreated, yesterdayCreated));
+
         return Result.success(stats);
     }
 
