@@ -25,6 +25,12 @@ public class WechatUtil {
     @Value("${wechat.secret}")
     private String secret;
 
+    /**
+     * test_ 开头的模拟 code 后门开关：仅供本地开发使用，默认关闭，生产环境必须保持 false
+     */
+    @Value("${wechat.mock-code-enabled:false}")
+    private boolean mockCodeEnabled;
+
     public String getOpenid(String code) {
         return getSessionKey(code).get("openid");
     }
@@ -35,7 +41,7 @@ public class WechatUtil {
             throw new BusinessException("微信授权码不能为空");
         }
 
-        if (code.startsWith("test_")) {
+        if (mockCodeEnabled && code.startsWith("test_")) {
             log.info("测试模式：模拟微信登录，code={}", code);
             result.put("openid", code);
             result.put("session_key", "test_session_key_" + System.currentTimeMillis());
@@ -101,7 +107,7 @@ public class WechatUtil {
             throw new BusinessException("手机号授权码不能为空");
         }
 
-        if (phoneCode.startsWith("test_")) {
+        if (mockCodeEnabled && phoneCode.startsWith("test_")) {
             log.info("测试模式：模拟获取手机号，phoneCode={}", phoneCode);
             return "13800138000";
         }

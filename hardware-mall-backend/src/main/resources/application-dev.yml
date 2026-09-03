@@ -13,3 +13,7 @@ logging:
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+wechat:
+  # 本地开发允许 test_ 开头的模拟登录/手机号 code；生产环境不配置此项（默认 false）
+  mock-code-enabled: true
