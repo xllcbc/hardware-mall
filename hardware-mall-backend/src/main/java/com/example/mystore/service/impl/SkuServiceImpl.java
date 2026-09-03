@@ -168,7 +168,13 @@ public class SkuServiceImpl implements SkuService {
         if (spu == null) {
             throw new RuntimeException("商品不存在");
         }
-        checkSpecComboUnique(sku.getSpuId(), null, sku.getSpecs());
+        Sku comboConflict = findSpecComboRow(sku.getSpuId(), null, sku.getSpecs());
+        if (comboConflict != null) {
+            if (isLive(comboConflict)) {
+                throw new BusinessException("该规格组合的SKU已存在");
+            }
+            return resurrectSku(comboConflict, sku);
+        }
 
         sku.setSpecHash(computeSpecHash(sku.getSpecs()));
         sku.setCreateTime(LocalDateTime.now());
@@ -193,7 +199,13 @@ public class SkuServiceImpl implements SkuService {
         }
 
         if (sku.getSpecs() != null) {
-            checkSpecComboUnique(exist.getSpuId(), exist.getId(), sku.getSpecs());
+            Sku comboConflict = findSpecComboRow(exist.getSpuId(), exist.getId(), sku.getSpecs());
+            if (comboConflict != null) {
+                if (isLive(comboConflict)) {
+                    throw new BusinessException("该规格组合的SKU已存在");
+                }
+                freeDeletedSlot(comboConflict);
+            }
             exist.setSpecs(sku.getSpecs());
             exist.setSpecHash(computeSpecHash(sku.getSpecs()));
         }
@@ -349,15 +361,59 @@ public class SkuServiceImpl implements SkuService {
         return String.join("|", entries);
     }
 
-    private void checkSpecComboUnique(Long spuId, Long excludeSkuId, List<SpecVO> specs) {
+    private Sku findSpecComboRow(Long spuId, Long excludeSkuId, List<SpecVO> specs) {
         String specKey = normalizeSpecKey(specs);
-        for (Sku existing : getSkusBySpu(spuId, null)) {
+        List<Sku> allRows = skuMapper.selectList(new LambdaQueryWrapper<Sku>()
+                .eq(Sku::getSpuId, spuId));
+        Sku latestDeleted = null;
+        for (Sku existing : allRows) {
             if (excludeSkuId != null && excludeSkuId.equals(existing.getId())) {
                 continue;
             }
-            if (normalizeSpecKey(existing.getSpecs()).equals(specKey)) {
-                throw new BusinessException("该规格组合的SKU已存在");
+            if (!normalizeSpecKey(existing.getSpecs()).equals(specKey)) {
+                continue;
             }
+            if (isLive(existing)) {
+                return existing;
+            }
+            if (latestDeleted == null || existing.getDeleteTime() > latestDeleted.getDeleteTime()) {
+                latestDeleted = existing;
+            }
+        }
+        return latestDeleted;
+    }
+
+    private boolean isLive(Sku sku) {
+        return sku.getDeleteTime() == null || sku.getDeleteTime() == 0L;
+    }
+
+    private Sku resurrectSku(Sku tombstone, Sku incoming) {
+        tombstone.setSpecs(incoming.getSpecs());
+        tombstone.setSpecHash(computeSpecHash(incoming.getSpecs()));
+        if (incoming.getPrice() != null) {
+            tombstone.setPrice(incoming.getPrice());
+        }
+        if (incoming.getStock() != null) {
+            tombstone.setStock(incoming.getStock());
+        }
+        if (incoming.getImage() != null) {
+            tombstone.setImage(incoming.getImage());
+        }
+        tombstone.setStatus(1);
+        tombstone.setDeleteTime(0L);
+        tombstone.setUpdateTime(LocalDateTime.now());
+        skuMapper.updateById(tombstone);
+        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + tombstone.getSpuId());
+        redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + tombstone.getId());
+        syncStockToCache(tombstone.getId());
+        return tombstone;
+    }
+
+    private void freeDeletedSlot(Sku tombstone) {
+        String hash = tombstone.getSpecHash();
+        if (hash != null && !hash.contains("#del")) {
+            tombstone.setSpecHash(hash + "#del" + tombstone.getDeleteTime());
+            skuMapper.updateById(tombstone);
         }
     }
 

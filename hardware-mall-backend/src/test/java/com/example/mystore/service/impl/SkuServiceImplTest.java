@@ -183,6 +183,135 @@ class SkuServiceImplTest {
         verify(skuMapper, never()).updateById(any(Sku.class));
     }
 
+    private Sku tombstone(Long id, Long deleteTime, String specHash) {
+        Sku sku = new Sku();
+        sku.setId(id);
+        sku.setSpuId(1L);
+        SpecVO spec = new SpecVO();
+        spec.setTemplateId(1L);
+        spec.setItemId(1L);
+        sku.setSpecs(Arrays.asList(spec));
+        sku.setSpecHash(specHash);
+        sku.setPrice(new BigDecimal("55.00"));
+        sku.setStock(10);
+        sku.setDeleteTime(deleteTime);
+        return sku;
+    }
+
+    @Test
+    void testCreateSku_MatchesTombstone_Resurrects() {
+        Sku deleted = tombstone(9L, 1725000000000L, "auto_c1_i1");
+        when(spuMapper.selectById(1L)).thenReturn(new Spu());
+        when(skuMapper.selectList(any())).thenReturn(Collections.singletonList(deleted));
+
+        Sku incoming = new Sku();
+        incoming.setSpuId(1L);
+        SpecVO spec = new SpecVO();
+        spec.setTemplateId(1L);
+        spec.setItemId(1L);
+        incoming.setSpecs(Arrays.asList(spec));
+        incoming.setPrice(new BigDecimal("66.00"));
+
+        Sku result = skuService.createSku(incoming);
+
+        verify(skuMapper, never()).insert(any(Sku.class));
+        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(
+                s -> Long.valueOf(9L).equals(s.getId()) && Long.valueOf(0L).equals(s.getDeleteTime())));
+        assertThat(result.getId()).isEqualTo(9L);
+        assertThat(result.getDeleteTime()).isZero();
+        assertThat(result.getStatus()).isEqualTo(1);
+        assertThat(result.getSpecHash()).hasSize(32).matches("[0-9a-f]{32}");
+        assertThat(result.getPrice()).isEqualByComparingTo(new BigDecimal("66.00"));
+        verify(redisUtil).delete(RedisConstants.PREFIX_SKU_INFO + 9L);
+        verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
+    }
+
+    @Test
+    void testCreateSku_MultipleTombstones_ResurrectsLatest() {
+        Sku older = tombstone(7L, 1000L, "auto_c1_i1");
+        Sku latest = tombstone(8L, 2000L, "11111111111111111111111111111111");
+        when(spuMapper.selectById(1L)).thenReturn(new Spu());
+        when(skuMapper.selectList(any())).thenReturn(Arrays.asList(older, latest));
+
+        Sku incoming = new Sku();
+        incoming.setSpuId(1L);
+        SpecVO spec = new SpecVO();
+        spec.setTemplateId(1L);
+        spec.setItemId(1L);
+        incoming.setSpecs(Arrays.asList(spec));
+
+        Sku result = skuService.createSku(incoming);
+
+        verify(skuMapper, never()).insert(any(Sku.class));
+        verify(skuMapper, times(1)).updateById(any(Sku.class));
+        assertThat(result.getId()).isEqualTo(8L);
+    }
+
+    @Test
+    void testCreateSku_LiveAndTombstoneSameCombo_Throws() {
+        Sku deleted = tombstone(9L, 2000L, "auto_c1_i1");
+        when(spuMapper.selectById(1L)).thenReturn(new Spu());
+        when(skuMapper.selectList(any())).thenReturn(Arrays.asList(sku2, deleted));
+
+        Sku incoming = new Sku();
+        incoming.setSpuId(1L);
+        SpecVO spec = new SpecVO();
+        spec.setTemplateId(1L);
+        spec.setItemId(1L);
+        incoming.setSpecs(Arrays.asList(spec));
+
+        assertThatThrownBy(() -> skuService.createSku(incoming))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已存在");
+        verify(skuMapper, never()).insert(any(Sku.class));
+        verify(skuMapper, never()).updateById(any(Sku.class));
+    }
+
+    @Test
+    void testUpdateSku_TombstoneOnlyConflict_FreesSlotAndProceeds() {
+        Sku deleted = tombstone(9L, 5000L, "22222222222222222222222222222222");
+        when(skuMapper.selectById(1L)).thenReturn(sku1);
+        when(skuMapper.selectList(any())).thenReturn(Arrays.asList(sku1, deleted));
+
+        Sku incoming = new Sku();
+        incoming.setId(1L);
+        SpecVO spec = new SpecVO();
+        spec.setTemplateId(1L);
+        spec.setItemId(1L);
+        incoming.setSpecs(Arrays.asList(spec));
+
+        Sku result = skuService.updateSku(incoming);
+
+        verify(skuMapper, never()).insert(any(Sku.class));
+        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(
+                s -> Long.valueOf(9L).equals(s.getId()) && s.getSpecHash().endsWith("#del5000")));
+        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(
+                s -> Long.valueOf(1L).equals(s.getId())));
+        assertThat(result.getId()).isEqualTo(1L);
+        assertThat(result.getSpecHash()).hasSize(32).matches("[0-9a-f]{32}");
+    }
+
+    @Test
+    void testUpdateSku_AlreadyFreedTombstone_SkipsMutation() {
+        Sku deleted = tombstone(9L, 5000L, "22222222222222222222222222222222#del5000");
+        when(skuMapper.selectById(1L)).thenReturn(sku1);
+        when(skuMapper.selectList(any())).thenReturn(Arrays.asList(sku1, deleted));
+
+        Sku incoming = new Sku();
+        incoming.setId(1L);
+        SpecVO spec = new SpecVO();
+        spec.setTemplateId(1L);
+        spec.setItemId(1L);
+        incoming.setSpecs(Arrays.asList(spec));
+
+        Sku result = skuService.updateSku(incoming);
+
+        verify(skuMapper, times(1)).updateById(any(Sku.class));
+        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(
+                s -> Long.valueOf(1L).equals(s.getId())));
+        assertThat(result.getId()).isEqualTo(1L);
+    }
+
     @Test
     void testGetSkuBySpecs_ExactMatch() {
         when(skuMapper.selectList(any())).thenReturn(Arrays.asList(sku1, sku2));
