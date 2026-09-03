@@ -200,12 +200,53 @@ class OrderServiceImplTest {
         when(redisUtil.setIfAbsent(eq(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "k1"),
                 any(), eq(RedisConstants.IDEMPOTENCY_TTL), eq(TimeUnit.SECONDS)))
                 .thenReturn(false);
+        // M8: 冲突时读回 value 比对归属 —— 自己的坑才是"重复下单"
+        when(redisUtil.get(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "k1")).thenReturn(2L);
 
         assertThatThrownBy(() -> orderService.createOrder(2L, stubValidRequest(), "k1"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("重复");
 
         verify(orderMapper, never()).insert(any(Order.class));
+    }
+
+    @Test
+    void createOrder_idempotentKeyOwnedByOther_rejectsWithoutDelete() {
+        // M8: 坑被其他用户占用 → "请求冲突", 且不得清除(保护真正持有者)
+        when(redisUtil.setIfAbsent(eq(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "k1"),
+                any(), eq(RedisConstants.IDEMPOTENCY_TTL), eq(TimeUnit.SECONDS)))
+                .thenReturn(false);
+        when(redisUtil.get(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "k1")).thenReturn(999L);
+
+        assertThatThrownBy(() -> orderService.createOrder(2L, stubValidRequest(), "k1"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("请求冲突，请刷新后重试");
+
+        verify(redisUtil, never()).delete(anyString());
+        verify(orderMapper, never()).insert(any(Order.class));
+    }
+
+    @Test
+    void createOrder_validationFails_releasesIdempotencyKey() {
+        // M8: 业务失败(库存不足) = 意图未达成, 必须释放幂等坑, 允许用户立即重试
+        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(skuService.getSkuById(5L)).thenReturn(sku);
+
+        CreateOrderRequest.CartItem item = new CreateOrderRequest.CartItem();
+        item.setSkuId(5L);
+        item.setQuantity(100); // 超过库存
+
+        CreateOrderRequest request = new CreateOrderRequest();
+        request.setAddressId(1L);
+        request.setLogisticsId(1L);
+        request.setItems(Collections.singletonList(item));
+
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "stock-key"))
+                .hasMessageContaining("库存不足");
+
+        verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "stock-key");
     }
 
     private CreateOrderRequest stubValidRequest() {

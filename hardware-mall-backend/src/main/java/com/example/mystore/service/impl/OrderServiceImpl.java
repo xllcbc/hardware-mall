@@ -67,21 +67,33 @@ public class OrderServiceImpl implements OrderService {
     public OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey) {
         log.info("创建订单开始, userId={}, idemKey={}, request={}", userId, idempotencyKey, request);
 
-        if (idempotencyKey == null || !redisUtil.setIfAbsent(
-                RedisConstants.PREFIX_ORDER_IDEMPOTENCY + idempotencyKey,
-                userId, RedisConstants.IDEMPOTENCY_TTL, TimeUnit.SECONDS)) {
+        String idemKey = RedisConstants.PREFIX_ORDER_IDEMPOTENCY + idempotencyKey;
+        if (idempotencyKey == null || !redisUtil.setIfAbsent(idemKey, userId,
+                RedisConstants.IDEMPOTENCY_TTL, TimeUnit.SECONDS)) {
+            // M8: 冲突时校验坑的归属 —— 自己的坑是真重复下单; 别人的坑不得误伤, 也不得清除
+            Object owner = idempotencyKey == null ? null : redisUtil.get(idemKey);
+            if (owner == null || !owner.toString().equals(String.valueOf(userId))) {
+                throw new BusinessException("请求冲突，请刷新后重试");
+            }
             throw new BusinessException("请勿重复下单");
         }
 
-        // ① 事务外：只读校验 + 构建订单明细快照（不占用 DB 连接事务）
-        ValidatedOrder validated = validateAndBuildSnapshot(userId, request);
+        try {
+            // ① 事务外：只读校验 + 构建订单明细快照（不占用 DB 连接事务）
+            ValidatedOrder validated = validateAndBuildSnapshot(userId, request);
 
-        // ② 事务内：扣减库存 + 建单 + 明细 + 删购物车 + 发布事件
-        Long orderId = new TransactionTemplate(transactionManager)
-                .execute(status -> persistOrder(userId, request, validated));
+            // ② 事务内：扣减库存 + 建单 + 明细 + 删购物车 + 发布事件
+            Long orderId = new TransactionTemplate(transactionManager)
+                    .execute(status -> persistOrder(userId, request, validated));
 
-        // ③ 事务外：组装返回 VO
-        return getOrderVO(orderId, userId);
+            // ③ 事务外：组装返回 VO
+            return getOrderVO(orderId, userId);
+        } catch (RuntimeException e) {
+            // M8: 业务失败 = 意图未达成, 释放幂等坑允许立即重试
+            // 此刻事务已回滚、DB 零痕迹, 删坑不会造成"订单建成但坑没了"的重复下单窗口
+            redisUtil.delete(idemKey);
+            throw e;
+        }
     }
 
     private ValidatedOrder validateAndBuildSnapshot(Long userId, CreateOrderRequest request) {
