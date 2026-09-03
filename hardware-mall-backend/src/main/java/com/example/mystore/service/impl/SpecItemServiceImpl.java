@@ -3,7 +3,9 @@ package com.example.mystore.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.SpecItem;
+import com.example.mystore.entity.db.SpecTemplate;
 import com.example.mystore.mapper.SpecItemMapper;
+import com.example.mystore.mapper.SpecTemplateMapper;
 import com.example.mystore.service.SpecItemService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,7 @@ import java.util.stream.Collectors;
 public class SpecItemServiceImpl implements SpecItemService {
 
     private final SpecItemMapper specItemMapper;
+    private final SpecTemplateMapper specTemplateMapper;
 
     @Override
     public List<SpecItem> getItemsByTemplate(Long templateId) {
@@ -31,8 +34,18 @@ public class SpecItemServiceImpl implements SpecItemService {
 
     @Override
     public List<SpecItem> getItemsByCategory(Long categoryId) {
+        // 规格项表没有 categoryId, 需经模板间接关联: categoryId → 存活模板集合 → in(templateId) 过滤
+        List<Long> templateIds = specTemplateMapper.selectList(
+                        new LambdaQueryWrapper<SpecTemplate>()
+                                .eq(SpecTemplate::getCategoryId, categoryId)
+                                .eq(SpecTemplate::getDeleteTime, 0))
+                .stream().map(SpecTemplate::getId).toList();
+        if (templateIds.isEmpty()) {
+            return Collections.emptyList();
+        }
         LambdaQueryWrapper<SpecItem> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(SpecItem::getDeleteTime, 0)
+        wrapper.in(SpecItem::getTemplateId, templateIds)
+               .eq(SpecItem::getDeleteTime, 0)
                .orderByAsc(SpecItem::getSortOrder);
         return specItemMapper.selectList(wrapper);
     }
