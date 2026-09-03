@@ -12,7 +12,7 @@ import java.util.Map;
 public interface OrderService {
     OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey);
     Page<OrderVO> getOrderPage(Long userId, Integer status, Integer page, Integer limit);
-    Page<OrderVO> getAdminOrderPage(Long userId, Integer status, Integer page, Integer limit);
+    Page<OrderVO> getAdminOrderPage(Long userId, Integer status, String orderNo, String startDate, String endDate, Integer page, Integer limit);
     OrderVO getOrderById(Long userId, Long orderId);
     OrderVO getOrderByOrderNo(String orderNo);
     void cancelOrder(Long userId, Long orderId, String reason);

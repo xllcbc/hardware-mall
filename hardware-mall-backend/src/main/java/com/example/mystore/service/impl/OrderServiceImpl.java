@@ -37,9 +37,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -252,7 +256,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public Page<OrderVO> getAdminOrderPage(Long userId, Integer status, Integer page, Integer limit) {
+    public Page<OrderVO> getAdminOrderPage(Long userId, Integer status, String orderNo, String startDate, String endDate, Integer page, Integer limit) {
         Page<Order> pageParam = new Page<>(page, limit);
         LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
         wrapper.and(w -> w.isNull(Order::getAdminDeleteTime).or().eq(Order::getAdminDeleteTime, 0));
@@ -262,6 +266,16 @@ public class OrderServiceImpl implements OrderService {
 
         if (status != null) {
             wrapper.eq(Order::getStatus, status);
+        }
+        // M9: 管理端搜索参数补齐 —— orderNo 精确匹配, 日期按 createTime 区间(含 endDate 当天)
+        if (StringUtils.hasText(orderNo)) {
+            wrapper.eq(Order::getOrderNo, orderNo.trim());
+        }
+        if (StringUtils.hasText(startDate)) {
+            wrapper.ge(Order::getCreateTime, parseDate(startDate));
+        }
+        if (StringUtils.hasText(endDate)) {
+            wrapper.lt(Order::getCreateTime, parseDate(endDate).plusDays(1));
         }
         wrapper.orderByDesc(Order::getCreateTime);
         Page<Order> orderPage = orderMapper.selectPage(pageParam, wrapper);
@@ -646,6 +660,17 @@ public class OrderServiceImpl implements OrderService {
             case StatusConstants.ORDER_REFUNDED -> "已退款";
             default -> "未知";
         };
+    }
+
+    /**
+     * M9: 管理端订单搜索的日期参数解析, 统一取当天 00:00
+     */
+    private LocalDateTime parseDate(String date) {
+        try {
+            return LocalDate.parse(date, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay();
+        } catch (DateTimeParseException e) {
+            throw new BusinessException("日期格式应为 yyyy-MM-dd");
+        }
     }
 
     String generateOrderNo() {

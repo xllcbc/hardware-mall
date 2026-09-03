@@ -24,11 +24,12 @@ public class AdminOrderController {
     public Result<Page<OrderVO>> getOrderList(
             @RequestParam(required = false) Long userId,
             @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) String orderNo,
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "20") Integer limit) {
-        return Result.success(orderService.getAdminOrderPage(userId, status, page, limit));
+        return Result.success(orderService.getAdminOrderPage(userId, status, orderNo, startDate, endDate, page, limit));
     }
 
     @GetMapping("/{id}")

@@ -2,6 +2,7 @@ package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.RedisConstants;
@@ -247,6 +248,24 @@ class OrderServiceImplTest {
                 .hasMessageContaining("库存不足");
 
         verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "stock-key");
+    }
+
+    @Test
+    void getAdminOrderPage_invalidDateFormat_throws() {
+        // M9: 日期参数格式错误必须入口拦截, 而不是拼进 SQL 报 500
+        assertThatThrownBy(() -> orderService.getAdminOrderPage(null, null, null, "2026/01/01", null, 1, 20))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("日期格式应为 yyyy-MM-dd");
+    }
+
+    @Test
+    void getAdminOrderPage_withSearchArgs_queriesPage() {
+        when(orderMapper.selectPage(any(), any())).thenReturn(new Page<>(1, 20));
+
+        Page<OrderVO> result = orderService.getAdminOrderPage(null, null, "SO123", "2026-01-01", "2026-01-31", 1, 20);
+
+        assertThat(result.getRecords()).isEmpty();
+        verify(orderMapper).selectPage(any(), any());
     }
 
     private CreateOrderRequest stubValidRequest() {
