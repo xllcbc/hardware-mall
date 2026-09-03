@@ -5,9 +5,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -20,6 +22,14 @@ public class RedisUtil {
 
     private final RedisTemplate<String, Object> redisTemplate;
     private final RedisLockUtil redisLockUtil;
+
+    /**
+     * INCR + 首次 EXPIRE 原子脚本：仅当计数从 0 → 1 时设置 TTL
+     */
+    private static final DefaultRedisScript<Long> INCR_WITH_EXPIRE_SCRIPT = new DefaultRedisScript<>(
+            "local v = redis.call('INCR', KEYS[1]) "
+                    + "if v == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end "
+                    + "return v", Long.class);
 
     /**
      * 未抢到锁时的告警轮数，达到后只告警，循环继续等待缓存重建
@@ -115,6 +125,18 @@ public class RedisUtil {
 
     public Long decr(String key, long delta) {
         return redisTemplate.opsForValue().decrement(key, delta);
+    }
+
+    /**
+     * 原子计数并设置过期：INCR 与首次 EXPIRE 在同一段 Lua 中执行，
+     * 消除"incr 后进程崩溃导致 key 永不过期、计数只涨不清"的窗口
+     *
+     * @return 自增后的计数值
+     */
+    public long incrWithExpire(String key, long ttlSeconds) {
+        Long result = redisTemplate.execute(INCR_WITH_EXPIRE_SCRIPT,
+                Collections.singletonList(key), String.valueOf(ttlSeconds));
+        return result == null ? 0L : result;
     }
 
     public void sAdd(String key, Object... values) {

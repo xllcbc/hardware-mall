@@ -28,8 +28,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(traceIdInterceptor)
                 .addPathPatterns("/api/**")
                 .order(-1);
-        registry.addInterceptor(rateLimitInterceptor)
-                .addPathPatterns("/api/**");
+        // jwt 必须先于限流执行: 限流按 userId 维度隔离计数, 依赖 jwt 预先填充 UserContext
         registry.addInterceptor(jwtInterceptor)
                 .addPathPatterns("/api/**")
                 .excludePathPatterns(
@@ -37,6 +36,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
                     "/api/user/category/**", "/api/user/product/**", "/api/user/logistics/**",
                     "/api/user/pay/callback", "/api/user/pay/callback/refund"
                 );
+        registry.addInterceptor(rateLimitInterceptor)
+                .addPathPatterns("/api/**");
         registry.addInterceptor(adminRoleInterceptor)
                 .addPathPatterns("/api/**")
                 .excludePathPatterns("/api/admin/login");
