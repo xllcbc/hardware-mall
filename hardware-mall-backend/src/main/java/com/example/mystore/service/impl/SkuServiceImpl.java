@@ -186,6 +186,8 @@ public class SkuServiceImpl implements SkuService {
         }
         skuMapper.insert(sku);
         redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + sku.getSpuId());
+        // SKU 价格/上下架直接影响列表展示; 列表缓存是 分类×页码 多 key, 无法逐个枚举, 只能按模式失效
+        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
         syncStockToCache(sku.getId());
         return sku;
     }
@@ -225,6 +227,7 @@ public class SkuServiceImpl implements SkuService {
         skuMapper.updateById(exist);
         redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + exist.getSpuId());
         redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + exist.getId());
+        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
         syncStockToCache(exist.getId());
         return exist;
     }
@@ -243,6 +246,8 @@ public class SkuServiceImpl implements SkuService {
         }
         redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + spuId);
         redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + id);
+        redisUtil.delete(RedisConstants.PREFIX_SKU_STOCK + id);
+        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
     }
 
     @Override
@@ -405,6 +410,7 @@ public class SkuServiceImpl implements SkuService {
         skuMapper.updateById(tombstone);
         redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + tombstone.getSpuId());
         redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + tombstone.getId());
+        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
         syncStockToCache(tombstone.getId());
         return tombstone;
     }

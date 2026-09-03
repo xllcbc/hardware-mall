@@ -163,6 +163,23 @@ class SkuServiceImplTest {
         verify(skuMapper).insert(any(Sku.class));
         assertThat(result.getSpecHash()).hasSize(32).matches("[0-9a-f]{32}");
         verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
+        // M4: 新增 SKU 也要失效商品列表缓存
+        verify(redisUtil).deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+    }
+
+    @Test
+    void testUpdateSku_PriceChange_InvalidatesListCache() {
+        // M4: 改价后列表页最长 1 小时显示旧价, 必须按模式失效 product:list:*
+        when(skuMapper.selectById(1L)).thenReturn(sku1);
+
+        Sku incoming = new Sku();
+        incoming.setId(1L);
+        incoming.setPrice(new BigDecimal("299.00"));
+
+        skuService.updateSku(incoming);
+
+        verify(redisUtil).deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        verify(redisUtil).delete(RedisConstants.PREFIX_SKU_INFO + 1L);
     }
 
     @Test
@@ -470,5 +487,8 @@ class SkuServiceImplTest {
         verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku -> sku.getDeleteTime() > 0));
         verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
         verify(redisUtil).delete(RedisConstants.PREFIX_SKU_INFO + 1L);
+        // M4: 删除 SKU 清库存缓存 + 失效列表缓存
+        verify(redisUtil).delete(RedisConstants.PREFIX_SKU_STOCK + 1L);
+        verify(redisUtil).deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
     }
 }
