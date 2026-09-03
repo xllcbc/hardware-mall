@@ -43,7 +43,8 @@ class AdminAuthControllerTest {
     @BeforeEach
     void clearRateLimit() {
         try {
-            redisUtil.delete("rate:limit:admin:login");
+            // M2 后限流 key 带身份维度后缀(如 rate:limit:admin:login:ip127.0.0.1), 需按模式清理
+            redisUtil.deleteByPattern("rate:limit:admin:login*");
         } catch (Exception ignored) {
         }
     }
