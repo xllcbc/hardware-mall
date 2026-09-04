@@ -29,6 +29,7 @@
             "codeProtect" : false,
             "autoPrefixWXSS" : true
         },
+        "__usePrivacyCheck__" : true,
         "usingComponents" : true,
         "lazyCodeLoad" : true
     },

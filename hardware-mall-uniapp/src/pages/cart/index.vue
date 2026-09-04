@@ -4,6 +4,7 @@
       <EmptyState text="购物车是空的" icon="🛒">
         <template #action>
           <view class="empty-btn" @tap="goShopping">去逛逛</view>
+          <view v-if="!userStore.isLoggedIn" class="empty-btn" @tap="goLogin">去登录</view>
         </template>
       </EmptyState>
     </view>
@@ -85,6 +86,7 @@
         </view>
       </view>
     </template>
+    <PrivacyPopup v-model="showPrivacy" @agree="onAgree" />
   </view>
 </template>
 
@@ -93,34 +95,46 @@ import { ref, computed, onMounted } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import EmptyState from '@/components/common/EmptyState.vue'
 import CountStepper from '@/components/common/CountStepper.vue'
+import PrivacyPopup from '@/components/common/PrivacyPopup.vue'
 import { useCartStore } from '@/stores/cart'
 import { useAppStore } from '@/stores/app'
+import { useUserStore } from '@/stores/user'
+import { usePrivacyGate } from '@/composables/usePrivacyGate'
 import { getCartList } from '@/api/cart'
 import type { CartItem } from '@/types'
 
 const cartStore = useCartStore()
 const appStore = useAppStore()
+const userStore = useUserStore()
+const { showPrivacy, onAgree, check: checkPrivacy } = usePrivacyGate()
 const manageMode = ref(false)
 
-onShow(async () => {
+onShow(() => {
+  // 未登录不请求购物车接口: 展示空车 + 去登录入口, 不强制跳转登录页(审核合规)
+  if (!userStore.isLoggedIn) {
+    cartStore.setItems([])
+    return
+  }
+  loadCart()
+})
+
+onPullDownRefresh(() => {
+  if (userStore.isLoggedIn) loadCart()
+  uni.stopPullDownRefresh()
+})
+
+const loadCart = async () => {
   try {
     const data = await getCartList()
     cartStore.setItems(data || [])
   } catch (e) {
     console.error('加载购物车失败:', e)
   }
-})
+}
 
-onPullDownRefresh(async () => {
-  try {
-    const data = await getCartList()
-    cartStore.setItems(data || [])
-  } catch (e) {
-    console.error('刷新失败:', e)
-  } finally {
-    uni.stopPullDownRefresh()
-  }
-})
+const goLogin = () => {
+  uni.navigateTo({ url: '/pages/login/index' })
+}
 
 const isSelectAll = computed(() =>
   cartStore.items.length > 0 && cartStore.items.every(item => item.selected)

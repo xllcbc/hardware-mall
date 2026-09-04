@@ -46,6 +46,7 @@
         <view v-else-if="noMore && products.length" class="no-more">— 没有更多了 —</view>
       </scroll-view>
     </view>
+    <PrivacyPopup v-model="showPrivacy" @agree="onAgree" />
   </view>
 </template>
 
@@ -56,9 +57,13 @@ import SearchBar from '@/components/common/SearchBar.vue'
 import ProductCard from '@/components/common/ProductCard.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import PrivacyPopup from '@/components/common/PrivacyPopup.vue'
 import { getCategoryList, getProductList } from '@/api/product'
 import { useAppStore } from '@/stores/app'
+import { usePrivacyGate } from '@/composables/usePrivacyGate'
 import type { Category, Product } from '@/types'
+
+const { showPrivacy, onAgree, check: checkPrivacy } = usePrivacyGate()
 
 const searchKeyword = ref('')
 const categories = ref<Category[]>([])
@@ -70,6 +75,7 @@ const pageSize = 10
 const noMore = ref(false)
 
 onMounted(async () => {
+  checkPrivacy()
   await loadCategories()
 })
 

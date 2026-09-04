@@ -39,33 +39,49 @@
         <text class="btn-text">{{ loginLoading ? '登录中...' : '微信一键登录' }}</text>
       </button>
 
-      <view class="login-tip">
-        <text class="tip-text">登录即表示同意</text>
-        <text class="link" @tap="goTerms">《用户服务协议》</text>
-        <text class="tip-text">和</text>
-        <text class="link" @tap="goPrivacy">《隐私政策》</text>
+      <view class="agreement-check" @tap="agreed = !agreed">
+        <view class="check-box" :class="{ checked: agreed }">
+          <text v-if="agreed" class="check-icon">✓</text>
+        </view>
+        <view class="check-text-wrap">
+          <text class="tip-text">已阅读并同意</text>
+          <text class="link" @tap.stop="goTerms">《用户服务协议》</text>
+          <text class="tip-text">和</text>
+          <text class="link" @tap.stop="goPrivacy">《隐私政策》</text>
+        </view>
       </view>
     </view>
 
     <view class="login-footer">
       <text class="footer-text">如有疑问，请联系客服</text>
     </view>
+    <PrivacyPopup v-model="showPrivacy" @agree="onAgree" />
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { login, bindPhone, updateUserInfo } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { uploadAvatar } from '@/utils/upload'
+import PrivacyPopup from '@/components/common/PrivacyPopup.vue'
+import { usePrivacyGate } from '@/composables/usePrivacyGate'
 
 const loginLoading = ref(false)
 const avatarUrl = ref('')
 const nickname = ref('')
 const userStore = useUserStore()
+const { showPrivacy, onAgree, check: checkPrivacy } = usePrivacyGate()
+
+// 协议主动勾选: 首次启动已全局同意过隐私政策时默认勾上, 否则必须勾选才能登录
+const agreed = ref(!!uni.getStorageSync('PRIVACY_AGREED'))
+
+onMounted(() => {
+  checkPrivacy()
+})
 
 const canLogin = computed(() => {
-  return avatarUrl.value && nickname.value.trim().length > 0
+  return avatarUrl.value && nickname.value.trim().length > 0 && agreed.value
 })
 
 const onChooseAvatar = (e: any) => {
@@ -313,6 +329,44 @@ const goPrivacy = () => {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
+  gap: 4rpx;
+}
+
+.agreement-check {
+  margin-top: 32rpx;
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+  max-width: 100%;
+}
+
+.check-box {
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 50%;
+  border: 2rpx solid #C0C0C0;
+  background: #FFFFFF;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &.checked {
+    background: #C9A86C;
+    border-color: #C9A86C;
+  }
+
+  .check-icon {
+    font-size: 22rpx;
+    color: #FFFFFF;
+    line-height: 1;
+  }
+}
+
+.check-text-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 4rpx;
 }
 
