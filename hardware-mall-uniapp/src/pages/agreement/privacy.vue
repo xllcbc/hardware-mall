@@ -9,7 +9,7 @@
       <view class="section">
         <text class="sub-title">一、我们收集的信息</text>
         <text class="paragraph">为了向您提供服务，我们会在征得您明示同意后，收集以下必要信息：</text>
-        <text class="paragraph">1. 微信昵称、头像：用于展示用户身份信息，完善个人资料。</text>
+        <text class="paragraph">1. 昵称、头像：用于展示用户身份信息，完善个人资料。</text>
         <text class="paragraph">2. 手机号：用于账号登录注册，以及订单配送联系与售后服务。</text>
         <text class="paragraph">3. 收货地址：用于商品配送，填写收货地址以完成订单发货。</text>
         <text class="paragraph">4. 订单信息：用于生成订单、处理发货、退款及售后查询。</text>

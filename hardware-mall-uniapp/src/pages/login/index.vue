@@ -36,7 +36,7 @@
         :disabled="!canLogin || loginLoading"
       >
         <text class="btn-icon">📱</text>
-        <text class="btn-text">{{ loginLoading ? '登录中...' : '微信一键登录' }}</text>
+        <text class="btn-text">{{ loginLoading ? '登录中...' : '手机号快捷登录' }}</text>
       </button>
 
       <view class="agreement-check" @tap="agreed = !agreed">

@@ -5,7 +5,7 @@
       <scroll-view class="privacy-body" scroll-y>
         <text class="privacy-text">欢迎使用五金商城！我们非常重视您的个人信息与隐私保护。</text>
         <text class="privacy-text">为了向您提供服务，我们会在征得您明示同意后，收集以下必要信息：</text>
-        <text class="privacy-text">1. 微信昵称与头像，用于展示和完善个人资料；</text>
+        <text class="privacy-text">1. 昵称与头像，用于展示和完善个人资料；</text>
         <text class="privacy-text">2. 手机号，用于账号登录注册及订单配送联系；</text>
         <text class="privacy-text">3. 收货地址，用于商品配送发货；</text>
         <text class="privacy-text">4. 订单信息，用于处理发货、退款及售后；</text>
@@ -21,7 +21,7 @@
       <view class="privacy-actions">
         <view class="privacy-btn secondary" @tap="onDisagree">不同意</view>
         <!-- #ifdef MP-WEIXIN -->
-        <!-- 原生同意按钮: 微信隐私流程挂起时授权登记有效; tap 兜底非挂起场景(check 弹窗) -->
+        <!-- 原生同意按钮: 平台隐私流程挂起时授权登记有效; tap 兜底非挂起场景(check 弹窗) -->
         <button
           class="privacy-btn primary native-agree-btn"
           open-type="agreePrivacyAuthorization"

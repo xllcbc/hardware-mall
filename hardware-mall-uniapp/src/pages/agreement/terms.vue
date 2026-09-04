@@ -8,7 +8,7 @@
 
       <view class="section">
         <text class="sub-title">一、账号注册与使用</text>
-        <text class="paragraph">您通过微信授权登录本小程序，应保证所提供信息的真实、准确、合法。您的账号仅供您本人使用，不得出借、转让。</text>
+        <text class="paragraph">您通过授权登录本小程序，应保证所提供信息的真实、准确、合法。您的账号仅供您本人使用，不得出借、转让。</text>
       </view>
 
       <view class="section">
