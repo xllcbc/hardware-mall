@@ -74,7 +74,6 @@
     <view v-if="userStore.isLoggedIn" class="logout-section">
       <view class="logout-btn" @tap="handleLogout">退出登录</view>
     </view>
-    <PrivacyPopup v-model="showPrivacy" @agree="onAgree" />
   </view>
 </template>
 
@@ -82,15 +81,11 @@
 import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
-import PrivacyPopup from '@/components/common/PrivacyPopup.vue'
-import { usePrivacyGate } from '@/composables/usePrivacyGate'
 
 const userStore = useUserStore()
 const appStore = useAppStore()
-const { showPrivacy, onAgree, check: checkPrivacy } = usePrivacyGate()
 
 onShow(() => {
-  checkPrivacy()
   const raw = uni.getStorageSync('LOGIN_RESULT')
   if (raw) {
     try {

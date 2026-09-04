@@ -55,7 +55,7 @@
     <view class="login-footer">
       <text class="footer-text">如有疑问，请联系客服</text>
     </view>
-    <PrivacyPopup v-model="showPrivacy" @agree="onAgree" />
+    <PrivacyPopup @agree="handlePrivacyAgree" />
   </view>
 </template>
 
@@ -65,20 +65,24 @@ import { login, bindPhone, updateUserInfo } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { uploadAvatar } from '@/utils/upload'
 import PrivacyPopup from '@/components/common/PrivacyPopup.vue'
-import { usePrivacyGate } from '@/composables/usePrivacyGate'
+import { checkPrivacyGate, showPrivacy } from '@/composables/usePrivacyGate'
 
 const loginLoading = ref(false)
 const avatarUrl = ref('')
 const nickname = ref('')
 const userStore = useUserStore()
-const { showPrivacy, onAgree, check: checkPrivacy } = usePrivacyGate()
 
-// 协议主动勾选: 首次启动已全局同意过隐私政策时默认勾上, 否则必须勾选才能登录
+// 协议主动勾选: 隐私弹窗同意过(本地有记录)则默认勾上, 否则必须勾选才能登录
 const agreed = ref(!!uni.getStorageSync('PRIVACY_AGREED'))
 
 onMounted(() => {
-  checkPrivacy()
+  checkPrivacyGate()
 })
+
+// 隐私弹窗同意后自动同步勾选框
+const handlePrivacyAgree = () => {
+  agreed.value = true
+}
 
 const canLogin = computed(() => {
   return avatarUrl.value && nickname.value.trim().length > 0 && agreed.value
@@ -105,9 +109,17 @@ const onNicknameBlur = () => {
 
 const onGetPhoneNumber = async (e: any) => {
   if (e.detail.errMsg !== 'getPhoneNumber:ok') {
-    if (!e.detail.errMsg?.includes('cancel')) {
-      uni.showToast({ title: '获取手机号失败', icon: 'none' })
+    const errMsg = e.detail.errMsg || ''
+    if (errMsg.includes('cancel')) {
+      return
     }
+    if (errMsg.includes('privacy')) {
+      // 隐私授权未通过: 弹出隐私弹窗引导用户同意后重试
+      uni.showToast({ title: '请先同意隐私政策后再登录', icon: 'none' })
+      showPrivacy.value = true
+      return
+    }
+    uni.showToast({ title: '获取手机号失败', icon: 'none' })
     return
   }
 

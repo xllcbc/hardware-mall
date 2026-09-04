@@ -86,7 +86,6 @@
         </view>
       </view>
     </template>
-    <PrivacyPopup v-model="showPrivacy" @agree="onAgree" />
   </view>
 </template>
 
@@ -95,18 +94,15 @@ import { ref, computed, onMounted } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import EmptyState from '@/components/common/EmptyState.vue'
 import CountStepper from '@/components/common/CountStepper.vue'
-import PrivacyPopup from '@/components/common/PrivacyPopup.vue'
 import { useCartStore } from '@/stores/cart'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
-import { usePrivacyGate } from '@/composables/usePrivacyGate'
 import { getCartList } from '@/api/cart'
 import type { CartItem } from '@/types'
 
 const cartStore = useCartStore()
 const appStore = useAppStore()
 const userStore = useUserStore()
-const { showPrivacy, onAgree, check: checkPrivacy } = usePrivacyGate()
 const manageMode = ref(false)
 
 onShow(() => {

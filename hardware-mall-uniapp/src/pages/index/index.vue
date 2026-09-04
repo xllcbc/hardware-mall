@@ -62,7 +62,6 @@
         />
       </view>
     </view>
-    <PrivacyPopup v-model="showPrivacy" @agree="onAgree" />
   </view>
 </template>
 
@@ -71,13 +70,9 @@ import { ref, computed, onMounted } from 'vue'
 import ProductCard from '@/components/common/ProductCard.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
-import PrivacyPopup from '@/components/common/PrivacyPopup.vue'
 import { getCategoryList, getRecommendProducts } from '@/api/product'
 import { useAppStore } from '@/stores/app'
-import { usePrivacyGate } from '@/composables/usePrivacyGate'
 import type { Category, Product } from '@/types'
-
-const { showPrivacy, onAgree, check: checkPrivacy } = usePrivacyGate()
 
 interface CategoryItem extends Category {
   isMore?: boolean
@@ -96,7 +91,6 @@ const displayCategories = computed<CategoryItem[]>(() => {
 })
 
 onMounted(async () => {
-  checkPrivacy()
   await Promise.all([
     loadCategories(),
     loadProducts()

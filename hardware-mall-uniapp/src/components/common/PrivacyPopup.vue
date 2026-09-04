@@ -1,5 +1,5 @@
 <template>
-  <view v-if="modelValue" class="privacy-mask" catchtouchmove="return">
+  <view v-if="showPrivacy" class="privacy-mask" catchtouchmove="return">
     <view class="privacy-card">
       <text class="privacy-title">隐私保护提示</text>
       <scroll-view class="privacy-body" scroll-y>
@@ -20,33 +20,63 @@
       </scroll-view>
       <view class="privacy-actions">
         <view class="privacy-btn secondary" @tap="onDisagree">不同意</view>
-        <view class="privacy-btn primary" @tap="onAgree">同意</view>
+        <!-- #ifdef MP-WEIXIN -->
+        <!-- 原生同意按钮: 微信隐私流程挂起时授权登记有效; tap 兜底非挂起场景(check 弹窗) -->
+        <button
+          class="privacy-btn primary native-agree-btn"
+          open-type="agreePrivacyAuthorization"
+          @agreeprivacyauthorization="onNativeAgree"
+          @tap="onNativeTap"
+        >同意</button>
+        <!-- #endif -->
+        <!-- #ifndef MP-WEIXIN -->
+        <view class="privacy-btn primary" @tap="onPlainAgree">同意</view>
+        <!-- #endif -->
       </view>
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
-const props = defineProps<{ modelValue: boolean }>()
+import { showPrivacy, isWxPrivacyPending, agreeWxPrivacy } from '@/composables/usePrivacyGate'
+
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: boolean): void
   (e: 'agree'): void
 }>()
 
-const onAgree = () => {
+/** 统一完成动作: 记录同意 + 关闭弹窗 + 通知页面(如登录页同步勾选框) */
+const finishAgree = () => {
+  uni.setStorageSync('PRIVACY_AGREED', true)
+  showPrivacy.value = false
   emit('agree')
-  emit('update:modelValue', false)
+}
+
+// 原生按钮双事件幂等: 挂起时 agreeprivacyauthorization 触发(resolve+finish), tap 跳过;
+// 非挂起时(check 弹窗) agreeprivacyauthorization 不会触发, 由 tap 完成同意
+const onNativeTap = () => {
+  if (!isWxPrivacyPending.value) {
+    finishAgree()
+  }
+}
+
+const onNativeAgree = () => {
+  agreeWxPrivacy()
+  finishAgree()
+}
+
+const onPlainAgree = () => {
+  finishAgree()
 }
 
 const onDisagree = () => {
   uni.showModal({
     title: '提示',
-    content: '未同意隐私政策将无法使用本小程序，确定拒绝?',
+    content: '未同意隐私政策将无法登录使用本小程序，确定拒绝?',
     confirmText: '仍不同意',
     cancelText: '返回同意',
     success: (res) => {
       if (res.confirm) {
-        uni.showToast({ title: '您已拒绝隐私政策，部分功能将不可用', icon: 'none' })
+        uni.showToast({ title: '您已拒绝隐私政策，无法登录使用', icon: 'none' })
       }
     }
   })
@@ -140,6 +170,18 @@ const goTerms = () => {
 
   &:active {
     opacity: 0.9;
+  }
+}
+
+/* 原生 open-type button 样式重置, 与 .privacy-btn 视觉一致 */
+.native-agree-btn {
+  margin: 0;
+  padding: 0;
+  line-height: 80rpx;
+  border: none;
+
+  &::after {
+    border: none;
   }
 }
 </style>
