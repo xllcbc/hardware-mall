@@ -24,6 +24,8 @@ public class StatusConstants {
     public static final int ORDER_REFUNDING = 6;
     /** 已退款 */
     public static final int ORDER_REFUNDED = 7;
+    /** 退款申请中(用户已申请, 等待管理员审核) */
+    public static final int ORDER_REFUND_REQUESTED = 8;
     
     // ==================== 用户角色 ====================
     /** 普通用户 */

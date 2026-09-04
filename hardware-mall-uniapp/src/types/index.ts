@@ -140,6 +140,7 @@ export interface Order {
   receiverPhone?: string
   receiverAddress?: string
   buyerRemark?: string
+  cancelReason?: string
   payTime?: string
   shipTime?: string
   receiveTime?: string

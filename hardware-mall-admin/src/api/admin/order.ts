@@ -63,3 +63,7 @@ export const shipOrder = (id: number, logisticsId: number, logisticsNo: string) 
 export const refundOrder = (id: number, reason: string) => {
   return request.put(`/admin/order/${id}/refund`, { reason })
 }
+
+export const rejectRefund = (id: number, reason: string) => {
+  return request.put(`/admin/order/${id}/reject-refund`, { reason })
+}

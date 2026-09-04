@@ -39,6 +39,10 @@ export const cancelOrder = (id: number, reason: string) => {
   return request.put(`/user/order/${id}/cancel`, { reason })
 }
 
+export const applyRefund = (id: number, reason: string) => {
+  return request.put(`/user/order/${id}/apply-refund`, { reason })
+}
+
 export const confirmReceive = (id: number) => {
   return request.put(`/user/order/${id}/receive`, {})
 }

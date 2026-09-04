@@ -24,6 +24,17 @@ public interface OrderService {
     
     void shipOrder(Long orderId, Long logisticsId, String logisticsNo);
     void refundOrder(Long orderId, String reason);
+
+    /**
+     * 用户申请退款（写入 8=退款申请中, 通知管理员审核）
+     * 仅允许待发货/已发货状态; 审核通过走 refundOrder, 拒绝走 rejectRefund
+     */
+    void applyRefund(Long userId, Long orderId, String reason);
+
+    /**
+     * 管理员拒绝退款申请: 8 → 回原状态(按 shipTime 判断回 2 或 3), 拒绝原因记入 adminRemark
+     */
+    void rejectRefund(Long orderId, String rejectReason);
     
     /**
      * 自动取消超时未支付订单（幂等）

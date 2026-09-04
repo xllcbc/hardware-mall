@@ -13,6 +13,7 @@
           <text class="status-text">{{ order.statusText }}</text>
           <text v-if="order.status === 6" class="status-desc">退款处理中，请耐心等待</text>
           <text v-if="order.status === 7" class="status-desc">已退款，金额已原路退回</text>
+          <text v-if="order.status === 8" class="status-desc">管理员正在审核，处理结果将尽快通知</text>
           <text v-if="order.status === 1" class="status-desc">请尽快完成支付</text>
           <text v-if="order.status === 3" class="status-desc">正在配送中，请保持电话畅通</text>
         </view>
@@ -50,6 +51,10 @@
         <view v-if="order.shipTime" class="info-row">
           <text class="info-label">发货时间</text>
           <text class="info-value">{{ formatTime(order.shipTime) }}</text>
+        </view>
+        <view v-if="order.status === 8 && order.cancelReason" class="info-row">
+          <text class="info-label">退款申请原因</text>
+          <text class="info-value">{{ order.cancelReason }}</text>
         </view>
       </view>
 
@@ -109,7 +114,11 @@
       <view class="action-btn secondary" @tap="cancelOrder">取消订单</view>
       <view class="action-btn primary" @tap="payOrder">去支付</view>
     </view>
+    <view v-if="order.status === 2" class="detail-footer">
+      <view class="action-btn secondary" @tap="applyRefund">申请退款</view>
+    </view>
     <view v-if="order.status === 3" class="detail-footer">
+      <view class="action-btn secondary" @tap="applyRefund">申请退款</view>
       <view class="action-btn primary" @tap="confirmReceive">确认收货</view>
     </view>
     <view v-if="order.status === 4 || order.status === 5" class="detail-footer">
@@ -123,7 +132,7 @@
 import { ref, onMounted } from 'vue'
 import { onPullDownRefresh } from '@dcloudio/uni-app'
 import type { Order } from '@/types'
-import { cancelOrder as cancelOrderApi, confirmReceive as confirmReceiveApi, deleteOrder as deleteOrderApi, getOrderDetail } from '@/api/order'
+import { cancelOrder as cancelOrderApi, confirmReceive as confirmReceiveApi, deleteOrder as deleteOrderApi, getOrderDetail, applyRefund as applyRefundApi } from '@/api/order'
 import { prepayOrder } from '@/api/pay'
 import LoadingState from '@/components/common/LoadingState.vue'
 
@@ -183,7 +192,8 @@ const getStatusBgClass = (status: number) => {
     3: 'bg-primary',
     4: 'bg-success',
     6: 'bg-danger',
-    7: 'bg-danger'
+    7: 'bg-danger',
+    8: 'bg-warning'
   }
   return map[status] || ''
 }
@@ -195,7 +205,8 @@ const getStatusIcon = (status: number) => {
     3: '🚚',
     4: '✓',
     6: '⟳',
-    7: '✓'
+    7: '✓',
+    8: '📝'
   }
   return map[status] || '📋'
 }
@@ -280,6 +291,34 @@ const payOrder = async () => {
     uni.hideLoading()
     uni.showToast({ title: e.message || '支付失败', icon: 'none' })
   }
+}
+
+const applyRefund = () => {
+  uni.showModal({
+    title: '申请退款',
+    editable: true,
+    placeholderText: '请填写退款原因(如质量问题、不想要了等)',
+    success: async (res) => {
+      if (!res.confirm) return
+      const reason = (res.content || '').trim()
+      if (!reason) {
+        uni.showToast({ title: '请填写退款原因', icon: 'none' })
+        return
+      }
+      try {
+        await applyRefundApi(order.value.id!, reason)
+        uni.showToast({ title: '已提交，等待审核', icon: 'success' })
+        try {
+          const data = await getOrderDetail(Number(order.value.id))
+          order.value = data || {}
+        } catch (e) {
+          console.error('刷新订单失败:', e)
+        }
+      } catch (e) {
+        uni.showToast({ title: e.message || '申请失败', icon: 'none' })
+      }
+    }
+  })
 }
 
 const confirmReceive = async () => {

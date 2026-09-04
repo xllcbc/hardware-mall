@@ -57,4 +57,12 @@ public class AdminOrderController {
         orderService.refundOrder(id, params.get("reason"));
         return Result.success();
     }
+
+    @PutMapping("/{id}/reject-refund")
+    public Result<Void> rejectRefund(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> params) {
+        orderService.rejectRefund(id, params.get("reason"));
+        return Result.success();
+    }
 }

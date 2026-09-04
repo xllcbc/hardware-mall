@@ -57,6 +57,15 @@ public class OrderController {
         return Result.success();
     }
 
+    @PutMapping("/{id}/apply-refund")
+    public Result<Void> applyRefund(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> params) {
+        Long userId = UserContext.getUserId();
+        orderService.applyRefund(userId, id, params.get("reason"));
+        return Result.success();
+    }
+
     @PutMapping("/{id}/receive")
     public Result<Void> confirmReceive(@PathVariable Long id) {
         Long userId = UserContext.getUserId();

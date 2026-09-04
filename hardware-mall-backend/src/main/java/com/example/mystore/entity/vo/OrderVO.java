@@ -22,6 +22,7 @@ public class OrderVO implements Serializable {
     private String receiverPhone;
     private String receiverAddress;
     private String buyerRemark;
+    private String cancelReason;
     private LocalDateTime payTime;
     private LocalDateTime shipTime;
     private LocalDateTime receiveTime;

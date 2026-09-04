@@ -50,6 +50,7 @@
           <view class="order-actions">
             <view class="action-btn secondary" @tap.stop="goOrderDetail(order.id)">查看详情</view>
             <view v-if="order.status === 1" class="action-btn secondary" @tap.stop="cancelOrder(order)">取消订单</view>
+            <view v-if="order.status === 2 || order.status === 3" class="action-btn secondary" @tap.stop="applyRefund(order)">申请退款</view>
             <view v-if="order.status === 3" class="action-btn primary" @tap.stop="confirmReceive(order)">确认收货</view>
             <view v-if="order.status === 4 || order.status === 5" class="action-btn secondary" @tap.stop="deleteOrder(order)">删除订单</view>
           </view>
@@ -66,7 +67,7 @@ import { onShow } from '@dcloudio/uni-app'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import type { Order } from '@/types'
-import { cancelOrder as cancelOrderApi, confirmReceive as confirmReceiveApi, deleteOrder as deleteOrderApi, getOrderList } from '@/api/order'
+import { cancelOrder as cancelOrderApi, confirmReceive as confirmReceiveApi, deleteOrder as deleteOrderApi, getOrderList, applyRefund as applyRefundApi } from '@/api/order'
 
 const tabs = reactive([
   { label: '全部', status: 0, count: 0 },
@@ -136,7 +137,8 @@ const getStatusClass = (status: number) => {
     1: 'warning',
     2: 'info',
     3: 'primary',
-    4: 'success'
+    4: 'success',
+    8: 'warning'
   }
   return map[status] || ''
 }
@@ -175,6 +177,29 @@ const cancelOrder = async (order: Order) => {
         } catch (e) {
           uni.showToast({ title: e.message || '操作失败', icon: 'none' })
         }
+      }
+    }
+  })
+}
+
+const applyRefund = (order: Order) => {
+  uni.showModal({
+    title: '申请退款',
+    editable: true,
+    placeholderText: '请填写退款原因(如质量问题、不想要了等)',
+    success: async (res) => {
+      if (!res.confirm) return
+      const reason = (res.content || '').trim()
+      if (!reason) {
+        uni.showToast({ title: '请填写退款原因', icon: 'none' })
+        return
+      }
+      try {
+        await applyRefundApi(order.id, reason)
+        uni.showToast({ title: '已提交，等待审核', icon: 'success' })
+        loadOrders()
+      } catch (e) {
+        uni.showToast({ title: e.message || '申请失败', icon: 'none' })
       }
     }
   })

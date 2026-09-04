@@ -12,6 +12,7 @@ export const ORDER_STATUS = {
   CANCELLED: 5,          // 已取消
   REFUNDING: 6,          // 退款中
   REFUNDED: 7,           // 已退款
+  REFUND_REQUESTED: 8,   // 退款申请中(等待管理员审核)
 } as const
 
 export const ORDER_STATUS_TEXT: Record<number, string> = {
@@ -22,6 +23,7 @@ export const ORDER_STATUS_TEXT: Record<number, string> = {
   [ORDER_STATUS.CANCELLED]: '已取消',
   [ORDER_STATUS.REFUNDING]: '退款中',
   [ORDER_STATUS.REFUNDED]: '已退款',
+  [ORDER_STATUS.REFUND_REQUESTED]: '退款申请中',
 }
 
 export const ORDER_STATUS_TYPE: Record<number, string> = {
@@ -32,6 +34,7 @@ export const ORDER_STATUS_TYPE: Record<number, string> = {
   [ORDER_STATUS.CANCELLED]: 'info',            // 灰色
   [ORDER_STATUS.REFUNDING]: 'danger',          // 红色
   [ORDER_STATUS.REFUNDED]: 'danger',           // 红色
+  [ORDER_STATUS.REFUND_REQUESTED]: 'warning',  // 橙色
 }
 
 // ==================== 用户角色 ====================

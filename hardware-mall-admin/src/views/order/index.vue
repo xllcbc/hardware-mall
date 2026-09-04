@@ -13,6 +13,12 @@
       <el-button link type="primary" @click="clearUserFilter">清除筛选</el-button>
     </div>
 
+    <div v-if="refundRequestedCount > 0" class="card filter-tip refund-tip animate-fade-in">
+      <el-icon><Bell /></el-icon>
+      <span>有 {{ refundRequestedCount }} 笔退款申请待审核</span>
+      <el-button link type="warning" @click="filterRefundRequested">立即处理</el-button>
+    </div>
+
     <div class="card search-card animate-fade-in-up stagger-1">
       <el-form :inline="true" :model="queryForm" class="search-form">
         <el-form-item label="订单状态">
@@ -28,8 +34,9 @@
             <el-option label="已发货" :value="ORDER_STATUS.SHIPPED" />
             <el-option label="已完成" :value="ORDER_STATUS.COMPLETED" />
             <el-option label="已取消" :value="ORDER_STATUS.CANCELLED" />
-            <el-option label="已退款" :value="ORDER_STATUS.REFUNDED" />
+            <el-option label="退款申请中" :value="ORDER_STATUS.REFUND_REQUESTED" />
             <el-option label="退款中" :value="ORDER_STATUS.REFUNDING" />
+            <el-option label="已退款" :value="ORDER_STATUS.REFUNDED" />
           </el-select>
         </el-form-item>
         <el-form-item label="订单号">
@@ -100,7 +107,7 @@
             <span class="time">{{ row.createTime }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="handleView(row)">查看</el-button>
             <el-button 
@@ -110,6 +117,22 @@
               @click="handleShip(row)"
             >
               发货
+            </el-button>
+            <el-button 
+              link 
+              type="warning" 
+              v-if="row.status === ORDER_STATUS.REFUND_REQUESTED" 
+              @click="handleApproveRefund(row)"
+            >
+              同意退款
+            </el-button>
+            <el-button 
+              link 
+              type="info" 
+              v-if="row.status === ORDER_STATUS.REFUND_REQUESTED" 
+              @click="handleRejectRefund(row)"
+            >
+              拒绝退款
             </el-button>
             <el-button 
               link 
@@ -161,6 +184,9 @@
         </el-descriptions-item>
         <el-descriptions-item label="下单时间">{{ currentOrder.createTime }}</el-descriptions-item>
         <el-descriptions-item label="买家备注" :span="2">{{ currentOrder.buyerRemark || '-' }}</el-descriptions-item>
+        <el-descriptions-item v-if="currentOrder.cancelReason" label="退款申请/退款原因" :span="2">
+          {{ currentOrder.cancelReason }}
+        </el-descriptions-item>
       </el-descriptions>
       
       <el-divider>商品明细</el-divider>
@@ -214,7 +240,7 @@
 import { ref, reactive, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
-import { getOrderList, shipOrder, refundOrder } from '@/api/admin/order'
+import { getOrderList, shipOrder, refundOrder, rejectRefund, getOrderStats } from '@/api/admin/order'
 import { getLogisticsList } from '@/api/admin/logistics'
 import { ORDER_STATUS, ORDER_STATUS_TYPE } from '@/constants/status'
 
@@ -227,6 +253,7 @@ const shipVisible = ref(false)
 const currentOrder = ref<any>(null)
 const logisticsList = ref<any[]>([])
 const filterUserId = ref<number | null>(null)
+const refundRequestedCount = ref(0)
 const shipFormRef = ref()
 
 const queryForm = reactive({
@@ -296,6 +323,21 @@ watch(() => route.query.userId, (newUserId) => {
   }
 }, { immediate: true })
 
+const loadRefundRequestedCount = async () => {
+  try {
+    const res: any = await getOrderStats()
+    refundRequestedCount.value = Number(res?.refundRequested) || 0
+  } catch {
+    // error handled by interceptor
+  }
+}
+
+const filterRefundRequested = () => {
+  queryForm.status = ORDER_STATUS.REFUND_REQUESTED
+  pagination.page = 1
+  loadData()
+}
+
 const handleSearch = () => {
   pagination.page = 1
   loadData()
@@ -353,8 +395,43 @@ const handleRefund = async (row: any) => {
   }
 }
 
+const handleApproveRefund = async (row: any) => {
+  try {
+    await ElMessageBox.confirm(
+      '同意后按实付金额原路退款, 该操作不可撤销',
+      '同意退款',
+      { confirmButtonText: '确定退款', cancelButtonText: '取消', type: 'warning' }
+    )
+    await refundOrder(row.id, '管理员同意退款申请')
+    ElMessage.success('退款已受理, 等待微信原路退回')
+    loadRefundRequestedCount()
+    loadData()
+  } catch {
+    // 用户取消或 error handled by interceptor
+  }
+}
+
+const handleRejectRefund = async (row: any) => {
+  try {
+    const { value } = await ElMessageBox.prompt('拒绝后订单回退原状态, 原因会展示给用户', '拒绝退款', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputPlaceholder: '请填写拒绝原因(必填)',
+      inputValidator: (v: string) => (!!v && v.trim().length > 0) || '请输入拒绝原因',
+      type: 'warning'
+    })
+    await rejectRefund(row.id, value)
+    ElMessage.success('已拒绝退款申请')
+    loadRefundRequestedCount()
+    loadData()
+  } catch {
+    // 用户取消或 error handled by interceptor
+  }
+}
+
 onMounted(() => {
   loadData()
+  loadRefundRequestedCount()
 })
 </script>
 
@@ -440,6 +517,12 @@ onMounted(() => {
 
 .filter-tip span {
   flex: 1;
+}
+
+.refund-tip {
+  background: #fdf6ec;
+  border-color: #faecd8;
+  color: #e6a23c;
 }
 
 .search-select {

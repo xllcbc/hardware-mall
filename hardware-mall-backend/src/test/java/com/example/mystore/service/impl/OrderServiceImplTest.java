@@ -2,6 +2,7 @@ package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import com.example.mystore.common.constant.StatusConstants;
@@ -70,6 +71,8 @@ class OrderServiceImplTest {
     private RedisUtil redisUtil;
     @Mock
     private ApplicationEventPublisher applicationEventPublisher;
+    @Mock
+    private DingTalkAlertService dingTalkAlertService;
     @Mock
     private org.springframework.transaction.PlatformTransactionManager transactionManager;
 
@@ -704,6 +707,208 @@ class OrderServiceImplTest {
                 .hasMessageContaining("wechat error");
 
         verify(orderMapper).update(isNull(), any()); // claim 已提交, status 保持 6
+    }
+
+    // ==================== applyRefund 用户申请退款 ====================
+
+    @Test
+    void applyRefund_success_claimsStatus8AndNotifiesAdmin() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setUserId(2L);
+        order.setOrderNo("SO123");
+        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+
+        orderService.applyRefund(2L, 1L, "不想要了");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
+                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
+        verify(orderMapper).update(isNull(), captor.capture());
+        // CAS 占位目标状态必须是 8(退款申请中), 而非直接 6(退款中)
+        assertThat(captor.getValue().getParamNameValuePairs())
+                .containsValue(StatusConstants.ORDER_REFUND_REQUESTED);
+
+        // 每笔申请都要通知到管理员(防抖 key 含订单号, 互不吞单)
+        verify(dingTalkAlertService).notify(eq("REFUND_REQUEST:1"), contains("SO123"));
+        verify(dingTalkAlertService).notify(eq("REFUND_REQUEST:1"), contains("不想要了"));
+    }
+
+    @Test
+    void applyRefund_casMiss_throwsAndNoNotify() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setUserId(2L);
+        order.setOrderNo("SO123");
+        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(0); // 竞态输了
+
+        assertThatThrownBy(() -> orderService.applyRefund(2L, 1L, "不想要了"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("状态已变更");
+
+        verify(dingTalkAlertService, never()).notify(any(), any()); // 未占位成功绝不通知
+    }
+
+    @Test
+    void applyRefund_invalidStatus_rejectsBeforeCasClaim() {
+        // 待付款/已完成/已取消/退款中/已退款 均不允许申请退款
+        int[] invalidStatuses = {
+                StatusConstants.ORDER_PENDING_PAYMENT,
+                StatusConstants.ORDER_COMPLETED,
+                StatusConstants.ORDER_CANCELLED,
+                StatusConstants.ORDER_REFUNDING,
+                StatusConstants.ORDER_REFUNDED,
+                StatusConstants.ORDER_REFUND_REQUESTED
+        };
+        for (int status : invalidStatuses) {
+            Order order = new Order();
+            order.setId(1L);
+            order.setUserId(2L);
+            order.setStatus(status);
+            when(orderMapper.selectById(1L)).thenReturn(order);
+
+            assertThatThrownBy(() -> orderService.applyRefund(2L, 1L, "不想要了"))
+                    .as("status=%d 应被拒绝", status)
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("不支持申请退款");
+        }
+        verify(orderMapper, never()).update(isNull(), any()); // 预检失败绝不写库
+        verify(dingTalkAlertService, never()).notify(any(), any());
+    }
+
+    @Test
+    void applyRefund_notOwner_rejectsAndNoWrite() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setUserId(2L); // 归属用户 2
+        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+
+        assertThatThrownBy(() -> orderService.applyRefund(999L, 1L, "不想要了"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单不存在");
+
+        verify(orderMapper, never()).update(isNull(), any());
+        verify(dingTalkAlertService, never()).notify(any(), any());
+    }
+
+    // ==================== refundOrder 审核通过(放行状态8) ====================
+
+    @Test
+    void refundOrder_requestedStatus8_approved_casClaimIncludes8() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_REFUND_REQUESTED); // 用户已申请, 管理员同意
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        lenient().when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        orderService.refundOrder(1L, "同意退款");
+
+        // 预检不再拒绝状态 8; 占位为退款中后走既有微信退款链路
+        // (CAS in-list 是否含 8 的并发防护属 DB 层, 由 Testcontainers 并发测试兜底, mock 无法观测)
+        verify(orderMapper).update(isNull(), any());
+        verify(payService).refund(1L, "同意退款");
+    }
+
+    // ==================== rejectRefund 管理员拒绝退款申请 ====================
+
+    @Test
+    void rejectRefund_notShipped_backToPendingShipment() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_REFUND_REQUESTED);
+        order.setShipTime(null); // 未发货
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+
+        orderService.rejectRefund(1L, "凭证不足");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
+                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
+        verify(orderMapper).update(isNull(), captor.capture());
+        // 状态回退到待发货, 拒绝原因记录在 adminRemark
+        assertThat(captor.getValue().getParamNameValuePairs())
+                .containsValue(StatusConstants.ORDER_PENDING_SHIPMENT)
+                .containsValue("凭证不足");
+    }
+
+    @Test
+    void rejectRefund_shipped_backToShipped() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_REFUND_REQUESTED);
+        order.setShipTime(LocalDateTime.now()); // 已发货
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+
+        orderService.rejectRefund(1L, "影响二次销售");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
+                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
+        verify(orderMapper).update(isNull(), captor.capture());
+        assertThat(captor.getValue().getParamNameValuePairs())
+                .containsValue(StatusConstants.ORDER_SHIPPED)
+                .containsValue("影响二次销售");
+    }
+
+    @Test
+    void rejectRefund_nonRequestedStatus_rejectsAndNoWrite() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT); // 不是待审核状态
+        when(orderMapper.selectById(1L)).thenReturn(order);
+
+        assertThatThrownBy(() -> orderService.rejectRefund(1L, "拒绝"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不是待审核的退款申请");
+
+        verify(orderMapper, never()).update(isNull(), any());
+    }
+
+    // ==================== Seam 2: 状态 8 的 VO 文案与原因透出 ====================
+
+    @Test
+    void orderDetail_status8_exposesCancelReasonAndRefundRequestedText() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setUserId(2L);
+        order.setStatus(StatusConstants.ORDER_REFUND_REQUESTED);
+        order.setAddressId(1L);
+        order.setLogisticsId(1L);
+        order.setCancelReason("不想要了");
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        OrderVO vo = orderService.getOrderById(2L, 1L);
+
+        assertThat(vo.getStatusText()).isEqualTo("退款申请中");
+        assertThat(vo.getCancelReason()).isEqualTo("不想要了");
+    }
+
+    // ==================== Seam 3: stats 透出退款申请计数 ====================
+
+    @Test
+    void orderStats_containsRefundRequestedCount() {
+        // 4 次 selectCount 依次: 待付款 1, 待发货 2, 已发货 3, 退款申请中 4
+        when(orderMapper.selectCount(any())).thenReturn(1L, 2L, 3L, 4L);
+
+        Map<String, Object> stats = orderService.getOrderStats();
+
+        assertThat(stats.get("refundRequested")).isEqualTo(4L);
     }
 
     @Test

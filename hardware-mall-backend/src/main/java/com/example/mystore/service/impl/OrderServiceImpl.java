@@ -66,6 +66,7 @@ public class OrderServiceImpl implements OrderService {
     private final RedisUtil redisUtil;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final PlatformTransactionManager transactionManager;
+    private final DingTalkAlertService dingTalkAlertService;
 
     @Override
     public OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey) {
@@ -433,9 +434,15 @@ public class OrderServiceImpl implements OrderService {
         wrapper.eq(Order::getStatus, StatusConstants.ORDER_SHIPPED);
         long shipped = orderMapper.selectCount(wrapper);
 
+        // 待管理员审核的退款申请数, 管理后台据此显示红点/快捷筛选
+        wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Order::getStatus, StatusConstants.ORDER_REFUND_REQUESTED);
+        long refundRequested = orderMapper.selectCount(wrapper);
+
         stats.put("pendingPay", pendingPay);
         stats.put("pendingShip", pendingShip);
         stats.put("shipped", shipped);
+        stats.put("refundRequested", refundRequested);
 
         return stats;
     }
@@ -533,7 +540,10 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException("订单不存在");
         }
         // 预检: 明显错状态直接报错 (CAS 才是权威并发守卫, 预检仅为友好提示)
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT && order.getStatus() != StatusConstants.ORDER_SHIPPED) {
+        // 8(退款申请中) 视为管理员审核通过: 沿用同一 CAS 占位链路 8→6→微信退款→回调→7
+        if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT
+                && order.getStatus() != StatusConstants.ORDER_SHIPPED
+                && order.getStatus() != StatusConstants.ORDER_REFUND_REQUESTED) {
             throw new BusinessException("该订单状态不支持退款");
         }
 
@@ -543,7 +553,8 @@ public class OrderServiceImpl implements OrderService {
         int affected = orderMapper.update(null,
                 new LambdaUpdateWrapper<Order>()
                         .eq(Order::getId, orderId)
-                        .in(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT, StatusConstants.ORDER_SHIPPED)
+                        .in(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT,
+                                StatusConstants.ORDER_SHIPPED, StatusConstants.ORDER_REFUND_REQUESTED)
                         .set(Order::getStatus, StatusConstants.ORDER_REFUNDING)
                         .set(Order::getCancelReason, reason)
                         .set(Order::getCancelTime, LocalDateTime.now())
@@ -554,6 +565,68 @@ public class OrderServiceImpl implements OrderService {
         log.info("订单置退款中, orderId={}, 等待微信退款回调确认", orderId);
 
         payService.refund(orderId, reason);
+    }
+
+    @Override
+    public void applyRefund(Long userId, Long orderId, String reason) {
+        Order order = orderMapper.selectById(orderId);
+        if (order == null || !order.getUserId().equals(userId)) {
+            throw new BusinessException("订单不存在");
+        }
+        // 预检: 明显错状态直接报错 (CAS 才是权威并发守卫, 预检仅为友好提示)
+        if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT
+                && order.getStatus() != StatusConstants.ORDER_SHIPPED) {
+            throw new BusinessException("当前订单状态不支持申请退款");
+        }
+
+        // claim-first: 先 CAS 占位 8(退款申请中), 命中 0 行说明状态被并发改走, 中止
+        // 单条 UPDATE 自动提交, 不加 @Transactional; 管理员审核通过后走 refundOrder 调微信退款
+        int affected = orderMapper.update(null,
+                new LambdaUpdateWrapper<Order>()
+                        .eq(Order::getId, orderId)
+                        .in(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT, StatusConstants.ORDER_SHIPPED)
+                        .set(Order::getStatus, StatusConstants.ORDER_REFUND_REQUESTED)
+                        .set(Order::getCancelReason, reason)
+                        .set(Order::getCancelTime, LocalDateTime.now())
+                        .set(Order::getUpdateTime, LocalDateTime.now()));
+        if (affected == 0) {
+            throw new BusinessException("订单状态已变更，请刷新后重试");
+        }
+        log.info("用户申请退款, orderId={}, orderNo={}, 等待管理员审核", orderId, order.getOrderNo());
+
+        // 通知管理员审核(防抖 key 含订单 ID, 每笔申请都独立送达)
+        dingTalkAlertService.notify("REFUND_REQUEST:" + orderId,
+                "用户申请退款\n订单号: " + order.getOrderNo() + "\n申请原因: " + reason);
+    }
+
+    @Override
+    public void rejectRefund(Long orderId, String rejectReason) {
+        Order order = orderMapper.selectById(orderId);
+        if (order == null) {
+            throw new BusinessException("订单不存在");
+        }
+        if (order.getStatus() != StatusConstants.ORDER_REFUND_REQUESTED) {
+            throw new BusinessException("该订单不是待审核的退款申请");
+        }
+
+        // 回退目标: 申请前是什么状态就回什么状态 — 按是否已有发货时间判断, 无需额外字段
+        int targetStatus = order.getShipTime() == null
+                ? StatusConstants.ORDER_PENDING_SHIPMENT
+                : StatusConstants.ORDER_SHIPPED;
+
+        // CAS: 仅当仍为退款申请中时回退, 防与并发审核互相覆盖
+        int affected = orderMapper.update(null,
+                new LambdaUpdateWrapper<Order>()
+                        .eq(Order::getId, orderId)
+                        .eq(Order::getStatus, StatusConstants.ORDER_REFUND_REQUESTED)
+                        .set(Order::getStatus, targetStatus)
+                        .set(Order::getAdminRemark, rejectReason)
+                        .set(Order::getCancelTime, null)
+                        .set(Order::getUpdateTime, LocalDateTime.now()));
+        if (affected == 0) {
+            throw new BusinessException("订单状态已变更，请刷新后重试");
+        }
+        log.info("管理员拒绝退款申请, orderId={}, 回退至状态{}, 原因: {}", orderId, targetStatus, rejectReason);
     }
 
     @Override
@@ -661,6 +734,7 @@ public class OrderServiceImpl implements OrderService {
         vo.setReceiverPhone(address != null ? address.getPhone() : null);
         vo.setReceiverAddress(address != null ? address.getProvince() + address.getCity() + address.getDistrict() + address.getDetail() : null);
         vo.setBuyerRemark(order.getBuyerRemark());
+        vo.setCancelReason(order.getCancelReason());
         vo.setPayTime(order.getPayTime());
         vo.setShipTime(order.getShipTime());
         vo.setReceiveTime(order.getReceiveTime());
@@ -679,6 +753,7 @@ public class OrderServiceImpl implements OrderService {
             case StatusConstants.ORDER_CANCELLED -> "已取消";
             case StatusConstants.ORDER_REFUNDING -> "退款中";
             case StatusConstants.ORDER_REFUNDED -> "已退款";
+            case StatusConstants.ORDER_REFUND_REQUESTED -> "退款申请中";
             default -> "未知";
         };
     }
