@@ -35,6 +35,11 @@ def esc(v):
     return v.replace("\\", "\\\\").replace("'", "''")
 
 
+def json_esc(v):
+    """Escape string for use inside a JSON value within a SQL string literal."""
+    return v.replace('\\', '\\\\\\\\').replace('"', '\\"').replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+
+
 # ===== group into SPUs =====
 groups = OrderedDict()
 no_model_idx = defaultdict(int)
@@ -64,7 +69,7 @@ for name in CATEGORY_ORDER:
 lines = []
 lines.append("-- ==========================================")
 lines.append("-- 五金商城系统 - 真实商品数据 v2 (含OSS图片)")
-lines.append("-- 来源：乾程五金锁具价格表(1).xlsx")
+lines.append("-- 来源：乾程五金锁具价格表新.xlsx")
 lines.append("-- 图片已上传至阿里云OSS products/目录")
 lines.append("-- 价格为 1234567 的商品表示原始Excel中无价格数据")
 lines.append("-- ==========================================")
@@ -173,7 +178,7 @@ for key, prods in ordered_groups:
         sku_img_sql = f"'{esc(sku_img)}'" if sku_img else "NULL"
         if co and co in colors_by_cat.get(cat, {}):
             iid = colors_by_cat[cat][co]
-            specs = f'[{{"templateId":{cid},"itemId":{iid},"name":"颜色","value":"{esc(co)}"}}]'
+            specs = f'[{{"templateId":{cid},"itemId":{iid},"name":"颜色","value":"{json_esc(co)}"}}]'
             hash_ = f"auto_c{cid}_i{iid}"
         else:
             specs = '[{"name":"颜色","value":"默认"}]'

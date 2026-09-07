@@ -4,7 +4,7 @@ import json, os, re, sys, zipfile
 import oss2
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-XLSX = os.path.join(os.path.dirname(os.path.dirname(BASE)), "乾程五金锁具价格表(1).xlsx")
+XLSX = os.path.join(os.path.dirname(os.path.dirname(BASE)), "乾程五金锁具价格表新.xlsx")
 CATALOG = os.path.join(BASE, "catalog.json")
 
 BUCKET = os.environ.get("OSS_BUCKET_NAME", "java0251014")
@@ -25,6 +25,17 @@ def load_env(path):
     return env
 
 
+def clear_products_prefix(bucket):
+    """Delete all objects under products/ prefix."""
+    print("Clearing products/ prefix in OSS...")
+    count = 0
+    for obj in oss2.ObjectIterator(bucket, prefix="products/"):
+        bucket.delete_object(obj.key)
+        count += 1
+    print(f"  Deleted {count} objects from products/")
+    return count
+
+
 def main():
     env = load_env(ENV)
     akid = os.environ.get("OSS_ACCESS_KEY_ID") or env.get("OSS_ACCESS_KEY_ID")
@@ -35,6 +46,8 @@ def main():
 
     auth = oss2.Auth(akid, aks)
     bucket = oss2.Bucket(auth, f"https://oss-{REGION}.aliyuncs.com", BUCKET)
+
+    clear_products_prefix(bucket)
 
     catalog = json.load(open(CATALOG, encoding="utf-8"))
     z = zipfile.ZipFile(XLSX)

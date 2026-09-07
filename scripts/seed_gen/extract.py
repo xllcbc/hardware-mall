@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Extract product data + image-to-product mapping from 乾程五金锁具价格表(1).xlsx"""
+"""Extract product data + image-to-product mapping from 乾程五金锁具价格表新.xlsx"""
 import re, json, os, zipfile
 import xml.etree.ElementTree as ET
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-XLSX = os.path.join(os.path.dirname(os.path.dirname(BASE)), "乾程五金锁具价格表(1).xlsx")
+XLSX = os.path.join(os.path.dirname(os.path.dirname(BASE)), "乾程五金锁具价格表新.xlsx")
 OUT = BASE
 NS = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 
