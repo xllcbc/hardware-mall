@@ -45,7 +45,8 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         }
 
         if (current > rateLimit.count()) {
-            log.warn("接口限流触发 | key={} | count={} | limit={}", rateLimit.key(), current, rateLimit.count());
+            // rateKey 含身份(ip/userId), 一条日志即可定位"限的是谁", 无需再去 Redis 反查
+            log.warn("接口限流触发 | key={} | rateKey={} | count={} | limit={}", rateLimit.key(), rateKey, current, rateLimit.count());
             response.setStatus(429);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"code\":429,\"message\":\"请求过于频繁，请稍后再试\"}");

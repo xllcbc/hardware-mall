@@ -25,7 +25,7 @@ public class UserController {
     private final RedisUtil redisUtil;
 
     @PostMapping("/login")
-    @RateLimit(key = "user:login", count = 5, time = 60)
+    @RateLimit(key = "user:login", count = 10, time = 60)
     public Result<Map<String, Object>> login(@RequestBody Map<String, String> params) {
         String code = params.get("code");
         User user = userService.login(code);
@@ -68,7 +68,7 @@ public class UserController {
     }
 
     @PostMapping("/phone")
-    @RateLimit(key = "user:phone", count = 5, time = 60)
+    @RateLimit(key = "user:phone", count = 10, time = 60)
     public Result<User> bindPhone(@RequestBody Map<String, String> params) {
         Long userId = UserContext.getUserId();
         String phoneCode = params.get("code");

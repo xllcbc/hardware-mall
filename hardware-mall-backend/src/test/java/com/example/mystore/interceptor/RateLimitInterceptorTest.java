@@ -115,6 +115,29 @@ class RateLimitInterceptorTest {
     }
 
     @Test
+    void overLimit_warnLogContainsFullRateKeyWithIdentity() throws Exception {
+        // 排障契约: WARN 日志必须含完整 rateKey(带身份), 一条日志即可定位"限的是谁"
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(RateLimitInterceptor.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            when(redisUtil.incrWithExpire(anyString(), anyLong())).thenReturn(11L);
+            interceptor.preHandle(request("1.2.3.4", null), new MockHttpServletResponse(), limitedHandler);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+
+        assertThat(appender.list).anySatisfy(event -> {
+            assertThat(event.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+            assertThat(event.getFormattedMessage()).contains("rate:limit:pay:ip1.2.3.4");
+        });
+    }
+
+    @Test
     void withinLimit_passes() throws Exception {
         when(redisUtil.incrWithExpire(anyString(), anyLong())).thenReturn(10L);
 
