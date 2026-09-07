@@ -38,10 +38,11 @@ public interface OrderService {
     
     /**
      * 自动取消超时未支付订单（幂等）
-     * 供 MQ 消费者和定时任务兜底共用
+     * 供定时任务兜底调用
      * @param orderId 订单ID
      * @param cancelReason 取消原因
-     * @return true-成功取消；false-订单不存在或已非待付款状态
+     * @return true-成功取消；false-订单不存在或已非待付款状态（未产生任何副作用）
+     * @throws com.example.mystore.common.exception.BusinessException CAS 未命中（订单状态已被并发变更），事务回滚以保证库存不被多恢复
      */
     boolean autoCancelOrder(Long orderId, String cancelReason);
 

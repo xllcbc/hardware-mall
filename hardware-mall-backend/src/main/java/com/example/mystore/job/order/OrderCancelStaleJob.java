@@ -1,6 +1,7 @@
 package com.example.mystore.job.order;
 
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.mapper.OrderMapper;
@@ -105,6 +106,10 @@ public class OrderCancelStaleJob {
                         skipCount++;
                         log.info("自动取消跳过（订单已非待付款状态）, orderId={}", order.getId());
                     }
+                } catch (BusinessException be) {
+                    // CAS 未命中 = 预期竞态（并发支付回调/用户手动取消）, 事务已回滚, 计为跳过而非失败
+                    skipCount++;
+                    log.info("自动取消跳过（CAS 未命中，订单状态已变更）, orderId={}", order.getId());
                 } catch (Exception e) {
                     log.error("自动取消失败, orderId={}", order.getId(), e);
                 }

@@ -667,8 +667,9 @@ public class OrderServiceImpl implements OrderService {
                         .set(Order::getCancelTime, LocalDateTime.now())
                         .set(Order::getUpdateTime, LocalDateTime.now()));
         if (affected == 0) {
+            // 抛异常触发事务回滚, 撤销上方已执行的恢复库存; 对齐 cancelOrder 的 CAS-失败-回滚模式
             log.info("自动取消跳过（CAS 未命中，订单状态已变更）, orderId={}", orderId);
-            return false;
+            throw new BusinessException("订单状态已变更，跳过取消");
         }
 
         log.info("订单自动取消成功, orderId={}", orderId);
