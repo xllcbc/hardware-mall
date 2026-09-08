@@ -521,12 +521,19 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException("物流公司不存在或已停用");
         }
 
-        order.setStatus(StatusConstants.ORDER_SHIPPED);
-        order.setLogisticsId(logisticsId);
-        order.setLogisticsNo(logisticsNo);
-        order.setShipTime(LocalDateTime.now());
-        order.setUpdateTime(LocalDateTime.now());
-        orderMapper.updateById(order);
+        // CAS 条件更新: 仅当状态仍为待发货时置为已发货, 防与并发申请退款(2→8)/直退(2→6)/重复发货互相覆盖
+        int affected = orderMapper.update(null,
+                new LambdaUpdateWrapper<Order>()
+                        .eq(Order::getId, orderId)
+                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
+                        .set(Order::getStatus, StatusConstants.ORDER_SHIPPED)
+                        .set(Order::getLogisticsId, logisticsId)
+                        .set(Order::getLogisticsNo, logisticsNo)
+                        .set(Order::getShipTime, LocalDateTime.now())
+                        .set(Order::getUpdateTime, LocalDateTime.now()));
+        if (affected == 0) {
+            throw new BusinessException("订单状态已变更，请刷新后重试");
+        }
     }
 
     @Override
