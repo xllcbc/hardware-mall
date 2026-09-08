@@ -736,6 +736,7 @@ public class OrderServiceImpl implements OrderService {
         vo.setReceiverAddress(address != null ? address.getProvince() + address.getCity() + address.getDistrict() + address.getDetail() : null);
         vo.setBuyerRemark(order.getBuyerRemark());
         vo.setCancelReason(order.getCancelReason());
+        vo.setAdminRemark(order.getAdminRemark());
         vo.setPayTime(order.getPayTime());
         vo.setShipTime(order.getShipTime());
         vo.setReceiveTime(order.getReceiveTime());

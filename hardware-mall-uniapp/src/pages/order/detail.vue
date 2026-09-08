@@ -19,6 +19,15 @@
         </view>
       </view>
 
+      <view v-if="(order.status === 2 || order.status === 3) && order.adminRemark" class="refund-reject-card">
+        <view class="reject-header">
+          <text class="reject-icon">✕</text>
+          <text class="reject-title">退款申请已被拒绝</text>
+        </view>
+        <text class="reject-reason">拒绝原因：{{ order.adminRemark }}</text>
+        <text class="reject-hint">如有疑问可重新申请退款或联系客服</text>
+      </view>
+
       <view class="card address-card">
         <view class="address-row">
           <text class="address-icon">📍</text>
@@ -55,6 +64,10 @@
         <view v-if="order.status === 8 && order.cancelReason" class="info-row">
           <text class="info-label">退款申请原因</text>
           <text class="info-value">{{ order.cancelReason }}</text>
+        </view>
+        <view v-if="(order.status === 2 || order.status === 3) && order.adminRemark" class="info-row">
+          <text class="info-label">拒绝原因</text>
+          <text class="info-value">{{ order.adminRemark }}</text>
         </view>
       </view>
 
@@ -434,6 +447,52 @@ const deleteOrder = async () => {
   background: #FFFFFF;
   border-radius: 16rpx;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.04);
+}
+
+.refund-reject-card {
+  margin: 24rpx;
+  padding: 24rpx;
+  background: #FDECEC;
+  border: 1rpx solid #F5B7B1;
+  border-radius: 16rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.reject-header {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.reject-icon {
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 50%;
+  background: #E53935;
+  color: #FFFFFF;
+  font-size: 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reject-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #C62828;
+}
+
+.reject-reason {
+  font-size: 26rpx;
+  color: #C62828;
+  line-height: 1.5;
+}
+
+.reject-hint {
+  font-size: 24rpx;
+  color: #999999;
 }
 
 .address-card {

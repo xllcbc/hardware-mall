@@ -899,6 +899,27 @@ class OrderServiceImplTest {
         assertThat(vo.getCancelReason()).isEqualTo("不想要了");
     }
 
+    @Test
+    void orderDetail_rejectedRefund_exposesAdminRemark() {
+        // 拒绝退款后状态回退 2/3, 拒绝原因经 adminRemark 透出给用户
+        Order order = new Order();
+        order.setId(1L);
+        order.setUserId(2L);
+        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
+        order.setAddressId(1L);
+        order.setLogisticsId(1L);
+        order.setAdminRemark("凭证不足");
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        OrderVO vo = orderService.getOrderById(2L, 1L);
+
+        assertThat(vo.getStatus()).isEqualTo(StatusConstants.ORDER_PENDING_SHIPMENT);
+        assertThat(vo.getAdminRemark()).isEqualTo("凭证不足");
+    }
+
     // ==================== Seam 3: stats 透出退款申请计数 ====================
 
     @Test

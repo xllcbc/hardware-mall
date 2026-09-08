@@ -141,6 +141,7 @@ export interface Order {
   receiverAddress?: string
   buyerRemark?: string
   cancelReason?: string
+  adminRemark?: string
   payTime?: string
   shipTime?: string
   receiveTime?: string

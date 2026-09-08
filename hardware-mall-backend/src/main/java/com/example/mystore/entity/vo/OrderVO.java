@@ -23,6 +23,8 @@ public class OrderVO implements Serializable {
     private String receiverAddress;
     private String buyerRemark;
     private String cancelReason;
+    /** 管理员拒绝退款的原因, 仅在拒绝退款时写入 */
+    private String adminRemark;
     private LocalDateTime payTime;
     private LocalDateTime shipTime;
     private LocalDateTime receiveTime;
