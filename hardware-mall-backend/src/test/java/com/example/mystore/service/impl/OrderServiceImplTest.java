@@ -318,15 +318,19 @@ class OrderServiceImplTest {
 
         when(orderMapper.selectById(1L)).thenReturn(order);
         when(logisticsMapper.selectById(2L)).thenReturn(logistics);
+        // CAS 条件更新按成功命中 1 行 mock
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
 
         orderService.shipOrder(1L, 2L, "SF123456789");
 
-        verify(orderMapper).updateById(org.mockito.Mockito.<Order>argThat(o ->
-                o.getStatus() == StatusConstants.ORDER_SHIPPED &&
-                o.getLogisticsId() == 2L &&
-                "SF123456789".equals(o.getLogisticsNo()) &&
-                o.getShipTime() != null
-        ));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
+                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
+        verify(orderMapper).update(isNull(), captor.capture());
+        assertThat(captor.getValue().getParamNameValuePairs())
+                .containsValue(StatusConstants.ORDER_SHIPPED)
+                .containsValue(2L)
+                .containsValue("SF123456789");
     }
 
     @Test
@@ -360,7 +364,7 @@ class OrderServiceImplTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("物流公司不存在或已停用");
 
-        verify(orderMapper, never()).updateById(any(Order.class));
+        verify(orderMapper, never()).update(isNull(), any());
     }
 
     @Test
