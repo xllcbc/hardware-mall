@@ -172,7 +172,8 @@ public class RedisUtil {
     }
 
     public void setWithJitter(String key, Object value, long baseTtl, TimeUnit unit, long maxJitterSeconds) {
-        long jitter = (long) (Math.random() * maxJitterSeconds);
+        // ThreadLocalRandom: 线程私有 seed 零竞争; 替换 Math.random() 的全局共享 CAS 自旋 (类内与 nextSleep 统一)
+        long jitter = ThreadLocalRandom.current().nextLong(maxJitterSeconds + 1);
         long ttlSeconds = unit.toSeconds(baseTtl) + jitter;
         redisTemplate.opsForValue().set(key, value, ttlSeconds, TimeUnit.SECONDS);
     }
