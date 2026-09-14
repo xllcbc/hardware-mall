@@ -64,6 +64,10 @@ admin:
 wechat:
   appid: ${WECHAT_APPID}
   secret: ${WECHAT_SECRET}
+  msg-push:
+    # 小程序「消息推送配置」的服务器校验(安全模式); 未配置时端点静默跳过
+    token: ${WECHAT_MSG_TOKEN:}
+    aes-key: ${WECHAT_MSG_AES_KEY:}
   pay:
     mch-id: ${WECHAT_MCH_ID:}
     api-v3-key: ${WECHAT_API_V3_KEY:}

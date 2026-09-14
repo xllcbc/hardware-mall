@@ -34,7 +34,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                     "/api/user/login", "/api/admin/login",
                     "/api/user/category/**", "/api/user/product/**", "/api/user/logistics/**",
-                    "/api/user/pay/callback", "/api/user/pay/callback/refund"
+                    "/api/user/pay/callback", "/api/user/pay/callback/refund",
+                    "/api/wechat/message/notify"
                 );
         registry.addInterceptor(rateLimitInterceptor)
                 .addPathPatterns("/api/**");
