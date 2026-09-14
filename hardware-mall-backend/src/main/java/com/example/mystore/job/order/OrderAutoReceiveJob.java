@@ -16,7 +16,8 @@ import java.util.List;
 
 /**
  * 已发货订单超期自动收货定时任务
- * 扫描发货超过 N 天仍未确认收货的订单，自动置为已完成
+ * 扫描发货超期未确认收货的订单，自动置为已完成。
+ * 周期按发货方式分级(对齐微信结算规则): 同城配送/自提 T+2, 快递 T+10(预留)
  */
 @Component
 @RequiredArgsConstructor
@@ -27,8 +28,13 @@ public class OrderAutoReceiveJob {
     private final OrderMapper orderMapper;
     private final RedisLockUtil redisLockUtil;
 
-    @Value("${order.auto-receive.days:7}")
-    private int autoReceiveDays;
+    /** 同城配送/自提 自动确认收货周期(天) */
+    @Value("${order.auto-receive.local-days:2}")
+    private int localDays;
+
+    /** 快递 自动确认收货周期(天), 预留 */
+    @Value("${order.auto-receive.express-days:10}")
+    private int expressDays;
 
     // 单次处理上限
     private static final int BATCH_SIZE = 100;
@@ -47,7 +53,9 @@ public class OrderAutoReceiveJob {
         }
 
         try {
-            LocalDateTime beforeTime = LocalDateTime.now().minusDays(autoReceiveDays);
+            // 以最短周期为扫描下界, 命中后再按发货方式精确判定是否到期
+            int minDays = Math.min(localDays, expressDays);
+            LocalDateTime beforeTime = LocalDateTime.now().minusDays(minDays);
             List<Order> staleOrders = orderMapper.selectStaleShippedOrders(
                     StatusConstants.ORDER_SHIPPED, beforeTime, BATCH_SIZE);
 
@@ -62,6 +70,10 @@ public class OrderAutoReceiveJob {
 
             for (Order order : staleOrders) {
                 try {
+                    if (!isStaleEnough(order)) {
+                        skipCount++;
+                        continue;
+                    }
                     boolean success = orderService.autoConfirmReceive(order.getId());
                     if (success) {
                         successCount++;
@@ -81,5 +93,20 @@ public class OrderAutoReceiveJob {
         } finally {
             redisLockUtil.unlock(LOCK_KEY);
         }
+    }
+
+    /** 按发货方式判定是否已达自动收货周期 */
+    private boolean isStaleEnough(Order order) {
+        if (order.getShipTime() == null) {
+            return false;
+        }
+        int days = isLocalOrPickup(order.getDeliveryType()) ? localDays : expressDays;
+        return order.getShipTime().isBefore(LocalDateTime.now().minusDays(days));
+    }
+
+    private boolean isLocalOrPickup(Integer deliveryType) {
+        return deliveryType != null
+                && (deliveryType == StatusConstants.DELIVERY_TYPE_LOCAL
+                    || deliveryType == StatusConstants.DELIVERY_TYPE_PICKUP);
     }
 }

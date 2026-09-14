@@ -27,11 +27,13 @@ import com.example.mystore.service.CartService;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.SkuService;
+import com.example.mystore.service.WechatOrderShippingService;
 import com.example.mystore.util.RedisUtil;
 import com.wechat.pay.java.service.payments.model.Transaction;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -66,6 +68,11 @@ public class OrderServiceImpl implements OrderService {
     private final RedisUtil redisUtil;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final PlatformTransactionManager transactionManager;
+    private final WechatOrderShippingService wechatOrderShippingService;
+    private final PaymentRecordMapper paymentRecordMapper;
+
+    @Value("${wechat.pay.mch-id:}")
+    private String mchId;
     private final DingTalkAlertService dingTalkAlertService;
 
     @Override
@@ -404,6 +411,30 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    public void confirmReceiveByWechat(Long userId, Long orderId) {
+        Order order = orderMapper.selectById(orderId);
+        if (order == null || !order.getUserId().equals(userId)) {
+            throw new BusinessException("订单不存在");
+        }
+        if (order.getStatus() == StatusConstants.ORDER_COMPLETED) {
+            return; // 已完成, 幂等
+        }
+        if (order.getStatus() != StatusConstants.ORDER_SHIPPED) {
+            throw new BusinessException("当前订单状态不支持确认收货");
+        }
+        // 以微信 order_state 为准: 仅 3确认收货/4交易完成 才算数
+        Integer state = wechatOrderShippingService.queryOrderState(orderId);
+        if (state == null || (state != 3 && state != 4)) {
+            throw new BusinessException("微信未确认收货，请稍后重试");
+        }
+        orderMapper.update(null, new LambdaUpdateWrapper<Order>()
+                .eq(Order::getId, orderId)
+                .set(Order::getWechatOrderState, state)
+                .set(Order::getUpdateTime, LocalDateTime.now()));
+        confirmReceive(userId, orderId);
+    }
+
+    @Override
     public void deleteOrder(Long userId, Long orderId) {
         Order order = orderMapper.selectById(orderId);
         if (order == null || !order.getUserId().equals(userId)) {
@@ -512,8 +543,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @Transactional
-    public void shipOrder(Long orderId, Long logisticsId, String logisticsNo) {
+    public void shipOrder(Long orderId, Integer deliveryType, Long logisticsId) {
         Order order = orderMapper.selectById(orderId);
         if (order == null) {
             throw new BusinessException("订单不存在");
@@ -521,10 +551,23 @@ public class OrderServiceImpl implements OrderService {
         if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT) {
             throw new BusinessException("只能发货待发货的订单");
         }
-        Logistics logistics = logisticsMapper.selectById(logisticsId);
-        // M10: 只校验"存在"不够, 停用的物流公司不允许再被选用于发货
-        if (logistics == null || logistics.getStatus() != StatusConstants.LOGISTICS_STATUS_ENABLED) {
-            throw new BusinessException("物流公司不存在或已停用");
+
+        Long finalLogisticsId;
+        String logisticsNo;
+        if (deliveryType == StatusConstants.DELIVERY_TYPE_PICKUP) {
+            // 用户自提: 无物流、无单号
+            finalLogisticsId = null;
+            logisticsNo = null;
+        } else if (deliveryType == StatusConstants.DELIVERY_TYPE_LOCAL) {
+            // 同城配送: 物流取自 admin 物流管理(仅校验存在且启用), 配送单号后端自动生成
+            Logistics logistics = logisticsMapper.selectById(logisticsId);
+            if (logistics == null || logistics.getStatus() != StatusConstants.LOGISTICS_STATUS_ENABLED) {
+                throw new BusinessException("物流公司不存在或已停用");
+            }
+            finalLogisticsId = logisticsId;
+            logisticsNo = generateDeliveryNo();
+        } else {
+            throw new BusinessException("不支持的发货方式");
         }
 
         // CAS 条件更新: 仅当状态仍为待发货时置为已发货, 防与并发申请退款(2→8)/直退(2→6)/重复发货互相覆盖
@@ -533,13 +576,26 @@ public class OrderServiceImpl implements OrderService {
                         .eq(Order::getId, orderId)
                         .eq(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
                         .set(Order::getStatus, StatusConstants.ORDER_SHIPPED)
-                        .set(Order::getLogisticsId, logisticsId)
+                        .set(Order::getDeliveryType, deliveryType)
+                        .set(Order::getLogisticsId, finalLogisticsId)
                         .set(Order::getLogisticsNo, logisticsNo)
                         .set(Order::getShipTime, LocalDateTime.now())
                         .set(Order::getUpdateTime, LocalDateTime.now()));
         if (affected == 0) {
             throw new BusinessException("订单状态已变更，请刷新后重试");
         }
+
+        // 发货成功后上报微信发货信息; 失败不影响发货结果, 由 WechatShippingRetryJob 兜底
+        try {
+            wechatOrderShippingService.uploadShippingInfo(orderId);
+        } catch (Exception e) {
+            log.warn("发货后微信上报失败, 待重试任务兜底, orderId={}: {}", orderId, e.getMessage());
+        }
+    }
+
+    /** 同城配送单号: 后端自动生成, 前缀 PS + 雪花ID */
+    String generateDeliveryNo() {
+        return "PS" + IdWorker.getIdStr();
     }
 
     @Override
@@ -746,6 +802,8 @@ public class OrderServiceImpl implements OrderService {
         vo.setPayAmount(order.getPayAmount());
         vo.setLogisticsName(logistics != null ? logistics.getName() : null);
         vo.setLogisticsNo(order.getLogisticsNo());
+        vo.setDeliveryType(order.getDeliveryType());
+        vo.setDeliveryTypeText(getDeliveryTypeText(order.getDeliveryType()));
         vo.setReceiverName(address != null ? address.getConsignee() : null);
         vo.setReceiverPhone(address != null ? address.getPhone() : null);
         vo.setReceiverAddress(address != null ? address.getProvince() + address.getCity() + address.getDistrict() + address.getDetail() : null);
@@ -757,6 +815,15 @@ public class OrderServiceImpl implements OrderService {
         vo.setReceiveTime(order.getReceiveTime());
         vo.setCreateTime(order.getCreateTime());
         vo.setItems(items);
+
+        // 微信确认收货组件所需参数(商户单号=订单号; 交易单号支付成功后回填)
+        PaymentRecord payRecord = paymentRecordMapper.selectOne(new LambdaQueryWrapper<PaymentRecord>()
+                .eq(PaymentRecord::getOrderId, orderId)
+                .orderByDesc(PaymentRecord::getCreateTime)
+                .last("LIMIT 1"));
+        vo.setMerchantId(mchId);
+        vo.setMerchantTradeNo(payRecord != null ? payRecord.getOutTradeNo() : null);
+        vo.setTransactionId(payRecord != null ? payRecord.getTransactionId() : null);
 
         return vo;
     }
@@ -772,6 +839,17 @@ public class OrderServiceImpl implements OrderService {
             case StatusConstants.ORDER_REFUNDED -> "已退款";
             case StatusConstants.ORDER_REFUND_FAILED -> "退款失败";
             case StatusConstants.ORDER_REFUND_REQUESTED -> "退款申请中";
+            default -> "未知";
+        };
+    }
+
+    private String getDeliveryTypeText(Integer deliveryType) {
+        if (deliveryType == null) {
+            return null;
+        }
+        return switch (deliveryType) {
+            case StatusConstants.DELIVERY_TYPE_LOCAL -> "同城配送";
+            case StatusConstants.DELIVERY_TYPE_PICKUP -> "用户自提";
             default -> "未知";
         };
     }

@@ -19,6 +19,10 @@ public class Order {
     
     private Long logisticsId;
     
+    private Integer deliveryType;
+    
+    private Integer wechatOrderState;
+    
     private Integer status;
     
     private BigDecimal totalAmount;

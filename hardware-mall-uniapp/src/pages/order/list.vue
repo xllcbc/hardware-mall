@@ -67,7 +67,7 @@ import { onShow } from '@dcloudio/uni-app'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import type { Order } from '@/types'
-import { cancelOrder as cancelOrderApi, confirmReceive as confirmReceiveApi, deleteOrder as deleteOrderApi, getOrderList, applyRefund as applyRefundApi } from '@/api/order'
+import { cancelOrder as cancelOrderApi, confirmReceiveVerify, deleteOrder as deleteOrderApi, getOrderList, applyRefund as applyRefundApi } from '@/api/order'
 
 const tabs = reactive([
   { label: '全部', status: 0, count: 0 },
@@ -208,20 +208,36 @@ const applyRefund = (order: Order) => {
   })
 }
 
-const confirmReceive = async (order: Order) => {
+const confirmReceive = (order: Order) => {
   uni.showModal({
-    title: '提示',
-    content: '确认已收到货物?',
-    success: async (res) => {
-      if (res.confirm) {
-        try {
-          await confirmReceiveApi(order.id)
+    title: '确认收货',
+    content: '将调起微信官方确认收货组件，确认后交易完成',
+    success: (res) => {
+      if (!res.confirm) return
+      // #ifdef MP-WEIXIN
+      if (typeof wx !== 'undefined' && (wx as any).openBusinessView) {
+        uni.setStorageSync('pendingConfirmOrderId', order.id)
+        ;(wx as any).openBusinessView({
+          businessType: 'weappOrderConfirm',
+          extraData: {
+            merchant_id: order.merchantId,
+            merchant_trade_no: order.merchantTradeNo,
+            transaction_id: order.transactionId
+          },
+          fail: () => uni.showToast({ title: '当前微信版本不支持，请升级微信', icon: 'none' })
+        })
+      } else {
+        uni.showToast({ title: '当前微信版本不支持，请升级微信', icon: 'none' })
+      }
+      // #endif
+      // #ifndef MP-WEIXIN
+      confirmReceiveVerify(order.id)
+        .then(() => {
           uni.showToast({ title: '已确认收货', icon: 'success' })
           loadOrders()
-        } catch (e) {
-          uni.showToast({ title: e.message || '操作失败', icon: 'none' })
-        }
-      }
+        })
+        .catch((e: any) => uni.showToast({ title: e.message || '确认失败', icon: 'none' }))
+      // #endif
     }
   })
 }

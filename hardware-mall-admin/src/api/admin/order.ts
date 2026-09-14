@@ -26,6 +26,8 @@ export interface Order {
   statusText?: string
   logisticsName?: string
   logisticsNo?: string
+  deliveryType?: number
+  deliveryTypeText?: string
   payTime?: string
   shipTime?: string
   receiveTime?: string
@@ -56,8 +58,13 @@ export const getOrderStats = () => {
   return request.get<any>('/admin/order/stats')
 }
 
-export const shipOrder = (id: number, logisticsId: number, logisticsNo: string) => {
-  return request.put(`/admin/order/${id}/ship`, { logisticsId, logisticsNo })
+export interface ShipOrderPayload {
+  deliveryType: number
+  logisticsId?: number
+}
+
+export const shipOrder = (id: number, payload: ShipOrderPayload) => {
+  return request.put(`/admin/order/${id}/ship`, payload)
 }
 
 export const refundOrder = (id: number, reason: string) => {

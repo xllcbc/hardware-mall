@@ -134,7 +134,8 @@ public class PayServiceImpl implements PayService {
             return new PendingPrepay(existingRecord.getOutTradeNo(), user.getOpenid(), order.getPayAmount(), false);
         }
 
-        String outTradeNo = generateOutTradeNo(orderId);
+        // 商户单号统一为订单号: 微信侧"商户单号" == 我们的订单号, 两端一致
+        String outTradeNo = order.getOrderNo();
         PaymentRecord record = new PaymentRecord();
         record.setOrderId(orderId);
         record.setOutTradeNo(outTradeNo);
@@ -583,9 +584,5 @@ public class PayServiceImpl implements PayService {
         prepayRequest.setPayer(payer);
 
         return jsapiService.prepayWithRequestPayment(prepayRequest);
-    }
-
-    private String generateOutTradeNo(Long orderId) {
-        return "HM" + System.currentTimeMillis() + orderId;
     }
 }

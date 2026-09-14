@@ -93,8 +93,9 @@ cache:
 
 order:
   auto-receive:
-    # 发货后自动收货天数：已发货超过该天数未确认收货的订单由定时任务自动置为已完成
-    days: 7
+    # 自动确认收货周期(天): 同城配送/自提 对齐微信 T+2; 快递预留 T+10
+    local-days: 2
+    express-days: 10
 
 dingtalk:
   webhook: ${DINGTALK_WEBHOOK:}

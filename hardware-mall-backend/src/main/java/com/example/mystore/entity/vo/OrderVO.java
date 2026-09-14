@@ -18,6 +18,12 @@ public class OrderVO implements Serializable {
     private BigDecimal payAmount;
     private String logisticsName;
     private String logisticsNo;
+    private Integer deliveryType;
+    private String deliveryTypeText;
+    /** 微信确认收货组件参数 */
+    private String merchantId;
+    private String merchantTradeNo;
+    private String transactionId;
     private String receiverName;
     private String receiverPhone;
     private String receiverAddress;

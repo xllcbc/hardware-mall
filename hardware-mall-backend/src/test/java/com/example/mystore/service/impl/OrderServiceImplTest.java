@@ -15,6 +15,7 @@ import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.SkuService;
+import com.example.mystore.service.WechatOrderShippingService;
 import com.example.mystore.event.StockSyncEvent;
 import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
@@ -75,6 +76,10 @@ class OrderServiceImplTest {
     private DingTalkAlertService dingTalkAlertService;
     @Mock
     private org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @Mock
+    private PaymentRecordMapper paymentRecordMapper;
+    @Mock
+    private WechatOrderShippingService wechatOrderShippingService;
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -321,16 +326,44 @@ class OrderServiceImplTest {
         // CAS 条件更新按成功命中 1 行 mock
         when(orderMapper.update(isNull(), any())).thenReturn(1);
 
-        orderService.shipOrder(1L, 2L, "SF123456789");
+        orderService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 2L);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
                 ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
         verify(orderMapper).update(isNull(), captor.capture());
-        assertThat(captor.getValue().getParamNameValuePairs())
-                .containsValue(StatusConstants.ORDER_SHIPPED)
-                .containsValue(2L)
-                .containsValue("SF123456789");
+        assertThat(captor.getValue().getParamNameValuePairs().values())
+                .contains(StatusConstants.ORDER_SHIPPED)
+                .contains(StatusConstants.DELIVERY_TYPE_LOCAL)
+                .contains(2L)
+                .anyMatch(v -> v instanceof String s && s.startsWith("PS"));
+    }
+
+    @Test
+    void testShipOrder_Pickup_NoLogistics() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
+
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+
+        // 自提: 不选物流、无单号
+        orderService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_PICKUP, null);
+
+        verify(logisticsMapper, never()).selectById(any());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
+                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
+        verify(orderMapper).update(isNull(), captor.capture());
+        assertThat(captor.getValue().getParamNameValuePairs().values())
+                .contains(StatusConstants.ORDER_SHIPPED)
+                .contains(StatusConstants.DELIVERY_TYPE_PICKUP);
+    }
+
+    @Test
+    void testGenerateDeliveryNo_Prefix() {
+        assertThat(orderService.generateDeliveryNo()).startsWith("PS");
     }
 
     @Test
@@ -342,7 +375,7 @@ class OrderServiceImplTest {
         when(orderMapper.selectById(1L)).thenReturn(order);
         when(logisticsMapper.selectById(999L)).thenReturn(null);
 
-        assertThatThrownBy(() -> orderService.shipOrder(1L, 999L, "SF123456789"))
+        assertThatThrownBy(() -> orderService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 999L))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("物流公司不存在");
     }
@@ -360,7 +393,7 @@ class OrderServiceImplTest {
         when(orderMapper.selectById(1L)).thenReturn(order);
         when(logisticsMapper.selectById(3L)).thenReturn(disabled);
 
-        assertThatThrownBy(() -> orderService.shipOrder(1L, 3L, "SF123456789"))
+        assertThatThrownBy(() -> orderService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 3L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("物流公司不存在或已停用");
 

@@ -73,6 +73,13 @@ public class OrderController {
         return Result.success();
     }
 
+    @PutMapping("/{id}/receive-verify")
+    public Result<Void> confirmReceiveVerify(@PathVariable Long id) {
+        Long userId = UserContext.getUserId();
+        orderService.confirmReceiveByWechat(userId, id);
+        return Result.success();
+    }
+
     @DeleteMapping("/{id}")
     public Result<Void> deleteOrder(@PathVariable Long id) {
         Long userId = UserContext.getUserId();

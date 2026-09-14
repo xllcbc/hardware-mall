@@ -76,4 +76,27 @@ public interface OrderMapper extends BaseMapper<Order> {
     List<Order> selectStaleRefundingOrders(@Param("status") Integer status,
                                             @Param("beforeTime") LocalDateTime beforeTime,
                                             @Param("limit") Integer limit);
+
+    /**
+     * 查询已发货但未上报微信发货信息的订单(同城/自提), 用于上报重试任务
+     */
+    @Select("SELECT * FROM shop_order " +
+            "WHERE status = #{status} AND delivery_type IN (2, 4) " +
+            "AND wechat_order_state IS NULL AND ship_time < #{beforeTime} " +
+            "ORDER BY ship_time ASC " +
+            "LIMIT #{limit}")
+    List<Order> selectUnreportedShippedOrders(@Param("status") Integer status,
+                                               @Param("beforeTime") LocalDateTime beforeTime,
+                                               @Param("limit") Integer limit);
+
+    /**
+     * 查询已上报微信(wechat_order_state=2)待收敛的已发货订单, 用于对账
+     */
+    @Select("SELECT * FROM shop_order " +
+            "WHERE status = #{status} AND wechat_order_state = 2 AND ship_time < #{beforeTime} " +
+            "ORDER BY ship_time ASC " +
+            "LIMIT #{limit}")
+    List<Order> selectReconcileShippedOrders(@Param("status") Integer status,
+                                              @Param("beforeTime") LocalDateTime beforeTime,
+                                              @Param("limit") Integer limit);
 }

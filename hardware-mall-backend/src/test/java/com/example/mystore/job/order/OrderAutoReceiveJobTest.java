@@ -1,5 +1,6 @@
 package com.example.mystore.job.order;
 
+import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.service.OrderService;
@@ -39,7 +40,8 @@ class OrderAutoReceiveJobTest {
     @BeforeEach
     void setUp() {
         // @Value 在纯 Mockito 单测中不生效，手动注入与 application.yml 默认一致的配置
-        ReflectionTestUtils.setField(job, "autoReceiveDays", 7);
+        ReflectionTestUtils.setField(job, "localDays", 2);
+        ReflectionTestUtils.setField(job, "expressDays", 10);
     }
 
     @Test
@@ -66,10 +68,8 @@ class OrderAutoReceiveJobTest {
     @Test
     void staleOrders_shouldProcessEach() {
         when(redisLockUtil.tryLock(anyString())).thenReturn(true);
-        Order o1 = new Order();
-        o1.setId(1L);
-        Order o2 = new Order();
-        o2.setId(2L);
+        Order o1 = staleLocalOrder(1L);
+        Order o2 = staleLocalOrder(2L);
         when(orderMapper.selectStaleShippedOrders(any(), any(), any())).thenReturn(Arrays.asList(o1, o2));
         when(orderService.autoConfirmReceive(1L)).thenReturn(true);
         when(orderService.autoConfirmReceive(2L)).thenReturn(false);
@@ -84,10 +84,8 @@ class OrderAutoReceiveJobTest {
     @Test
     void singleOrderFailure_shouldNotAffectOthers() {
         when(redisLockUtil.tryLock(anyString())).thenReturn(true);
-        Order o1 = new Order();
-        o1.setId(1L);
-        Order o2 = new Order();
-        o2.setId(2L);
+        Order o1 = staleLocalOrder(1L);
+        Order o2 = staleLocalOrder(2L);
         when(orderMapper.selectStaleShippedOrders(any(), any(), any())).thenReturn(Arrays.asList(o1, o2));
         when(orderService.autoConfirmReceive(1L)).thenThrow(new RuntimeException("db error"));
         when(orderService.autoConfirmReceive(2L)).thenReturn(true);
@@ -96,6 +94,46 @@ class OrderAutoReceiveJobTest {
 
         verify(orderService).autoConfirmReceive(2L);
         verify(redisLockUtil).unlock("job:order-auto-receive");
+    }
+
+    @Test
+    void localOrderNotYetDue_shouldSkip() {
+        // 同城配送 T+2: 发货仅 1 天, 未到期 → 跳过
+        when(redisLockUtil.tryLock(anyString())).thenReturn(true);
+        Order o = new Order();
+        o.setId(1L);
+        o.setDeliveryType(StatusConstants.DELIVERY_TYPE_LOCAL);
+        o.setShipTime(LocalDateTime.now().minusDays(1));
+        when(orderMapper.selectStaleShippedOrders(any(), any(), any())).thenReturn(Collections.singletonList(o));
+
+        job.autoReceiveShippedOrders();
+
+        verify(orderService, never()).autoConfirmReceive(any());
+        verify(redisLockUtil).unlock("job:order-auto-receive");
+    }
+
+    @Test
+    void expressOrderUsesT10_shouldSkipAt3Days() {
+        // 未知/快递类型按 T+10: 发货 3 天, 未到期 → 跳过
+        when(redisLockUtil.tryLock(anyString())).thenReturn(true);
+        Order o = new Order();
+        o.setId(1L);
+        o.setDeliveryType(null);
+        o.setShipTime(LocalDateTime.now().minusDays(3));
+        when(orderMapper.selectStaleShippedOrders(any(), any(), any())).thenReturn(Collections.singletonList(o));
+
+        job.autoReceiveShippedOrders();
+
+        verify(orderService, never()).autoConfirmReceive(any());
+        verify(redisLockUtil).unlock("job:order-auto-receive");
+    }
+
+    private Order staleLocalOrder(Long id) {
+        Order o = new Order();
+        o.setId(id);
+        o.setDeliveryType(StatusConstants.DELIVERY_TYPE_LOCAL);
+        o.setShipTime(LocalDateTime.now().minusDays(3));
+        return o;
     }
 
     @Test

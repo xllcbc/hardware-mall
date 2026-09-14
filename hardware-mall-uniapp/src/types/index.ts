@@ -136,6 +136,11 @@ export interface Order {
   payAmount: number
   logisticsName?: string
   logisticsNo?: string
+  deliveryType?: number
+  deliveryTypeText?: string
+  merchantId?: string
+  merchantTradeNo?: string
+  transactionId?: string
   receiverName?: string
   receiverPhone?: string
   receiverAddress?: string

@@ -47,6 +47,11 @@ export const confirmReceive = (id: number) => {
   return request.put(`/user/order/${id}/receive`, {})
 }
 
+/** 微信确认收货组件回调后: 校验微信 order_state 再推进本地 3→4 */
+export const confirmReceiveVerify = (id: number) => {
+  return request.put(`/user/order/${id}/receive-verify`, {})
+}
+
 export const deleteOrder = (id: number) => {
   return request.del(`/user/order/${id}`)
 }

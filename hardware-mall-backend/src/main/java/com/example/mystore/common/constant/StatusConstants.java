@@ -28,6 +28,12 @@ public class StatusConstants {
     public static final int ORDER_REFUND_REQUESTED = 8;
     /** 退款失败(微信确认未退款成功, 待管理员处理/重试) */
     public static final int ORDER_REFUND_FAILED = 9;
+
+    // ==================== 发货方式(对齐微信 logistics_type) ====================
+    /** 同城配送 */
+    public static final int DELIVERY_TYPE_LOCAL = 2;
+    /** 用户自提 */
+    public static final int DELIVERY_TYPE_PICKUP = 4;
     
     // ==================== 用户角色 ====================
     /** 普通用户 */

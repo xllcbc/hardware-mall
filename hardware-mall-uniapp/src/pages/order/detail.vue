@@ -62,6 +62,10 @@
           <text class="info-label">发货时间</text>
           <text class="info-value">{{ formatTime(order.shipTime) }}</text>
         </view>
+        <view v-if="order.deliveryType" class="info-row">
+          <text class="info-label">发货方式</text>
+          <text class="info-value">{{ order.deliveryTypeText }}</text>
+        </view>
         <view v-if="order.status === 8 && order.cancelReason" class="info-row">
           <text class="info-label">退款申请原因</text>
           <text class="info-value">{{ order.cancelReason }}</text>
@@ -147,10 +151,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { onPullDownRefresh } from '@dcloudio/uni-app'
 import type { Order } from '@/types'
-import { cancelOrder as cancelOrderApi, confirmReceive as confirmReceiveApi, deleteOrder as deleteOrderApi, getOrderDetail, applyRefund as applyRefundApi } from '@/api/order'
+import { cancelOrder as cancelOrderApi, confirmReceiveVerify, deleteOrder as deleteOrderApi, getOrderDetail, applyRefund as applyRefundApi } from '@/api/order'
 import { prepayOrder } from '@/api/pay'
 import LoadingState from '@/components/common/LoadingState.vue'
 
@@ -176,6 +180,17 @@ onMounted(async () => {
     return
   }
   loading.value = false
+})
+
+function onWechatConfirmDone(orderId: number) {
+  if (Number(orderId) === Number(order.value.id)) {
+    refreshOrder()
+    uni.showToast({ title: '已确认收货', icon: 'success' })
+  }
+}
+uni.$on('wechat-confirm-done', onWechatConfirmDone)
+onUnmounted(() => {
+  uni.$off('wechat-confirm-done', onWechatConfirmDone)
 })
 
 onPullDownRefresh(async () => {
@@ -341,24 +356,58 @@ const applyRefund = () => {
   })
 }
 
-const confirmReceive = async () => {
+const confirmReceive = () => {
   uni.showModal({
-    title: '提示',
-    content: '确认已收到货物?',
-    success: async (res) => {
-      if (res.confirm) {
-        try {
-          await confirmReceiveApi(order.value.id!)
-          uni.showToast({ title: '已确认收货', icon: 'success' })
-          setTimeout(() => {
-            uni.navigateBack()
-          }, 1500)
-        } catch (e) {
-          uni.showToast({ title: e.message || '操作失败', icon: 'none' })
-        }
+    title: '确认收货',
+    content: '将调起微信官方确认收货组件，确认后交易完成',
+    success: (res) => {
+      if (!res.confirm) return
+      // #ifdef MP-WEIXIN
+      if (typeof wx !== 'undefined' && (wx as any).openBusinessView) {
+        // 记录待校验订单, 供 App.onShow 收到组件回调后调用 verify
+        uni.setStorageSync('pendingConfirmOrderId', order.value.id)
+        ;(wx as any).openBusinessView({
+          businessType: 'weappOrderConfirm',
+          extraData: {
+            merchant_id: order.value.merchantId,
+            merchant_trade_no: order.value.merchantTradeNo,
+            transaction_id: order.value.transactionId
+          },
+          fail: () => {
+            uni.showToast({ title: '当前微信版本不支持，请升级微信', icon: 'none' })
+          }
+        })
+      } else {
+        uni.showToast({ title: '当前微信版本不支持，请升级微信', icon: 'none' })
       }
+      // #endif
+      // #ifndef MP-WEIXIN
+      doConfirmVerify()
+      // #endif
     }
   })
+}
+
+const doConfirmVerify = async () => {
+  try {
+    uni.showLoading({ title: '确认中...' })
+    await confirmReceiveVerify(order.value.id!)
+    uni.hideLoading()
+    uni.showToast({ title: '已确认收货', icon: 'success' })
+    await refreshOrder()
+  } catch (e: any) {
+    uni.hideLoading()
+    uni.showToast({ title: e.message || '微信未确认收货，请稍后重试', icon: 'none' })
+  }
+}
+
+const refreshOrder = async () => {
+  try {
+    const data = await getOrderDetail(Number(order.value.id))
+    order.value = data || {}
+  } catch (e) {
+    console.error('刷新订单失败:', e)
+  }
 }
 
 const deleteOrder = async () => {

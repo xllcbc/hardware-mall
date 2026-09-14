@@ -1,18 +1,16 @@
 package com.example.mystore.entity.dto;
 
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
 import lombok.Data;
 import java.io.Serializable;
 
 @Data
 public class ShipOrderRequest implements Serializable {
 
-    @NotNull(message = "物流公司不能为空")
-    private Long logisticsId;
+    /** 发货方式: 2-同城配送, 4-用户自提 */
+    @NotNull(message = "发货方式不能为空")
+    private Integer deliveryType;
 
-    @NotBlank(message = "物流单号不能为空")
-    @Size(max = 50, message = "物流单号最多 50 字")
-    private String logisticsNo;
+    /** 物流方式ID(同城配送必填, 用户自提可为空) */
+    private Long logisticsId;
 }

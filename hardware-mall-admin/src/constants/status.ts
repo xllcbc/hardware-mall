@@ -40,6 +40,17 @@ export const ORDER_STATUS_TYPE: Record<number, string> = {
   [ORDER_STATUS.REFUND_FAILED]: 'danger',      // 红色
 }
 
+// ==================== 发货方式(对齐微信 logistics_type) ====================
+export const DELIVERY_TYPE = {
+  LOCAL: 2,    // 同城配送
+  PICKUP: 4,   // 用户自提
+} as const
+
+export const DELIVERY_TYPE_TEXT: Record<number, string> = {
+  [DELIVERY_TYPE.LOCAL]: '同城配送',
+  [DELIVERY_TYPE.PICKUP]: '用户自提',
+}
+
 // ==================== 用户角色 ====================
 export const USER_ROLE = {
   REGULAR: 1,  // 普通用户

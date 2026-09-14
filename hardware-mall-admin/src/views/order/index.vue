@@ -192,8 +192,9 @@
         <el-descriptions-item label="收货人">{{ currentOrder.receiverName }}</el-descriptions-item>
         <el-descriptions-item label="联系电话">{{ currentOrder.receiverPhone }}</el-descriptions-item>
         <el-descriptions-item label="收货地址" :span="2">{{ currentOrder.receiverAddress }}</el-descriptions-item>
-        <el-descriptions-item label="物流方式">{{ currentOrder.logisticsName || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="物流单号">{{ currentOrder.logisticsNo || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="发货方式">{{ currentOrder.deliveryTypeText || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="物流公司">{{ currentOrder.logisticsName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="配送单号">{{ currentOrder.logisticsNo || '-' }}</el-descriptions-item>
         <el-descriptions-item label="订单金额">
           <span class="amount">¥{{ Number(currentOrder.totalAmount).toFixed(2) }}</span>
         </el-descriptions-item>
@@ -229,8 +230,14 @@
       width="400px"
       class="ship-dialog"
     >
-      <el-form ref="shipFormRef" :model="shipForm" :rules="shipRules" label-width="80px">
-        <el-form-item label="物流公司">
+      <el-form ref="shipFormRef" :model="shipForm" :rules="shipRules" label-width="90px">
+        <el-form-item label="发货方式" prop="deliveryType">
+          <el-radio-group v-model="shipForm.deliveryType">
+            <el-radio :value="DELIVERY_TYPE.LOCAL">同城配送</el-radio>
+            <el-radio :value="DELIVERY_TYPE.PICKUP">用户自提</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="shipForm.deliveryType === DELIVERY_TYPE.LOCAL" label="物流公司" prop="logisticsId">
           <el-select v-model="shipForm.logisticsId" placeholder="请选择物流" class="form-select">
             <el-option 
               v-for="item in logisticsList" 
@@ -240,8 +247,11 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="物流单号" prop="logisticsNo">
-          <el-input v-model="shipForm.logisticsNo" placeholder="请输入物流单号" />
+        <el-form-item v-if="shipForm.deliveryType === DELIVERY_TYPE.LOCAL" label="配送单号">
+          <el-input model-value="系统自动生成" disabled />
+        </el-form-item>
+        <el-form-item v-else label="交付方式">
+          <span class="pickup-hint">用户到店自提，无需物流单号</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -258,7 +268,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { getOrderList, shipOrder, refundOrder, rejectRefund, getOrderStats } from '@/api/admin/order'
 import { getLogisticsList } from '@/api/admin/logistics'
-import { ORDER_STATUS, ORDER_STATUS_TYPE } from '@/constants/status'
+import { ORDER_STATUS, ORDER_STATUS_TYPE, DELIVERY_TYPE } from '@/constants/status'
 
 const route = useRoute()
 const router = useRouter()
@@ -285,13 +295,13 @@ const pagination = reactive({
 })
 
 const shipForm = reactive({
-  logisticsId: null as number | null,
-  logisticsNo: ''
+  deliveryType: DELIVERY_TYPE.LOCAL as number,
+  logisticsId: null as number | null
 })
 
 const shipRules = {
-  logisticsId: [{ required: true, message: '请选择物流', trigger: 'change' }],
-  logisticsNo: [{ required: true, message: '请输入物流单号', trigger: 'blur' }]
+  deliveryType: [{ required: true, message: '请选择发货方式', trigger: 'change' }],
+  logisticsId: [{ required: true, message: '请选择物流公司', trigger: 'change' }]
 }
 
 const getStatusType = (status: number | null | undefined): string => {
@@ -380,8 +390,8 @@ const handleView = (row: any) => {
 
 const handleShip = async (row: any) => {
   currentOrder.value = row
+  shipForm.deliveryType = DELIVERY_TYPE.LOCAL
   shipForm.logisticsId = null
-  shipForm.logisticsNo = ''
   await loadLogisticsList()
   shipVisible.value = true
 }
@@ -391,7 +401,10 @@ const confirmShip = async () => {
   await shipFormRef.value.validate(async (valid: boolean) => {
     if (valid) {
       try {
-        await shipOrder(currentOrder.value.id, shipForm.logisticsId!, shipForm.logisticsNo)
+        await shipOrder(currentOrder.value.id, {
+          deliveryType: shipForm.deliveryType,
+          logisticsId: shipForm.deliveryType === DELIVERY_TYPE.LOCAL ? shipForm.logisticsId! : undefined
+        })
         ElMessage.success('发货成功')
         shipVisible.value = false
         loadData()
@@ -633,6 +646,11 @@ onMounted(() => {
 
 .form-select {
   width: 100%;
+}
+
+.pickup-hint {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
 }
 
 .order-descriptions {

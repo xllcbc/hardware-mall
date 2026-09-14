@@ -17,12 +17,17 @@ public interface OrderService {
     OrderVO getOrderByOrderNo(String orderNo);
     void cancelOrder(Long userId, Long orderId, String reason);
     void confirmReceive(Long userId, Long orderId);
+
+    /**
+     * 小程序确认收货组件回调后确认收货: 先查微信 order_state, 确认后本地 3→4
+     */
+    void confirmReceiveByWechat(Long userId, Long orderId);
     void deleteOrder(Long userId, Long orderId);
     Map<String, Object> getOrderStats();
     DashboardStatsVO getDashboardStats();
     List<RecentOrderVO> getRecentOrders(Integer limit);
     
-    void shipOrder(Long orderId, Long logisticsId, String logisticsNo);
+    void shipOrder(Long orderId, Integer deliveryType, Long logisticsId);
     void refundOrder(Long orderId, String reason);
 
     /**

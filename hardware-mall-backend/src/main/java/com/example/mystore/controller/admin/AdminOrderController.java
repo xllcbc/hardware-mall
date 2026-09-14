@@ -46,7 +46,7 @@ public class AdminOrderController {
     public Result<Void> shipOrder(
             @PathVariable Long id,
             @RequestBody @Valid ShipOrderRequest request) {
-        orderService.shipOrder(id, request.getLogisticsId(), request.getLogisticsNo());
+        orderService.shipOrder(id, request.getDeliveryType(), request.getLogisticsId());
         return Result.success();
     }
 
