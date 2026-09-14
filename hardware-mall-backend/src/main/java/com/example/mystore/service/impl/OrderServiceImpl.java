@@ -439,10 +439,16 @@ public class OrderServiceImpl implements OrderService {
         wrapper.eq(Order::getStatus, StatusConstants.ORDER_REFUND_REQUESTED);
         long refundRequested = orderMapper.selectCount(wrapper);
 
+        // 退款失败待处理数, 管理后台据此显示提示条/快捷筛选/重试入口
+        wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Order::getStatus, StatusConstants.ORDER_REFUND_FAILED);
+        long refundFailed = orderMapper.selectCount(wrapper);
+
         stats.put("pendingPay", pendingPay);
         stats.put("pendingShip", pendingShip);
         stats.put("shipped", shipped);
         stats.put("refundRequested", refundRequested);
+        stats.put("refundFailed", refundFailed);
 
         return stats;
     }

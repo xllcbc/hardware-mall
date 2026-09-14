@@ -14,6 +14,7 @@
           <text v-if="order.status === 6" class="status-desc">退款处理中，请耐心等待</text>
           <text v-if="order.status === 7" class="status-desc">已退款，金额已原路退回</text>
           <text v-if="order.status === 8" class="status-desc">管理员正在审核，处理结果将尽快通知</text>
+          <text v-if="order.status === 9" class="status-desc">退款失败，请联系客服处理</text>
           <text v-if="order.status === 1" class="status-desc">请尽快完成支付</text>
           <text v-if="order.status === 3" class="status-desc">正在配送中，请保持电话畅通</text>
         </view>
@@ -63,6 +64,10 @@
         </view>
         <view v-if="order.status === 8 && order.cancelReason" class="info-row">
           <text class="info-label">退款申请原因</text>
+          <text class="info-value">{{ order.cancelReason }}</text>
+        </view>
+        <view v-if="order.status === 9 && order.cancelReason" class="info-row">
+          <text class="info-label">退款失败原因</text>
           <text class="info-value">{{ order.cancelReason }}</text>
         </view>
         <view v-if="(order.status === 2 || order.status === 3) && order.adminRemark" class="info-row">
@@ -206,7 +211,8 @@ const getStatusBgClass = (status: number) => {
     4: 'bg-success',
     6: 'bg-danger',
     7: 'bg-danger',
-    8: 'bg-warning'
+    8: 'bg-warning',
+    9: 'bg-danger'
   }
   return map[status] || ''
 }
@@ -219,7 +225,8 @@ const getStatusIcon = (status: number) => {
     4: '✓',
     6: '⟳',
     7: '✓',
-    8: '📝'
+    8: '📝',
+    9: '⚠'
   }
   return map[status] || '📋'
 }

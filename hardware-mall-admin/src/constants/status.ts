@@ -13,6 +13,7 @@ export const ORDER_STATUS = {
   REFUNDING: 6,          // 退款中
   REFUNDED: 7,           // 已退款
   REFUND_REQUESTED: 8,   // 退款申请中(等待管理员审核)
+  REFUND_FAILED: 9,      // 退款失败(待管理员处理/重试)
 } as const
 
 export const ORDER_STATUS_TEXT: Record<number, string> = {
@@ -24,6 +25,7 @@ export const ORDER_STATUS_TEXT: Record<number, string> = {
   [ORDER_STATUS.REFUNDING]: '退款中',
   [ORDER_STATUS.REFUNDED]: '已退款',
   [ORDER_STATUS.REFUND_REQUESTED]: '退款申请中',
+  [ORDER_STATUS.REFUND_FAILED]: '退款失败',
 }
 
 export const ORDER_STATUS_TYPE: Record<number, string> = {
@@ -35,6 +37,7 @@ export const ORDER_STATUS_TYPE: Record<number, string> = {
   [ORDER_STATUS.REFUNDING]: 'danger',          // 红色
   [ORDER_STATUS.REFUNDED]: 'danger',           // 红色
   [ORDER_STATUS.REFUND_REQUESTED]: 'warning',  // 橙色
+  [ORDER_STATUS.REFUND_FAILED]: 'danger',      // 红色
 }
 
 // ==================== 用户角色 ====================

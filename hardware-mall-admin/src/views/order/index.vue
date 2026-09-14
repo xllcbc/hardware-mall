@@ -19,6 +19,12 @@
       <el-button link type="warning" @click="filterRefundRequested">立即处理</el-button>
     </div>
 
+    <div v-if="refundFailedCount > 0" class="card filter-tip refund-failed-tip animate-fade-in">
+      <el-icon><WarningFilled /></el-icon>
+      <span>有 {{ refundFailedCount }} 笔退款失败待处理</span>
+      <el-button link type="danger" @click="filterRefundFailed">立即处理</el-button>
+    </div>
+
     <div class="card search-card animate-fade-in-up stagger-1">
       <el-form :inline="true" :model="queryForm" class="search-form">
         <el-form-item label="订单状态">
@@ -37,6 +43,7 @@
             <el-option label="退款申请中" :value="ORDER_STATUS.REFUND_REQUESTED" />
             <el-option label="退款中" :value="ORDER_STATUS.REFUNDING" />
             <el-option label="已退款" :value="ORDER_STATUS.REFUNDED" />
+            <el-option label="退款失败" :value="ORDER_STATUS.REFUND_FAILED" />
           </el-select>
         </el-form-item>
         <el-form-item label="订单号">
@@ -142,6 +149,14 @@
             >
               退款
             </el-button>
+            <el-button 
+              link 
+              type="warning" 
+              v-if="row.status === ORDER_STATUS.REFUND_FAILED" 
+              @click="handleRetryRefund(row)"
+            >
+              重试退款
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -184,7 +199,8 @@
         </el-descriptions-item>
         <el-descriptions-item label="下单时间">{{ currentOrder.createTime }}</el-descriptions-item>
         <el-descriptions-item label="买家备注" :span="2">{{ currentOrder.buyerRemark || '-' }}</el-descriptions-item>
-        <el-descriptions-item v-if="currentOrder.cancelReason" label="退款申请/退款原因" :span="2">
+        <el-descriptions-item v-if="currentOrder.cancelReason"
+          :label="currentOrder.status === ORDER_STATUS.REFUND_FAILED ? '退款失败原因' : '退款申请/退款原因'" :span="2">
           {{ currentOrder.cancelReason }}
         </el-descriptions-item>
       </el-descriptions>
@@ -254,6 +270,7 @@ const currentOrder = ref<any>(null)
 const logisticsList = ref<any[]>([])
 const filterUserId = ref<number | null>(null)
 const refundRequestedCount = ref(0)
+const refundFailedCount = ref(0)
 const shipFormRef = ref()
 
 const queryForm = reactive({
@@ -323,10 +340,11 @@ watch(() => route.query.userId, (newUserId) => {
   }
 }, { immediate: true })
 
-const loadRefundRequestedCount = async () => {
+const loadOrderStats = async () => {
   try {
     const res: any = await getOrderStats()
     refundRequestedCount.value = Number(res?.refundRequested) || 0
+    refundFailedCount.value = Number(res?.refundFailed) || 0
   } catch {
     // error handled by interceptor
   }
@@ -334,6 +352,12 @@ const loadRefundRequestedCount = async () => {
 
 const filterRefundRequested = () => {
   queryForm.status = ORDER_STATUS.REFUND_REQUESTED
+  pagination.page = 1
+  loadData()
+}
+
+const filterRefundFailed = () => {
+  queryForm.status = ORDER_STATUS.REFUND_FAILED
   pagination.page = 1
   loadData()
 }
@@ -395,6 +419,22 @@ const handleRefund = async (row: any) => {
   }
 }
 
+const handleRetryRefund = async (row: any) => {
+  try {
+    await ElMessageBox.confirm(
+      '将重新向微信发起退款, 是否继续?',
+      '重试退款',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    await refundOrder(row.id, '管理员重试退款')
+    ElMessage.success('退款已重新受理, 等待微信原路退回')
+    loadOrderStats()
+    loadData()
+  } catch {
+    // 用户取消或 error handled by interceptor
+  }
+}
+
 const handleApproveRefund = async (row: any) => {
   try {
     await ElMessageBox.confirm(
@@ -404,7 +444,7 @@ const handleApproveRefund = async (row: any) => {
     )
     await refundOrder(row.id, '管理员同意退款申请')
     ElMessage.success('退款已受理, 等待微信原路退回')
-    loadRefundRequestedCount()
+    loadOrderStats()
     loadData()
   } catch {
     // 用户取消或 error handled by interceptor
@@ -422,7 +462,7 @@ const handleRejectRefund = async (row: any) => {
     })
     await rejectRefund(row.id, value)
     ElMessage.success('已拒绝退款申请')
-    loadRefundRequestedCount()
+    loadOrderStats()
     loadData()
   } catch {
     // 用户取消或 error handled by interceptor
@@ -431,7 +471,7 @@ const handleRejectRefund = async (row: any) => {
 
 onMounted(() => {
   loadData()
-  loadRefundRequestedCount()
+  loadOrderStats()
 })
 </script>
 
@@ -523,6 +563,12 @@ onMounted(() => {
   background: #fdf6ec;
   border-color: #faecd8;
   color: #e6a23c;
+}
+
+.refund-failed-tip {
+  background: #fef0f0;
+  border-color: #fde2e2;
+  color: #f56c6c;
 }
 
 .search-select {

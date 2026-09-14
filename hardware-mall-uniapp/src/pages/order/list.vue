@@ -138,7 +138,10 @@ const getStatusClass = (status: number) => {
     2: 'info',
     3: 'primary',
     4: 'success',
-    8: 'warning'
+    6: 'danger',
+    7: 'danger',
+    8: 'warning',
+    9: 'danger'
   }
   return map[status] || ''
 }
@@ -353,6 +356,10 @@ const deleteOrder = async (order: Order) => {
   &.success {
     color: #388E3C;
     background: #E8F5E9;
+  }
+  &.danger {
+    color: #E53935;
+    background: #FFEBEE;
   }
 }
 
