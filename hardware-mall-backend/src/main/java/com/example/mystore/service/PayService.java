@@ -13,4 +13,5 @@ public interface PayService {
     void refund(Long orderId, String reason);
     boolean processPaymentSuccess(String outTradeNo, String transactionId);
     Transaction queryWechatOrder(String outTradeNo);
+    void reconcileRefund(Long orderId);
 }

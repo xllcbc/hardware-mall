@@ -213,21 +213,29 @@ class PayServiceImplTest {
     }
 
     @Test
-    void refundCallback_shouldAlert_whenRefundFailed() {
+    void refundCallback_shouldRollback_whenRefundFailed() {
         String outTradeNo = uniqueOutTradeNo();
         mockNotificationParser(outTradeNo, "FAIL");
         Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
         setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, outTradeNo);
+        Long skuId = setupSku(10);
+        setupOrderItem(orderId, skuId, 3);
 
         Map<String, String> result = payService.refundCallback("body", "sig", "nonce", "ts", "serial");
 
         assertThat(result).containsEntry("code", "SUCCESS");
-        verify(dingTalkAlertService).alert(eq("REFUND_CONFIRM_FAIL"), anyString());
+        verify(dingTalkAlertService).alert(eq("REFUND_ROLLBACK"), anyString());
 
         PaymentRecord pr = paymentRecordMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PaymentRecord>()
                         .eq(PaymentRecord::getOutTradeNo, outTradeNo));
-        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        // 回退到可重试态 PAID
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_PAID);
+
+        Order order = orderMapper.selectById(orderId);
+        assertThat(order.getStatus()).isEqualTo(StatusConstants.ORDER_REFUND_FAILED);
+        // 退款未成功, 不回补库存
+        assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(10);
     }
 
     @Test
@@ -260,6 +268,47 @@ class PayServiceImplTest {
 
         assertThat(result).containsEntry("code", "SUCCESS");
         assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(10);
+    }
+
+    @Test
+    void refundCallback_shouldHeal_whenRecordStillPaid() {
+        // 响应丢失滞留态: 退款已发起但本地停留 PAID, 微信成功后回调必须能自愈
+        String outTradeNo = uniqueOutTradeNo();
+        mockNotificationParser(outTradeNo, "SUCCESS");
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, outTradeNo);
+        Long skuId = setupSku(10);
+        setupOrderItem(orderId, skuId, 3);
+
+        Map<String, String> result = payService.refundCallback("body", "sig", "nonce", "ts", "serial");
+
+        assertThat(result).containsEntry("code", "SUCCESS");
+
+        PaymentRecord pr = paymentRecordMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getOutTradeNo, outTradeNo));
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDED);
+
+        Order order = orderMapper.selectById(orderId);
+        assertThat(order.getStatus()).isEqualTo(StatusConstants.ORDER_REFUNDED);
+        assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(13);
+    }
+
+    // ==================== refund claim-first ====================
+
+    @Test
+    void refund_shouldStayRefunding_whenWechatCallFails() {
+        // claim-first: CAS PAID→REFUNDING 在外呼之前; 外呼抛异常也应停留 REFUNDING 且不向上抛
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_SHIPMENT);
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+
+        // wechatPayConfig 为 @MockBean: SDK 外呼必然抛异常, 模拟超时/响应丢失
+        payService.refund(orderId, "测试退款");
+
+        PaymentRecord pr = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        verify(dingTalkAlertService).alert(eq("REFUND_FAIL"), anyString());
     }
 
     // ==================== M7 事务分段 ====================

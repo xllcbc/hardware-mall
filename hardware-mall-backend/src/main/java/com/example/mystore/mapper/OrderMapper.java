@@ -61,4 +61,19 @@ public interface OrderMapper extends BaseMapper<Order> {
     List<Order> selectStaleShippedOrders(@Param("status") Integer status,
                                           @Param("beforeTime") LocalDateTime beforeTime,
                                           @Param("limit") Integer limit);
+
+    /**
+     * 查询滞留的退款中订单（用于退款对账兜底任务）
+     * 按 update_time 过滤, 覆盖"已发起退款但结果未知"的滞留单
+     * @param status 订单状态（退款中）
+     * @param beforeTime 更新时间小于此时间的订单
+     * @param limit 单次查询上限
+     */
+    @Select("SELECT * FROM shop_order " +
+            "WHERE status = #{status} AND update_time < #{beforeTime} " +
+            "ORDER BY update_time ASC " +
+            "LIMIT #{limit}")
+    List<Order> selectStaleRefundingOrders(@Param("status") Integer status,
+                                            @Param("beforeTime") LocalDateTime beforeTime,
+                                            @Param("limit") Integer limit);
 }
