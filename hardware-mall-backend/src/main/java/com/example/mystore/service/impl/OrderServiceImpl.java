@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
@@ -422,9 +423,11 @@ public class OrderServiceImpl implements OrderService {
         if (order.getStatus() != StatusConstants.ORDER_SHIPPED) {
             throw new BusinessException("当前订单状态不支持确认收货");
         }
-        // 以微信 order_state 为准: 仅 3确认收货/4交易完成 才算数
+        // 以微信 order_state 为准: 仅 确认收货/交易完成 才算数
         Integer state = wechatOrderShippingService.queryOrderState(orderId);
-        if (state == null || (state != 3 && state != 4)) {
+        if (state == null
+                || (state != WechatConstants.OrderState.CONFIRMED
+                    && state != WechatConstants.OrderState.COMPLETED)) {
             throw new BusinessException("微信未确认收货，请稍后重试");
         }
         orderMapper.update(null, new LambdaUpdateWrapper<Order>()

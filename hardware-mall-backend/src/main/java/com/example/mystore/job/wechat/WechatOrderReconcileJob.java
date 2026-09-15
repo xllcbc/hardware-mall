@@ -2,6 +2,7 @@ package com.example.mystore.job.wechat;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.service.OrderService;
@@ -17,8 +18,8 @@ import java.util.List;
 
 /**
  * 微信订单对账任务
- * 扫描已上报微信(wechat_order_state=2)的已发货订单, 用 get_order 取权威 order_state:
- *   3确认收货/4交易完成 → 本地 3→4; 同时把微信状态写入 wechat_order_state 供展示/对账
+ * 扫描已上报微信(wechat_order_state=SHIPPED)的已发货订单, 用 get_order 取权威 order_state:
+ *   已确认收货/交易完成 → 本地 3→4; 同时把微信状态写入 wechat_order_state 供展示/对账
  * 兜底用户在微信订单中心确认收货(未经本小程序确认组件)的场景
  */
 @Component
@@ -66,7 +67,8 @@ public class WechatOrderReconcileJob {
                             .set(Order::getUpdateTime, LocalDateTime.now()));
                     synced++;
                     // 微信已确认收货/交易完成 → 本地 3→4(CAS 幂等)
-                    if (state == 3 || state == 4) {
+                    if (state == WechatConstants.OrderState.CONFIRMED
+                            || state == WechatConstants.OrderState.COMPLETED) {
                         if (orderService.autoConfirmReceive(order.getId())) {
                             confirmed++;
                         }

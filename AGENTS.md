@@ -10,6 +10,13 @@
 - Lombok 1.18.30, Hibernate Validator 8.0.1, SLF4J + Logback
 - JUnit 5 + Mockito 5 + Testcontainers 1.21.3
 
+## 构建环境
+- **必须使用 JDK 17 构建**。Lombok 1.18.30 不兼容 JDK 21+，在 JDK 25 上注解处理会静默失效，导致全项目出现大量「找不到 getter/setter」编译错误
+- 若本机 `JAVA_HOME` 指向 JDK 25，需临时切换后再构建（Windows/WSL 示例）：
+  ```
+  cmd.exe /c 'set JAVA_HOME=C:\Progra~1\Java\jdk-17.0.3.1&& mvn -DskipTests compile'
+  ```
+
 ## 项目结构
 - `hardware-mall-backend/` — Spring Boot 后端
 - `hardware-mall-admin/` — 管理后台 (Vue 3 + Element Plus + Vite + TS)
@@ -45,3 +52,4 @@ job/               — 定时任务
 7. **序列化规范** — Redis 用 Fastjson2，DB JSON 列用 Jackson
 8. **遵循已有模式** — 修改已存在的类时，先观察该类已有的代码风格并保持一致
 9. **修改后验证** — 改动完成后运行 `mvn compile` 确认无编译错误
+10. **常量组织** — 第三方协议常量（微信/支付等）按域拆分为嵌套静态类分组（参照 `WechatConstants` 的 `Api`/`Event`/`OrderState`/`Fields`/`Common`/`Alert`），禁止硬编码字符串与魔数；跨域同名不同义的常量（如微信 `order_state` 与本地订单状态）必须物理隔离在不同类中

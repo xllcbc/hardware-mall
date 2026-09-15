@@ -3,6 +3,7 @@ package com.example.mystore.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.entity.db.Order;
@@ -84,37 +85,37 @@ public class WechatOrderShippingServiceImpl implements WechatOrderShippingServic
 
         Map<String, Object> body = new HashMap<>();
         Map<String, Object> orderKey = new HashMap<>();
-        orderKey.put("order_number_type", 1);
-        orderKey.put("mchid", mchId);
-        orderKey.put("out_trade_no", record.getOutTradeNo());
-        body.put("order_key", orderKey);
-        body.put("logistics_type", deliveryType);
-        body.put("delivery_mode", 1);
-        body.put("shipping_list", buildShippingList(order, deliveryType));
-        body.put("upload_time", OffsetDateTime.now().format(RFC3339_MILLIS));
+        orderKey.put(WechatConstants.Fields.ORDER_NUMBER_TYPE, WechatConstants.Common.ORDER_NUMBER_TYPE_OUT_TRADE_NO);
+        orderKey.put(WechatConstants.Fields.MCHID, mchId);
+        orderKey.put(WechatConstants.Fields.OUT_TRADE_NO, record.getOutTradeNo());
+        body.put(WechatConstants.Fields.ORDER_KEY, orderKey);
+        body.put(WechatConstants.Fields.LOGISTICS_TYPE, deliveryType);
+        body.put(WechatConstants.Fields.DELIVERY_MODE, WechatConstants.Common.DELIVERY_MODE_UNIFIED);
+        body.put(WechatConstants.Fields.SHIPPING_LIST, buildShippingList(order, deliveryType));
+        body.put(WechatConstants.Fields.UPLOAD_TIME, OffsetDateTime.now().format(RFC3339_MILLIS));
         Map<String, Object> payer = new HashMap<>();
-        payer.put("openid", user.getOpenid());
-        body.put("payer", payer);
+        payer.put(WechatConstants.Fields.OPENID, user.getOpenid());
+        body.put(WechatConstants.Fields.PAYER, payer);
 
-        String url = "https://api.weixin.qq.com/wxa/sec/order/upload_shipping_info?access_token="
+        String url = WechatConstants.Api.UPLOAD_SHIPPING_INFO + "?access_token="
                 + wechatUtil.getAccessToken();
         try {
             String resp = HttpUtil.post(url, JsonUtil.toJson(body));
             Map<String, Object> result = JsonUtil.parse(resp);
-            Object errcode = result.get("errcode");
-            if (errcode != null && !"0".equals(errcode.toString())) {
-                throw new BusinessException("微信发货上报失败: " + result.get("errmsg"));
+            Object errcode = result.get(WechatConstants.Fields.ERRCODE);
+            if (errcode != null && !WechatConstants.Common.ERRCODE_SUCCESS.equals(errcode.toString())) {
+                throw new BusinessException("微信发货上报失败: " + result.get(WechatConstants.Fields.ERRMSG));
             }
-            // 上报成功: 记录微信侧状态=已发货(2)
+            // 上报成功: 记录微信侧状态=已发货
             orderMapper.update(null, new LambdaUpdateWrapper<Order>()
                     .eq(Order::getId, orderId)
-                    .set(Order::getWechatOrderState, 2)
+                    .set(Order::getWechatOrderState, WechatConstants.OrderState.SHIPPED)
                     .set(Order::getUpdateTime, LocalDateTime.now()));
             log.info("微信发货上报成功, orderId={}, outTradeNo={}, logisticsType={}",
                     orderId, record.getOutTradeNo(), deliveryType);
         } catch (Exception e) {
             log.error("微信发货上报异常, orderId={}", orderId, e);
-            dingTalkAlertService.alert("WECHAT_SHIPPING_UPLOAD_FAIL",
+            dingTalkAlertService.alert(WechatConstants.Alert.WECHAT_SHIPPING_UPLOAD_FAIL,
                     "订单=" + orderId + " 微信发货上报失败: " + e.getMessage());
             throw new BusinessException("微信发货上报失败: " + e.getMessage());
         }
@@ -132,25 +133,25 @@ public class WechatOrderShippingServiceImpl implements WechatOrderShippingServic
             return null;
         }
         Map<String, Object> body = new HashMap<>();
-        body.put("merchant_id", mchId);
-        body.put("merchant_trade_no", record.getOutTradeNo());
+        body.put(WechatConstants.Fields.MERCHANT_ID, mchId);
+        body.put(WechatConstants.Fields.MERCHANT_TRADE_NO, record.getOutTradeNo());
 
-        String url = "https://api.weixin.qq.com/wxa/sec/order/get_order?access_token="
+        String url = WechatConstants.Api.GET_ORDER + "?access_token="
                 + wechatUtil.getAccessToken();
         try {
             String resp = HttpUtil.post(url, JsonUtil.toJson(body));
             Map<String, Object> result = JsonUtil.parse(resp);
-            Object errcode = result.get("errcode");
-            if (errcode != null && !"0".equals(errcode.toString())) {
+            Object errcode = result.get(WechatConstants.Fields.ERRCODE);
+            if (errcode != null && !WechatConstants.Common.ERRCODE_SUCCESS.equals(errcode.toString())) {
                 log.warn("微信查单失败, orderId={}, errcode={}, errmsg={}",
-                        orderId, errcode, result.get("errmsg"));
+                        orderId, errcode, result.get(WechatConstants.Fields.ERRMSG));
                 return null;
             }
-            Object orderObj = result.get("order");
+            Object orderObj = result.get(WechatConstants.Fields.ORDER);
             if (!(orderObj instanceof Map<?, ?> orderMap)) {
                 return null;
             }
-            Object state = orderMap.get("order_state");
+            Object state = orderMap.get(WechatConstants.Fields.ORDER_STATE);
             return state == null ? null : Integer.valueOf(state.toString());
         } catch (Exception e) {
             log.error("微信查单异常, orderId={}", orderId, e);
@@ -161,12 +162,12 @@ public class WechatOrderShippingServiceImpl implements WechatOrderShippingServic
     /** 组装物流信息列表: 同城配送带物流公司名+配送单号; 自提仅商品描述 */
     private List<Map<String, Object>> buildShippingList(Order order, Integer deliveryType) {
         Map<String, Object> ship = new HashMap<>();
-        ship.put("item_desc", buildItemDesc(order.getId()));
+        ship.put(WechatConstants.Fields.ITEM_DESC, buildItemDesc(order.getId()));
         if (deliveryType == StatusConstants.DELIVERY_TYPE_LOCAL) {
-            ship.put("tracking_no", order.getLogisticsNo());
+            ship.put(WechatConstants.Fields.TRACKING_NO, order.getLogisticsNo());
             Logistics logistics = order.getLogisticsId() == null
                     ? null : logisticsMapper.selectById(order.getLogisticsId());
-            ship.put("express_company", logistics != null ? logistics.getName() : "同城配送");
+            ship.put(WechatConstants.Fields.EXPRESS_COMPANY, logistics != null ? logistics.getName() : "同城配送");
         }
         List<Map<String, Object>> list = new ArrayList<>();
         list.add(ship);

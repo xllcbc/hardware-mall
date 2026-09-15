@@ -1,5 +1,6 @@
 package com.example.mystore.controller.user;
 
+import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.service.WechatMessageService;
 import com.example.mystore.util.JsonUtil;
 import com.example.mystore.util.WxMsgCrypt;
@@ -63,7 +64,7 @@ public class WechatMessageController {
         }
         try {
             Map<String, Object> envelope = body == null ? null : JsonUtil.parse(body);
-            String encrypt = envelope == null ? null : str(envelope.get("Encrypt"));
+            String encrypt = envelope == null ? null : str(envelope.get(WechatConstants.Fields.ENCRYPT));
             if (encrypt == null) {
                 log.warn("微信消息推送缺少 Encrypt");
                 return "";
