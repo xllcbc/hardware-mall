@@ -56,10 +56,17 @@ class RateLimitInterceptorTest {
     }
 
     private MockHttpServletRequest request(String remoteAddr, String xff) {
+        return request(remoteAddr, xff, null);
+    }
+
+    private MockHttpServletRequest request(String remoteAddr, String xff, String realIp) {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setRemoteAddr(remoteAddr);
         if (xff != null) {
             request.addHeader("X-Forwarded-For", xff);
+        }
+        if (realIp != null) {
+            request.addHeader("X-Real-IP", realIp);
         }
         return request;
     }
@@ -78,15 +85,32 @@ class RateLimitInterceptorTest {
     }
 
     @Test
-    void anonymous_keyUsesXffFirstIp() throws Exception {
+    void anonymous_prefersXRealIp_overForgedXff() throws Exception {
         when(redisUtil.incrWithExpire(anyString(), anyLong())).thenReturn(1L);
 
-        boolean pass = interceptor.preHandle(request("10.0.0.1", "9.9.9.9, 10.0.0.1"), new MockHttpServletResponse(), limitedHandler);
+        boolean pass = interceptor.preHandle(
+                request("10.0.0.1", "9.9.9.9, 10.0.0.1", "1.2.3.4"),
+                new MockHttpServletResponse(), limitedHandler);
 
         assertThat(pass).isTrue();
         ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
         verify(redisUtil).incrWithExpire(keyCaptor.capture(), eq(60L));
-        // 反代场景下优先取 X-Forwarded-For 首段(真实客户端), 而非代理 IP
+        // X-Real-IP 由 nginx 覆盖赋值, 客户端伪造的 XFF 首段不得生效
+        assertThat(keyCaptor.getValue()).isEqualTo("rate:limit:pay:ip1.2.3.4");
+    }
+
+    @Test
+    void anonymous_noRealIp_fallsBackToXffFirstIp() throws Exception {
+        when(redisUtil.incrWithExpire(anyString(), anyLong())).thenReturn(1L);
+
+        boolean pass = interceptor.preHandle(
+                request("10.0.0.1", "9.9.9.9, 10.0.0.1", null),
+                new MockHttpServletResponse(), limitedHandler);
+
+        assertThat(pass).isTrue();
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(redisUtil).incrWithExpire(keyCaptor.capture(), eq(60L));
+        // 无 X-Real-IP 时退化取 XFF 首段
         assertThat(keyCaptor.getValue()).isEqualTo("rate:limit:pay:ip9.9.9.9");
     }
 

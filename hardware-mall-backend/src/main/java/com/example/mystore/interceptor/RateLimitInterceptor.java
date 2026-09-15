@@ -58,12 +58,20 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
     /**
      * 限流身份：优先 userId（jwt 拦截器须先于本拦截器执行，见 WebMvcConfig 注册顺序）；
-     * 匿名请求取 X-Forwarded-For 首段（反代场景 getRemoteAddr 是代理 IP），无则用 remoteAddr
+     * 匿名请求取 X-Real-IP（nginx 用 $remote_addr 覆盖赋值，客户端无法伪造），
+     * 无则退化为 X-Forwarded-For 首段，再退化为 remoteAddr。
+     *
+     * <p>不可直接取 X-Forwarded-For 首段: nginx 用 $proxy_add_x_forwarded_for 追加，
+     * 客户端自填的值会排在最前，可被用于绕过限流或嫁祸他人 IP。
      */
     private String resolveIdentity(HttpServletRequest request) {
         Long userId = UserContext.getUserId();
         if (userId != null) {
             return "u" + userId;
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (StringUtils.hasText(realIp)) {
+            return "ip" + realIp.trim();
         }
         String xff = request.getHeader("X-Forwarded-For");
         if (StringUtils.hasText(xff)) {
