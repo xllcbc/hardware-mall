@@ -42,6 +42,7 @@ import { showPrivacy, isWxPrivacyPending, agreeWxPrivacy } from '@/composables/u
 
 const emit = defineEmits<{
   (e: 'agree'): void
+  (e: 'reject'): void
 }>()
 
 /** 统一完成动作: 记录同意 + 关闭弹窗 + 通知页面(如登录页同步勾选框) */
@@ -76,7 +77,9 @@ const onDisagree = () => {
     cancelText: '返回同意',
     success: (res) => {
       if (res.confirm) {
-        uni.showToast({ title: '您已拒绝隐私政策，无法登录使用', icon: 'none' })
+        // 拒绝必须能真正退出: 关闭弹窗并通知页面离开(合规: 可拒绝、可继续浏览)
+        showPrivacy.value = false
+        emit('reject')
       }
     }
   })

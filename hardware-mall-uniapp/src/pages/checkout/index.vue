@@ -84,14 +84,17 @@ import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useCartStore } from '@/stores/cart'
 import { usePreOrderStore } from '@/stores/preOrder'
+import { useUserStore } from '@/stores/user'
 import { getAddressList } from '@/api/address'
 import { getLogisticsList } from '@/api/logistics'
 import { createOrder, getOrderDetail, getIdempotencyToken } from '@/api/order'
 import { prepayOrder } from '@/api/pay'
+import { requireLogin } from '@/utils/auth'
 import type { Address, Logistics } from '@/types'
 
 const cartStore = useCartStore()
 const preOrderStore = usePreOrderStore()
+const userStore = useUserStore()
 const addresses = ref<Address[]>([])
 const selectedAddress = ref<Address | null>(null)
 const logisticsList = ref<Logistics[]>([])
@@ -169,6 +172,8 @@ const loadLogistics = async () => {
 }
 
 onShow(() => {
+  // 未登录不请求结算接口, 不强制跳转(审核合规); 需要结算时再走 requireLogin
+  if (!userStore.isLoggedIn) return
   loadAddresses()
   loadLogistics()
 })
@@ -183,6 +188,7 @@ const addAddress = () => {
 
 const submitOrder = async () => {
   if (submitted.value) return
+  if (!(await requireLogin('登录后才能提交订单'))) return
   if (!selectedAddress.value) {
     uni.showToast({ title: '请选择收货地址', icon: 'none' })
     return

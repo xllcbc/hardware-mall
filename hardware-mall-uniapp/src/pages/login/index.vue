@@ -1,5 +1,11 @@
 <template>
   <view class="login-container">
+    <view class="login-nav">
+      <view class="nav-close" @tap="onCancel">
+        <text class="nav-close-icon">✕</text>
+      </view>
+    </view>
+
     <view class="login-header">
       <image class="logo" src="/static/images/logo.jpg" mode="aspectFill" />
       <text class="app-name">五金商城</text>
@@ -54,8 +60,11 @@
 
     <view class="login-footer">
       <text class="footer-text">如有疑问，请联系客服</text>
+      <view class="skip-btn" @tap="onCancel">
+        <text class="skip-text">暂不登录，先逛逛</text>
+      </view>
     </view>
-    <PrivacyPopup @agree="handlePrivacyAgree" />
+    <PrivacyPopup @agree="handlePrivacyAgree" @reject="onCancel" />
   </view>
 </template>
 
@@ -204,6 +213,16 @@ const navigateBack = () => {
   }
 }
 
+// 可取消/返回: 登录非强制, 用户可随时拒绝或离开
+const onCancel = () => {
+  const pages = getCurrentPages()
+  if (pages.length > 1) {
+    uni.navigateBack()
+  } else {
+    uni.switchTab({ url: '/pages/index/index' })
+  }
+}
+
 const goTerms = () => {
   uni.navigateTo({ url: '/pages/agreement/terms' })
 }
@@ -221,6 +240,35 @@ const goPrivacy = () => {
   flex-direction: column;
   padding: calc(120rpx + env(safe-area-inset-top)) 48rpx 64rpx;
   padding-bottom: calc(64rpx + env(safe-area-inset-bottom));
+  position: relative;
+}
+
+.login-nav {
+  position: absolute;
+  top: calc(16rpx + env(safe-area-inset-top));
+  left: 32rpx;
+  z-index: 10;
+}
+
+.nav-close {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.1);
+
+  &:active {
+    opacity: 0.8;
+  }
+
+  .nav-close-icon {
+    font-size: 34rpx;
+    color: #666666;
+    line-height: 1;
+  }
 }
 
 .login-header {
@@ -395,11 +443,28 @@ const goPrivacy = () => {
 .login-footer {
   padding-bottom: 64rpx;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 24rpx;
 }
 
 .footer-text {
   font-size: 24rpx;
   color: #999999;
+}
+
+.skip-btn {
+  padding: 16rpx 48rpx;
+  border-radius: 40rpx;
+  border: 1rpx solid rgba(201, 168, 108, 0.6);
+
+  &:active {
+    opacity: 0.7;
+  }
+
+  .skip-text {
+    font-size: 28rpx;
+    color: #B8956A;
+  }
 }
 </style>

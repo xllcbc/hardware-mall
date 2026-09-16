@@ -98,6 +98,7 @@ import { useCartStore } from '@/stores/cart'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import { getCartList } from '@/api/cart'
+import { requireLogin } from '@/utils/auth'
 import type { CartItem } from '@/types'
 
 const cartStore = useCartStore()
@@ -199,8 +200,9 @@ const moveToFavorites = () => {
   manageMode.value = false
 }
 
-const goCheckout = () => {
+const goCheckout = async () => {
   if (!cartStore.selectedItems.length) return
+  if (!(await requireLogin('登录后才能结算'))) return
   uni.navigateTo({ url: '/pages/checkout/index' })
 }
 </script>

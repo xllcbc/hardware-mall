@@ -81,6 +81,7 @@
 import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
+import { requireLogin } from '@/utils/auth'
 
 const userStore = useUserStore()
 const appStore = useAppStore()
@@ -102,7 +103,7 @@ onShow(() => {
 
 const handleUserTap = () => {
   if (!userStore.isLoggedIn) {
-    uni.navigateTo({ url: '/pages/login/index' })
+    requireLogin('登录后查看个人信息')
   }
 }
 
@@ -112,7 +113,7 @@ const goEdit = () => {
 
 const goPage = (url: string) => {
   if (!userStore.isLoggedIn) {
-    uni.navigateTo({ url: '/pages/login/index' })
+    requireLogin('登录后查看')
     return
   }
   uni.navigateTo({ url, animationType: 'none' })

@@ -1,4 +1,5 @@
 import { MOCK_ENABLED, MOCK_CATEGORIES, getMockProductImages, MOCK_ADDRESSES, MOCK_CART, MOCK_ORDERS, MOCK_USER_INFO } from './mock'
+import { requireLogin } from './auth'
 
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api'
 
@@ -96,14 +97,8 @@ async function request<T = any>(options: RequestOptions): Promise<T> {
             }
           }
 
-          uni.showModal({
-            title: '提示',
-            content: response.message || '登录已过期，请重新登录',
-            showCancel: false,
-            success: () => {
-              uni.reLaunch({ url: '/pages/login/index' })
-            }
-          })
+          // 审核合规: 不强制跳转登录页, 弹可取消提示, 用户确认后才去登录
+          requireLogin(response.message || '登录已过期，请重新登录')
           reject(new Error(response.message))
         } else {
           uni.showToast({ title: response.message || '请求失败', icon: 'none' })

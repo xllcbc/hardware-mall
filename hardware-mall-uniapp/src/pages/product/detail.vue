@@ -91,6 +91,7 @@ import { useAppStore } from '@/stores/app'
 import { usePreOrderStore } from '@/stores/preOrder'
 import CountStepper from '@/components/common/CountStepper.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
+import { requireLogin } from '@/utils/auth'
 import type { ProductDetail, SpecTemplate, SpecItem, Sku, SpecVO } from '@/types'
 
 const appStore = useAppStore()
@@ -255,6 +256,7 @@ const addToCart = async () => {
     uni.showToast({ title: '商品已售罄', icon: 'none' })
     return
   }
+  if (!(await requireLogin('登录后才能加入购物车'))) return
   try {
     const skuId = currentSku.value?.id || product.value.id
     if (!skuId) throw new Error('未找到可用规格')
@@ -283,6 +285,7 @@ const buyNow = async () => {
     uni.showToast({ title: '暂无可用规格，请稍后再试', icon: 'none' })
     return
   }
+  if (!(await requireLogin('登录后才能下单'))) return
 
   const specStr = Object.values(selectedSpecs.value)
     .map(spec => spec.value)
