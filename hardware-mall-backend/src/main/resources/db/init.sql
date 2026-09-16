@@ -247,7 +247,7 @@ CREATE TABLE IF NOT EXISTS `order_item` (
 
 -- ==================== 初始化数据 ====================
 
--- 初始化管理员账号 (密码: admin123)
+-- 初始化管理员账号（登录密码由环境变量 ADMIN_PASSWORD 配置）
 INSERT INTO `user` (`openid`, `nickname`, `role`, `status`) VALUES ('admin', '管理员', 2, 1);
 
 -- 初始化物流数据

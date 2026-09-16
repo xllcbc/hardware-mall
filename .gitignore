@@ -22,6 +22,7 @@ node_modules/
 # AI 开发工具
 .opencode/
 .sisyphus/
+.agents/
 
 # 个人文件
 markdown-resume-*.json
@@ -29,9 +30,25 @@ markdown-resume-*.json
 *.xlsx
 
 # 真实数据文件
-# seed_real_products.sql
+seed_real_products.sql
+seed_real_products_v2.sql
+
+# 本地 Apifox CLI 配置（含访问令牌）
+apifox/apifox-cli-config.json
+
+# 内部文档（仅本地保留，不公开）
+docs/superpowers/
+docs/网站备案指引/
+docs/盲写审计报告与修复计划.md
+docs/PRODUCTION_DEPLOYMENT_PLAN.md
+docs/server-setup.md
+docs/CI_CD.md
+docs/LIVE_GO_LIVE_REPORT.md
+docs/DOMAIN_NAMING.md
+docs/商城单体项目规划文档.md
+docs/hardware-mall-api.json
 
 # Load-test generated data and JMeter runtime
 scripts/loadtest/apache-jmeter-*/
 scripts/loadtest/results/
-scripts/loadtest/__pycache__/
+__pycache__/

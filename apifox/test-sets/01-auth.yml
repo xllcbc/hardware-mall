@@ -12,7 +12,7 @@ testCases:
         Content-Type: "application/json"
       body:
         username: "admin"
-        password: "123456"
+        password: "{{adminPassword}}"
     expect:
       statusCode: 200
       body:

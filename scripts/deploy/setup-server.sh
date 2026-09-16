@@ -7,7 +7,7 @@ set -e
 # ==========================================
 
 GITHUB_REPO="https://github.com/xllcbc/hardware-mall.git"
-SERVER_IP="182.92.105.45"
+SERVER_IP="${SERVER_IP:-}"
 
 echo "=========================================="
 echo "  五金商城服务器初始化 - 开始"
@@ -134,7 +134,7 @@ echo "  服务器初始化完成"
 echo "=========================================="
 echo ""
 echo "  项目目录: /opt/hardware-mall"
-echo "  服务器 IP: $SERVER_IP"
+echo "  服务器 IP: ${SERVER_IP:-<未设置>}"
 echo "  管理员账号: admin"
 echo ""
 echo "  下一步: 在 GitHub repo Settings 里配置 Secrets，"
