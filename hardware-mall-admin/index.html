@@ -4,9 +4,40 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>五金商城管理系统</title>
+  <style>
+    #beian-footer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 10px 0;
+      font-size: 12px;
+    }
+    #beian-footer img {
+      width: 16px;
+      height: 16px;
+      display: block;
+    }
+    #beian-footer a {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      color: #6b7280;
+    }
+    #beian-footer a:hover {
+      color: #2563eb;
+    }
+  </style>
 </head>
 <body>
   <div id="app"></div>
+  <footer id="beian-footer">
+    <a href="https://beian.mps.gov.cn/#/query/webSearch?code=37140202001791" target="_blank" rel="noreferrer">
+      <img src="%BASE_URL%beian.png" alt="公安备案图标">
+      <span>鲁公网安备37140202001791号</span>
+    </a>
+  </footer>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

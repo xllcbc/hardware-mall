@@ -66,18 +66,6 @@
       
     </div>
 
-    <div class="login-footer">
-      <a
-        class="beian-link"
-        href="https://beian.mps.gov.cn/#/query/webSearch?code=37140202001791"
-        target="_blank"
-        rel="noreferrer"
-      >
-        <img class="beian-icon" :src="beianIcon" alt="公安备案图标" />
-        <span>鲁公网安备37140202001791号</span>
-      </a>
-    </div>
-
     <div class="login-decoration">
       <div class="decoration-circle circle-1"></div>
       <div class="decoration-circle circle-2"></div>
@@ -92,7 +80,6 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { login } from '@/api/admin/auth'
 import { useAuthStore } from '@/stores/auth'
-import beianIcon from '@/assets/beian.png'
 
 const router = useRouter()
 const formRef = ref()
@@ -283,41 +270,6 @@ const handleLogin = async () => {
 
 .login-btn:active {
   transform: translateY(0);
-}
-
-.login-footer {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: var(--space-lg);
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.beian-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  text-decoration: none;
-  transition: opacity var(--transition-fast);
-}
-
-.beian-link:hover {
-  opacity: 0.85;
-}
-
-.beian-icon {
-  width: 16px;
-  height: 16px;
-  display: block;
-}
-
-.beian-link span {
-  font-size: var(--font-size-xs);
-  color: rgba(255, 255, 255, 0.75);
-  letter-spacing: 0.3px;
 }
 
 .login-decoration {

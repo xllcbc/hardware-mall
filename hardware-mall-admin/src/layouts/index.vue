@@ -41,15 +41,6 @@
       
       <div class="sidebar-footer">
         <div class="sidebar-footer-text">v1.0.0</div>
-        <a
-          class="beian-link"
-          href="https://beian.mps.gov.cn/#/query/webSearch?code=37140202001791"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <img class="beian-icon" :src="beianIcon" alt="公安备案图标" />
-          <span>鲁公网安备37140202001791号</span>
-        </a>
       </div>
     </el-aside>
 
@@ -125,7 +116,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { logout as logoutApi } from '@/api/admin/auth'
-import beianIcon from '@/assets/beian.png'
 
 const router = useRouter()
 const route = useRoute()
@@ -407,38 +397,6 @@ const handleCommand = (command: string) => {
 }
 
 .sidebar.is-collapsed .sidebar-footer-text {
-  display: none;
-}
-
-.beian-link {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  margin-top: 6px;
-  text-decoration: none;
-  transition: opacity var(--transition-fast);
-}
-
-.beian-link:hover {
-  opacity: 0.8;
-}
-
-.beian-icon {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  display: block;
-}
-
-.beian-link span {
-  font-size: 10px;
-  color: var(--text-tertiary);
-  letter-spacing: 0.3px;
-  word-break: break-all;
-}
-
-.sidebar.is-collapsed .beian-link {
   display: none;
 }
 
