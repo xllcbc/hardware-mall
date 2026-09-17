@@ -420,6 +420,9 @@ public class SkuServiceImpl implements SkuService {
         if (incoming.getImage() != null) {
             tombstone.setImage(incoming.getImage());
         }
+        BigDecimal effectivePrice = incoming.getPrice() != null ? incoming.getPrice() : tombstone.getPrice();
+        validateWholesalePrice(effectivePrice, incoming.getWholesalePrice());
+        tombstone.setWholesalePrice(incoming.getWholesalePrice());
         tombstone.setStatus(1);
         tombstone.setDeleteTime(0L);
         tombstone.setUpdateTime(LocalDateTime.now());

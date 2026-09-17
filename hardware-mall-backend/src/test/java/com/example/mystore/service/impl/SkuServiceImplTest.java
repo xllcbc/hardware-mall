@@ -181,6 +181,24 @@ class SkuServiceImplTest {
     }
 
     @Test
+    void updateSku_rejectsWholesalePriceNotBelowRetail() {
+        Sku exist = new Sku();
+        exist.setId(1L);
+        exist.setSpuId(1L);
+        exist.setPrice(new BigDecimal("20.00"));
+        when(skuMapper.selectById(1L)).thenReturn(exist);
+
+        Sku incoming = new Sku();
+        incoming.setId(1L);
+        incoming.setWholesalePrice(new BigDecimal("20.00"));
+
+        assertThatThrownBy(() -> skuService.updateSku(incoming))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("批发价");
+        verify(skuMapper, never()).updateById(any(Sku.class));
+    }
+
+    @Test
     void testUpdateSku_PriceChange_InvalidatesListCache() {
         // M4: 改价后列表页最长 1 小时显示旧价, 必须按模式失效 product:list:*
         when(skuMapper.selectById(1L)).thenReturn(sku1);
@@ -254,6 +272,29 @@ class SkuServiceImplTest {
         assertThat(result.getPrice()).isEqualByComparingTo(new BigDecimal("66.00"));
         verify(redisUtil).delete(RedisConstants.PREFIX_SKU_INFO + 9L);
         verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
+    }
+
+    @Test
+    void resurrectSku_persistsWholesalePrice() {
+        Sku deleted = tombstone(9L, 1725000000000L, "auto_c1_i1");
+        when(spuMapper.selectById(1L)).thenReturn(new Spu());
+        when(skuMapper.selectList(any())).thenReturn(Collections.singletonList(deleted));
+
+        Sku incoming = new Sku();
+        incoming.setSpuId(1L);
+        SpecVO spec = new SpecVO();
+        spec.setTemplateId(1L);
+        spec.setItemId(1L);
+        incoming.setSpecs(Arrays.asList(spec));
+        incoming.setPrice(new BigDecimal("66.00"));
+        incoming.setWholesalePrice(new BigDecimal("18.00"));
+
+        skuService.createSku(incoming);
+
+        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(
+                s -> Long.valueOf(9L).equals(s.getId())
+                        && s.getWholesalePrice() != null
+                        && s.getWholesalePrice().compareTo(new BigDecimal("18.00")) == 0));
     }
 
     @Test
