@@ -49,6 +49,7 @@ public class UserServiceImpl implements UserService {
             user.setOpenid(openid);
             user.setRole(StatusConstants.USER_ROLE_REGULAR);
             user.setStatus(StatusConstants.USER_STATUS_NORMAL);
+            user.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
             user.setCreateTime(LocalDateTime.now());
             userMapper.insert(user);
         } else {
@@ -151,6 +152,9 @@ public class UserServiceImpl implements UserService {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);
         claims.put("role", user.getRole());
+        claims.put("userGroup", user.getUserGroup() != null
+                ? user.getUserGroup()
+                : com.example.mystore.common.constant.StatusConstants.USER_GROUP_RETAIL);
         String newToken = jwtUtil.generateToken(claims);
 
         redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + userId, newToken);

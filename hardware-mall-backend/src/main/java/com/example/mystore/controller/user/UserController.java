@@ -33,6 +33,9 @@ public class UserController {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", user.getId());
         claims.put("role", user.getRole());
+        claims.put("userGroup", user.getUserGroup() != null
+                ? user.getUserGroup()
+                : com.example.mystore.common.constant.StatusConstants.USER_GROUP_RETAIL);
         String token = jwtUtil.generateToken(claims);
 
         redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + user.getId(), token);

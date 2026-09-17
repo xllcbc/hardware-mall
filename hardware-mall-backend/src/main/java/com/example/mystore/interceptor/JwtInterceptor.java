@@ -55,8 +55,10 @@ public class JwtInterceptor implements HandlerInterceptor {
             }
             Long userId = jwtUtil.getUserIdFromToken(token);
             Integer role = jwtUtil.getRoleFromToken(token);
+            Integer userGroup = jwtUtil.getUserGroupFromToken(token);
             UserContext.setUserId(userId);
             UserContext.setRole(role);
+            UserContext.setUserGroup(userGroup != null ? userGroup : com.example.mystore.common.constant.StatusConstants.USER_GROUP_RETAIL);
             log.debug("JWT验证通过 | URI: {} | userId: {} | role: {}", uri, userId, role);
             return true;
         } catch (Exception e) {

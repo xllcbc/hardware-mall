@@ -55,6 +55,15 @@ public class JwtUtil {
         return null;
     }
 
+    public Integer getUserGroupFromToken(String token) {
+        Claims claims = parseToken(token);
+        Object group = claims.get("userGroup");
+        if (group instanceof Number) {
+            return ((Number) group).intValue();
+        }
+        return null;
+    }
+
     public Long getExpirationFromToken(String token) {
         Claims claims = parseToken(token);
         return claims.getExpiration().getTime();
