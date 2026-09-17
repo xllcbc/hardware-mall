@@ -25,6 +25,8 @@ public class OrderItem {
 
     private BigDecimal price;
 
+    private Integer priceType;
+
     private Integer quantity;
 
     private BigDecimal subtotal;

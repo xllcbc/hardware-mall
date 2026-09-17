@@ -28,6 +28,8 @@ public class User {
     
     private Integer role;
     
+    private Integer userGroup;
+    
     private Integer status;
     
     private LocalDateTime lastLoginTime;

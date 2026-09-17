@@ -41,6 +41,18 @@ public class StatusConstants {
     /** 管理员 */
     public static final int USER_ROLE_ADMIN = 2;
     
+    // ==================== 用户分组(定价维度, 与鉴权 role 物理隔离) ====================
+    /** 零售用户 */
+    public static final int USER_GROUP_RETAIL = 1;
+    /** 批发商 */
+    public static final int USER_GROUP_WHOLESALE = 2;
+
+    // ==================== 订单价格类型 ====================
+    /** 零售价 */
+    public static final int PRICE_TYPE_RETAIL = 1;
+    /** 批发价 */
+    public static final int PRICE_TYPE_WHOLESALE = 2;
+
     // ==================== 用户状态 ====================
     /** 用户正常 */
     public static final int USER_STATUS_NORMAL = 1;
