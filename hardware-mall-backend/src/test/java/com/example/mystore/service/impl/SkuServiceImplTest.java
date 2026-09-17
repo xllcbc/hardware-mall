@@ -168,6 +168,19 @@ class SkuServiceImplTest {
     }
 
     @Test
+    void createSku_rejectsWholesalePriceNotBelowRetail() {
+        when(spuMapper.selectById(1L)).thenReturn(new Spu());
+
+        Sku sku = new Sku();
+        sku.setSpuId(1L);
+        sku.setPrice(new BigDecimal("20.00"));
+        sku.setWholesalePrice(new BigDecimal("20.00"));
+        assertThatThrownBy(() -> skuService.createSku(sku))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("批发价");
+    }
+
+    @Test
     void testUpdateSku_PriceChange_InvalidatesListCache() {
         // M4: 改价后列表页最长 1 小时显示旧价, 必须按模式失效 product:list:*
         when(skuMapper.selectById(1L)).thenReturn(sku1);

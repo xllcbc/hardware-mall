@@ -218,6 +218,23 @@ class UserServiceImplTest {
     }
 
     @Test
+    void updateUserGroup_persistsWholesale() {
+        User u = new User();
+        u.setId(5L);
+        u.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+        when(userMapper.selectById(5L)).thenReturn(u);
+        userService.updateUserGroup(5L, StatusConstants.USER_GROUP_WHOLESALE);
+        assertThat(u.getUserGroup()).isEqualTo(StatusConstants.USER_GROUP_WHOLESALE);
+        verify(userMapper).updateById(u);
+    }
+
+    @Test
+    void updateUserGroup_rejectsUnknownValue() {
+        assertThatThrownBy(() -> userService.updateUserGroup(5L, 99))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
     void testRefreshToken() {
         User user = new User();
         user.setId(2L);

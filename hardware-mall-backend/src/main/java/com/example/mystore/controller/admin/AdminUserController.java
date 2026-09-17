@@ -46,4 +46,12 @@ public class AdminUserController {
         userService.updateUserRegion(id, province, city);
         return Result.success();
     }
+
+    @PutMapping("/{id}/group")
+    public Result<Void> updateUserGroup(
+            @PathVariable Long id,
+            @RequestBody Map<String, Integer> params) {
+        userService.updateUserGroup(id, params.get("userGroup"));
+        return Result.success();
+    }
 }

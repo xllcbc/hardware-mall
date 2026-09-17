@@ -195,21 +195,45 @@ public class UserServiceImpl implements UserService {
         user.setStatus(status);
         userMapper.updateById(user);
         if (status == StatusConstants.USER_STATUS_DISABLED) {
-            java.util.Set<String> tokens = redisUtil.sMembers(RedisConstants.PREFIX_USER_TOKENS + id, String.class);
-            if (tokens != null && !tokens.isEmpty()) {
-                for (String token : tokens) {
-                    try {
-                        long ttl = (jwtUtil.getExpirationFromToken(token) - System.currentTimeMillis()) / 1000;
-                        if (ttl > 0) {
-                            redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + token, "1", ttl, TimeUnit.SECONDS);
-                        }
-                    } catch (JwtException e) {
-                        // 已自然过期或损坏的死 token 无需拉黑（拦截器本就会 401），跳过继续
-                        log.info("封禁扫荡: 登记集中存在无效 token，跳过拉黑, userId={}", id);
+            invalidateUserTokens(id);
+        }
+    }
+
+    @Override
+    public void updateUserGroup(Long id, Integer userGroup) {
+        if (userGroup == null
+                || (userGroup != StatusConstants.USER_GROUP_RETAIL
+                    && userGroup != StatusConstants.USER_GROUP_WHOLESALE)) {
+            throw new BusinessException("无效的用户分组");
+        }
+        User user = userMapper.selectById(id);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        if (userGroup.equals(user.getUserGroup())) {
+            return;
+        }
+        user.setUserGroup(userGroup);
+        user.setUpdateTime(LocalDateTime.now());
+        userMapper.updateById(user);
+        invalidateUserTokens(id);
+    }
+
+    private void invalidateUserTokens(Long userId) {
+        java.util.Set<String> tokens = redisUtil.sMembers(RedisConstants.PREFIX_USER_TOKENS + userId, String.class);
+        if (tokens != null && !tokens.isEmpty()) {
+            for (String token : tokens) {
+                try {
+                    long ttl = (jwtUtil.getExpirationFromToken(token) - System.currentTimeMillis()) / 1000;
+                    if (ttl > 0) {
+                        redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + token, "1", ttl, TimeUnit.SECONDS);
                     }
+                } catch (JwtException e) {
+                    // 已自然过期或损坏的死 token 无需拉黑（拦截器本就会 401），跳过继续
+                    log.info("token 失效扫描: 登记集中存在无效 token，跳过拉黑, userId={}", userId);
                 }
-                redisUtil.delete(RedisConstants.PREFIX_USER_TOKENS + id);
             }
+            redisUtil.delete(RedisConstants.PREFIX_USER_TOKENS + userId);
         }
     }
 
