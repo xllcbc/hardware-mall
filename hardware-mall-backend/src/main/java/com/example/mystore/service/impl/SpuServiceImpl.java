@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -237,6 +238,14 @@ public class SpuServiceImpl implements SpuService {
                 BigDecimal maxPrice = skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice());
                 vo.setMinPrice(minPrice);
                 vo.setMaxPrice(maxPrice);
+                List<BigDecimal> wholesalePrices = skus.stream()
+                        .map(Sku::getWholesalePrice)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList());
+                if (!wholesalePrices.isEmpty()) {
+                    vo.setWholesaleMinPrice(wholesalePrices.stream().min(BigDecimal::compareTo).orElse(null));
+                    vo.setWholesaleMaxPrice(wholesalePrices.stream().max(BigDecimal::compareTo).orElse(null));
+                }
             } else {
                 vo.setMinPrice(spu.getOriginalPrice());
                 vo.setMaxPrice(spu.getOriginalPrice());
@@ -284,6 +293,14 @@ public class SpuServiceImpl implements SpuService {
             if (!skus.isEmpty()) {
                 vo.setMinPrice(skus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
                 vo.setMaxPrice(skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
+                List<BigDecimal> wholesalePrices = skus.stream()
+                        .map(Sku::getWholesalePrice)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList());
+                if (!wholesalePrices.isEmpty()) {
+                    vo.setWholesaleMinPrice(wholesalePrices.stream().min(BigDecimal::compareTo).orElse(null));
+                    vo.setWholesaleMaxPrice(wholesalePrices.stream().max(BigDecimal::compareTo).orElse(null));
+                }
             } else {
                 vo.setMinPrice(spu.getOriginalPrice());
                 vo.setMaxPrice(spu.getOriginalPrice());

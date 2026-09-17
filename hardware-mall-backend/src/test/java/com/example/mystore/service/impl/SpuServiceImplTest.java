@@ -142,6 +142,58 @@ class SpuServiceImplTest {
     }
 
     @Test
+    void productList_includesWholesalePriceRangeWhenPresent() {
+        sku1.setPrice(new BigDecimal("25.00"));
+        sku1.setWholesalePrice(new BigDecimal("18.00"));
+        sku2.setPrice(new BigDecimal("30.00"));
+        sku2.setWholesalePrice(new BigDecimal("22.00"));
+        when(redisUtil.queryWithCache(anyString(), eq(ProductListResult.class), anyLong(), any())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            java.util.function.Supplier<ProductListResult> s = inv.getArgument(3);
+            return s.get();
+        });
+        when(spuMapper.selectPage(any(), any())).thenAnswer(inv -> {
+            com.baomidou.mybatisplus.extension.plugins.pagination.Page<Spu> page = inv.getArgument(0);
+            page.setRecords(Collections.singletonList(spu1));
+            page.setTotal(1);
+            return page;
+        });
+        when(skuService.getSkusBySpuIds(Collections.singletonList(1L)))
+                .thenReturn(java.util.Collections.singletonMap(1L, Arrays.asList(sku1, sku2)));
+
+        var result = spuService.getProductListVO(null, null, 1, 10, 1);
+
+        ProductListVO vo = result.getRecords().get(0);
+        assertThat(vo.getWholesaleMinPrice()).isEqualByComparingTo(new BigDecimal("18.00"));
+        assertThat(vo.getWholesaleMaxPrice()).isEqualByComparingTo(new BigDecimal("22.00"));
+    }
+
+    @Test
+    void productList_wholesaleRangeNullWhenNoSkuHasWholesalePrice() {
+        when(redisUtil.queryWithCache(anyString(), eq(ProductListResult.class), anyLong(), any())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            java.util.function.Supplier<ProductListResult> s = inv.getArgument(3);
+            return s.get();
+        });
+        when(spuMapper.selectPage(any(), any())).thenAnswer(inv -> {
+            com.baomidou.mybatisplus.extension.plugins.pagination.Page<Spu> page = inv.getArgument(0);
+            page.setRecords(Collections.singletonList(spu1));
+            page.setTotal(1);
+            return page;
+        });
+        when(skuService.getSkusBySpuIds(Collections.singletonList(1L)))
+                .thenReturn(java.util.Collections.singletonMap(1L, Arrays.asList(sku1, sku2)));
+
+        var result = spuService.getProductListVO(null, null, 1, 10, 1);
+
+        ProductListVO vo = result.getRecords().get(0);
+        assertThat(vo.getWholesaleMinPrice()).isNull();
+        assertThat(vo.getWholesaleMaxPrice()).isNull();
+        assertThat(vo.getMinPrice()).isEqualByComparingTo(new BigDecimal("199.00"));
+        assertThat(vo.getMaxPrice()).isEqualByComparingTo(new BigDecimal("299.00"));
+    }
+
+    @Test
     void getProductListVO_shouldQuerySkusInOneBatchCall() {
         when(redisUtil.queryWithCache(anyString(), eq(ProductListResult.class), anyLong(), any())).thenAnswer(inv -> {
             @SuppressWarnings("unchecked")
