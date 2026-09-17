@@ -11,7 +11,9 @@ import com.example.mystore.mapper.CartMapper;
 import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.CartService;
+import com.example.mystore.service.PriceService;
 import com.example.mystore.service.SkuService;
+import com.example.mystore.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +32,7 @@ public class CartServiceImpl implements CartService {
     private final SkuService skuService;
     private final SkuMapper skuMapper;
     private final SpuMapper spuMapper;
+    private final PriceService priceService;
 
 @Override
     public List<CartItemVO> getCartList(Long userId) {
@@ -57,11 +60,13 @@ public class CartServiceImpl implements CartService {
                     .collect(Collectors.joining(" ")));
 
                 List<Sku> allSkus = skuService.getSkusBySpu(spu.getId(), 1);
-                vo.setPrice(sku.getPrice());
+                PriceService.PriceResult priceResult =
+                        priceService.resolve(sku, UserContext.getUserGroup());
+                vo.setPrice(priceResult.unitPrice());
                 vo.setMinPrice(allSkus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(sku.getPrice()));
                 vo.setMaxPrice(allSkus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(sku.getPrice()));
                 vo.setQuantity(cart.getQuantity());
-                vo.setSubtotal(sku.getPrice().multiply(BigDecimal.valueOf(cart.getQuantity())));
+                vo.setSubtotal(priceResult.unitPrice().multiply(BigDecimal.valueOf(cart.getQuantity())));
                 vo.setStock(sku.getStock());
                 result.add(vo);
             }
