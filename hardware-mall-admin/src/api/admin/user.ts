@@ -11,6 +11,7 @@ export interface User {
   city?: string
   role: number
   status: number
+  userGroup: number
   lastLoginTime?: string
   lastLoginIp?: string
   createTime?: string
@@ -34,4 +35,8 @@ export const updateUserStatus = (id: number, status: number) => {
 
 export const updateUserRegion = (id: number, province: string, city: string) => {
   return request.put(`/admin/user/${id}/region`, { province, city })
+}
+
+export const updateUserGroup = (id: number, userGroup: number) => {
+  return request.put(`/admin/user/${id}/group`, { userGroup })
 }

@@ -54,6 +54,13 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="分组" width="110">
+          <template #default="{ row }">
+            <el-tag :type="row.userGroup === USER_GROUP.WHOLESALE ? 'success' : 'info'" size="small" effect="light">
+              {{ USER_GROUP_TEXT[row.userGroup] || '零售' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="地区" width="140">
           <template #default="{ row }">
             <span class="region">{{ row.city || '-' }}</span>
@@ -80,7 +87,7 @@
             <span class="time">{{ row.createTime }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="260" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="handleViewOrders(row)">
               <el-icon><List /></el-icon>
@@ -97,6 +104,9 @@
             >
               <el-icon><Switch /></el-icon>
               {{ row.status === 1 ? '禁用' : '启用' }}
+            </el-button>
+            <el-button link type="warning" @click="handleToggleGroup(row)">
+              {{ row.userGroup === USER_GROUP.WHOLESALE ? '取消批发' : '设为批发商' }}
             </el-button>
           </template>
         </el-table-column>
@@ -139,8 +149,8 @@ import { ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { provinceCityOptions } from '@/utils/regions'
-import { getUserList, updateUserStatus, updateUserRegion } from '@/api/admin/user'
-import { USER_ROLE, USER_ROLE_TEXT, USER_STATUS, USER_STATUS_TEXT } from '@/constants/status'
+import { getUserList, updateUserStatus, updateUserRegion, updateUserGroup } from '@/api/admin/user'
+import { USER_ROLE, USER_ROLE_TEXT, USER_STATUS, USER_STATUS_TEXT, USER_GROUP, USER_GROUP_TEXT } from '@/constants/status'
 
 const router = useRouter()
 const loading = ref(false)
@@ -187,6 +197,17 @@ const handleEditRegion = (row: any) => {
   editingUserId.value = row.id
   regionForm.value = row.province && row.city ? [row.province, row.city] : []
   regionDialogVisible.value = true
+}
+
+const handleToggleGroup = async (row: any) => {
+  const next = row.userGroup === USER_GROUP.WHOLESALE ? USER_GROUP.RETAIL : USER_GROUP.WHOLESALE
+  try {
+    await updateUserGroup(row.id, next)
+    ElMessage.success('已更新用户分组')
+    loadData()
+  } catch {
+    // error handled by interceptor
+  }
 }
 
 const handleRegionSubmit = async () => {

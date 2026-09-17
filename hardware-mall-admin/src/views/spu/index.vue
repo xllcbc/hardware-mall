@@ -348,6 +348,11 @@
               />
             </template>
           </el-table-column>
+          <el-table-column label="批发价(元)" width="150">
+            <template #default="{ row }">
+              <el-input-number v-model="row.wholesalePrice" :min="0" :precision="2" :controls="false" placeholder="不设" style="width: 100%" />
+            </template>
+          </el-table-column>
           <el-table-column label="库存" width="120">
             <template #default="{ row }">
               <el-input-number
@@ -622,6 +627,7 @@ const confirmSkuSubmit = async () => {
           spuId: currentSpu.value!.id!,
           specs: sku.specs,
           price: sku.price,
+          wholesalePrice: sku.wholesalePrice,
           stock: sku.stock,
           image: sku.image,
           status: sku.status || 1
