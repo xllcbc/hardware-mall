@@ -7,7 +7,6 @@ import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.CartItemVO;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.mapper.CartMapper;
-import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.PriceService;
 import com.example.mystore.service.SkuService;
@@ -33,8 +32,6 @@ class CartServiceImplTest {
     private CartMapper cartMapper;
     @Mock
     private SkuService skuService;
-    @Mock
-    private SkuMapper skuMapper;
     @Mock
     private SpuMapper spuMapper;
 
@@ -77,6 +74,38 @@ class CartServiceImplTest {
             CartItemVO vo = result.get(0);
             assertThat(vo.getPrice()).isEqualByComparingTo("25.00");
             assertThat(vo.getSubtotal()).isEqualByComparingTo("50.00");
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void emptyCart_returnsEmptyList() {
+        UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+        try {
+            when(cartMapper.selectList(any())).thenReturn(List.of());
+
+            List<CartItemVO> result = cartService.getCartList(1L);
+
+            assertThat(result).isEmpty();
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void offShelfSpu_lineIsSkipped() {
+        UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+        try {
+            when(cartMapper.selectList(any())).thenReturn(List.of(cart()));
+            when(skuService.getSkuById(1L)).thenReturn(sku());
+            Spu offShelf = spu();
+            offShelf.setStatus(0);
+            when(spuMapper.selectById(1L)).thenReturn(offShelf);
+
+            List<CartItemVO> result = cartService.getCartList(1L);
+
+            assertThat(result).isEmpty();
         } finally {
             UserContext.clear();
         }
