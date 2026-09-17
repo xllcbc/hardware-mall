@@ -29,6 +29,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -83,7 +84,7 @@ class OrderServiceImplTest {
     @Mock
     private WechatOrderShippingService wechatOrderShippingService;
 
-    @org.mockito.Spy
+    @Spy
     private PriceService priceService = new PriceServiceImpl();
 
     @InjectMocks
@@ -643,7 +644,7 @@ class OrderServiceImplTest {
 
             CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
             i1.setSkuId(5L);
-            i1.setQuantity(1);
+            i1.setQuantity(2);
             CreateOrderRequest request = new CreateOrderRequest();
             request.setAddressId(1L);
             request.setLogisticsId(1L);
@@ -656,6 +657,11 @@ class OrderServiceImplTest {
             OrderItem item = captor.getValue().get(0);
             assertThat(item.getPrice()).isEqualByComparingTo("18.00");
             assertThat(item.getPriceType()).isEqualTo(StatusConstants.PRICE_TYPE_WHOLESALE);
+            assertThat(item.getSubtotal()).isEqualByComparingTo("36.00");
+
+            ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
+            verify(orderMapper).insert(orderCaptor.capture());
+            assertThat(orderCaptor.getValue().getPayAmount()).isEqualByComparingTo("36.00");
         } finally {
             UserContext.clear();
         }
@@ -704,7 +710,7 @@ class OrderServiceImplTest {
 
             CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
             i1.setSkuId(5L);
-            i1.setQuantity(1);
+            i1.setQuantity(2);
             CreateOrderRequest request = new CreateOrderRequest();
             request.setAddressId(1L);
             request.setLogisticsId(1L);
@@ -717,6 +723,11 @@ class OrderServiceImplTest {
             OrderItem item = captor.getValue().get(0);
             assertThat(item.getPrice()).isEqualByComparingTo("25.00");
             assertThat(item.getPriceType()).isEqualTo(StatusConstants.PRICE_TYPE_RETAIL);
+            assertThat(item.getSubtotal()).isEqualByComparingTo("50.00");
+
+            ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
+            verify(orderMapper).insert(orderCaptor.capture());
+            assertThat(orderCaptor.getValue().getPayAmount()).isEqualByComparingTo("50.00");
         } finally {
             UserContext.clear();
         }
