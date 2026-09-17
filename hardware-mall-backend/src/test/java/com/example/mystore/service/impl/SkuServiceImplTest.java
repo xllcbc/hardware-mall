@@ -199,6 +199,23 @@ class SkuServiceImplTest {
     }
 
     @Test
+    void updateSku_nullWholesalePrice_clearsIt() {
+        Sku exist = new Sku();
+        exist.setId(1L);
+        exist.setSpuId(1L);
+        exist.setPrice(new BigDecimal("20.00"));
+        exist.setWholesalePrice(new BigDecimal("18.00"));
+        when(skuMapper.selectById(1L)).thenReturn(exist);
+
+        Sku incoming = new Sku();
+        incoming.setId(1L);
+
+        skuService.updateSku(incoming);
+
+        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(s -> s.getWholesalePrice() == null));
+    }
+
+    @Test
     void testUpdateSku_PriceChange_InvalidatesListCache() {
         // M4: 改价后列表页最长 1 小时显示旧价, 必须按模式失效 product:list:*
         when(skuMapper.selectById(1L)).thenReturn(sku1);

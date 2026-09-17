@@ -217,6 +217,7 @@ public class SkuServiceImpl implements SkuService {
         }
         BigDecimal effectivePrice = sku.getPrice() != null ? sku.getPrice() : exist.getPrice();
         validateWholesalePrice(effectivePrice, sku.getWholesalePrice());
+        // 管理端提交整行, wholesalePrice 为 null 表示清除批发价
         exist.setWholesalePrice(sku.getWholesalePrice());
         if (sku.getStock() != null) {
             exist.setStock(sku.getStock());

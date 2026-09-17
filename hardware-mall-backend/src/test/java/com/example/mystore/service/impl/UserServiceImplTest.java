@@ -235,6 +235,39 @@ class UserServiceImplTest {
     }
 
     @Test
+    void updateUserGroup_invalidatesExistingTokens() {
+        User u = new User();
+        u.setId(5L);
+        u.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+        when(userMapper.selectById(5L)).thenReturn(u);
+
+        Set<String> tokens = new HashSet<>();
+        tokens.add("live_token");
+        when(redisUtil.sMembers("user:tokens:5", String.class)).thenReturn(tokens);
+        when(jwtUtil.getExpirationFromToken("live_token"))
+                .thenReturn(System.currentTimeMillis() + 3600_000L);
+
+        userService.updateUserGroup(5L, StatusConstants.USER_GROUP_WHOLESALE);
+
+        verify(redisUtil).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
+                eq("1"), anyLong(), eq(TimeUnit.SECONDS));
+        verify(redisUtil).delete("user:tokens:5");
+    }
+
+    @Test
+    void updateUserGroup_sameGroup_doesNotTouchTokens() {
+        User u = new User();
+        u.setId(5L);
+        u.setUserGroup(StatusConstants.USER_GROUP_WHOLESALE);
+        when(userMapper.selectById(5L)).thenReturn(u);
+
+        userService.updateUserGroup(5L, StatusConstants.USER_GROUP_WHOLESALE);
+
+        verify(userMapper, never()).updateById(any(User.class));
+        verifyNoInteractions(redisUtil);
+    }
+
+    @Test
     void testRefreshToken() {
         User user = new User();
         user.setId(2L);

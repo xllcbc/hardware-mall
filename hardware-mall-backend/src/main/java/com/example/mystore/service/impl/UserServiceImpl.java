@@ -213,9 +213,11 @@ public class UserServiceImpl implements UserService {
         if (userGroup.equals(user.getUserGroup())) {
             return;
         }
+        Integer oldGroup = user.getUserGroup();
         user.setUserGroup(userGroup);
         user.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(user);
+        log.info("用户分组变更, userId={}, {} -> {}", id, oldGroup, userGroup);
         invalidateUserTokens(id);
     }
 
