@@ -152,9 +152,7 @@ public class UserServiceImpl implements UserService {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);
         claims.put("role", user.getRole());
-        claims.put("userGroup", user.getUserGroup() != null
-                ? user.getUserGroup()
-                : com.example.mystore.common.constant.StatusConstants.USER_GROUP_RETAIL);
+        claims.put("userGroup", StatusConstants.normalizeUserGroup(user.getUserGroup()));
         String newToken = jwtUtil.generateToken(claims);
 
         redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + userId, newToken);

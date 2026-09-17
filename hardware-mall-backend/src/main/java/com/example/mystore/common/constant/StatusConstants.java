@@ -53,6 +53,13 @@ public class StatusConstants {
     /** 批发价 */
     public static final int PRICE_TYPE_WHOLESALE = 2;
 
+    /**
+     * 归一化用户分组: 为空时视为零售
+     */
+    public static int normalizeUserGroup(Integer userGroup) {
+        return userGroup != null ? userGroup : USER_GROUP_RETAIL;
+    }
+
     // ==================== 用户状态 ====================
     /** 用户正常 */
     public static final int USER_STATUS_NORMAL = 1;

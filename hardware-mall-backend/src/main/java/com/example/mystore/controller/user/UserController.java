@@ -2,6 +2,7 @@ package com.example.mystore.controller.user;
 
 import com.example.mystore.annotation.RateLimit;
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.result.Result;
 import com.example.mystore.entity.db.User;
 import com.example.mystore.service.UserService;
@@ -33,9 +34,7 @@ public class UserController {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", user.getId());
         claims.put("role", user.getRole());
-        claims.put("userGroup", user.getUserGroup() != null
-                ? user.getUserGroup()
-                : com.example.mystore.common.constant.StatusConstants.USER_GROUP_RETAIL);
+        claims.put("userGroup", StatusConstants.normalizeUserGroup(user.getUserGroup()));
         String token = jwtUtil.generateToken(claims);
 
         redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + user.getId(), token);

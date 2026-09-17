@@ -1,6 +1,7 @@
 package com.example.mystore.interceptor;
 
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.util.JwtUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.StringUtil;
@@ -58,8 +59,8 @@ public class JwtInterceptor implements HandlerInterceptor {
             Integer userGroup = jwtUtil.getUserGroupFromToken(token);
             UserContext.setUserId(userId);
             UserContext.setRole(role);
-            UserContext.setUserGroup(userGroup != null ? userGroup : com.example.mystore.common.constant.StatusConstants.USER_GROUP_RETAIL);
-            log.debug("JWT验证通过 | URI: {} | userId: {} | role: {}", uri, userId, role);
+            UserContext.setUserGroup(StatusConstants.normalizeUserGroup(userGroup));
+            log.debug("JWT验证通过 | URI: {} | userId: {} | role: {} | userGroup: {}", uri, userId, role, userGroup);
             return true;
         } catch (Exception e) {
             log.warn("JWT拦截-Token无效 | URI: {} | 原因: {}", uri, e.getMessage());
