@@ -27,9 +27,11 @@ import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
+import com.example.mystore.service.PriceService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.WechatOrderShippingService;
 import com.example.mystore.util.RedisUtil;
+import com.example.mystore.util.UserContext;
 import com.wechat.pay.java.service.payments.model.Transaction;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -71,6 +73,7 @@ public class OrderServiceImpl implements OrderService {
     private final PlatformTransactionManager transactionManager;
     private final WechatOrderShippingService wechatOrderShippingService;
     private final PaymentRecordMapper paymentRecordMapper;
+    private final PriceService priceService;
 
     @Value("${wechat.pay.mch-id:}")
     private String mchId;
@@ -153,7 +156,9 @@ public class OrderServiceImpl implements OrderService {
             if (spu == null) {
                 throw new BusinessException("商品不存在或已下架: " + cartItem.getSkuId());
             }
-            BigDecimal subtotal = sku.getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
+            PriceService.PriceResult priceResult =
+                    priceService.resolve(sku, UserContext.getUserGroup());
+            BigDecimal subtotal = priceResult.unitPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             totalAmount = totalAmount.add(subtotal);
 
             OrderItem item = new OrderItem();
@@ -175,7 +180,8 @@ public class OrderServiceImpl implements OrderService {
             item.setProductSpec(specStr.length() > 0 ? specStr.toString().trim() : "");
 
             item.setProductImage(sku.getImage() != null ? sku.getImage() : getFirstImage(spu.getImages()));
-            item.setPrice(sku.getPrice());
+            item.setPrice(priceResult.unitPrice());
+            item.setPriceType(priceResult.priceType());
             item.setQuantity(cartItem.getQuantity());
             item.setSubtotal(subtotal);
             item.setCreateTime(LocalDateTime.now());

@@ -14,11 +14,13 @@ import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.PayService;
+import com.example.mystore.service.PriceService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.WechatOrderShippingService;
 import com.example.mystore.event.StockSyncEvent;
 import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
+import com.example.mystore.util.UserContext;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -80,6 +82,9 @@ class OrderServiceImplTest {
     private PaymentRecordMapper paymentRecordMapper;
     @Mock
     private WechatOrderShippingService wechatOrderShippingService;
+
+    @org.mockito.Spy
+    private PriceService priceService = new PriceServiceImpl();
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -593,6 +598,128 @@ class OrderServiceImplTest {
         assertThat(second.getProductImage()).isEqualTo("img-b.jpg");
         assertThat(second.getQuantity()).isEqualTo(3);
         assertThat(second.getSubtotal()).isEqualByComparingTo("297.00");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void wholesaleUser_getsWholesalePriceAndPriceType() {
+        UserContext.setUserGroup(StatusConstants.USER_GROUP_WHOLESALE);
+        try {
+            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+
+            Sku pricedSku = new Sku();
+            pricedSku.setId(5L);
+            pricedSku.setSpuId(1L);
+            pricedSku.setPrice(new BigDecimal("25.00"));
+            pricedSku.setWholesalePrice(new BigDecimal("18.00"));
+            pricedSku.setStock(40);
+            pricedSku.setStatus(1);
+
+            Spu pricedSpu = new Spu();
+            pricedSpu.setId(1L);
+            pricedSpu.setName("防盗门锁 C级");
+            pricedSpu.setImages(java.util.List.of("img-a.jpg"));
+
+            when(skuService.getSkuById(5L)).thenReturn(pricedSku);
+            when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));
+            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+                inv.getArgument(0, Order.class).setId(100L);
+                return 1;
+            });
+            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
+                Order o = new Order();
+                o.setId(100L);
+                o.setUserId(2L);
+                o.setOrderNo("SO1");
+                o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+                o.setAddressId(1L);
+                o.setLogisticsId(1L);
+                return o;
+            });
+            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+            CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
+            i1.setSkuId(5L);
+            i1.setQuantity(1);
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+            request.setItems(java.util.List.of(i1));
+
+            orderService.createOrder(2L, request, "k");
+
+            ArgumentCaptor<java.util.List<OrderItem>> captor = ArgumentCaptor.forClass(java.util.List.class);
+            verify(orderItemMapper).insertBatch(captor.capture());
+            OrderItem item = captor.getValue().get(0);
+            assertThat(item.getPrice()).isEqualByComparingTo("18.00");
+            assertThat(item.getPriceType()).isEqualTo(StatusConstants.PRICE_TYPE_WHOLESALE);
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void retailUser_getsRetailPriceAndPriceType() {
+        UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+        try {
+            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+
+            Sku pricedSku = new Sku();
+            pricedSku.setId(5L);
+            pricedSku.setSpuId(1L);
+            pricedSku.setPrice(new BigDecimal("25.00"));
+            pricedSku.setWholesalePrice(new BigDecimal("18.00"));
+            pricedSku.setStock(40);
+            pricedSku.setStatus(1);
+
+            Spu pricedSpu = new Spu();
+            pricedSpu.setId(1L);
+            pricedSpu.setName("防盗门锁 C级");
+            pricedSpu.setImages(java.util.List.of("img-a.jpg"));
+
+            when(skuService.getSkuById(5L)).thenReturn(pricedSku);
+            when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));
+            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+                inv.getArgument(0, Order.class).setId(100L);
+                return 1;
+            });
+            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
+                Order o = new Order();
+                o.setId(100L);
+                o.setUserId(2L);
+                o.setOrderNo("SO1");
+                o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+                o.setAddressId(1L);
+                o.setLogisticsId(1L);
+                return o;
+            });
+            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+            CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
+            i1.setSkuId(5L);
+            i1.setQuantity(1);
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+            request.setItems(java.util.List.of(i1));
+
+            orderService.createOrder(2L, request, "k");
+
+            ArgumentCaptor<java.util.List<OrderItem>> captor = ArgumentCaptor.forClass(java.util.List.class);
+            verify(orderItemMapper).insertBatch(captor.capture());
+            OrderItem item = captor.getValue().get(0);
+            assertThat(item.getPrice()).isEqualByComparingTo("25.00");
+            assertThat(item.getPriceType()).isEqualTo(StatusConstants.PRICE_TYPE_RETAIL);
+        } finally {
+            UserContext.clear();
+        }
     }
 
     @Test
