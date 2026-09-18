@@ -57,7 +57,7 @@
         <el-table-column label="分组" width="110">
           <template #default="{ row }">
             <el-tag :type="row.userGroup === USER_GROUP.WHOLESALE ? 'success' : 'info'" size="small" effect="light">
-              {{ USER_GROUP_TEXT[row.userGroup] || '零售' }}
+              {{ USER_GROUP_TEXT[row.userGroup] || USER_GROUP_TEXT[USER_GROUP.RETAIL] }}
             </el-tag>
           </template>
         </el-table-column>
@@ -200,10 +200,12 @@ const handleEditRegion = (row: any) => {
 }
 
 const handleToggleGroup = async (row: any) => {
-  const next = row.userGroup === USER_GROUP.WHOLESALE ? USER_GROUP.RETAIL : USER_GROUP.WHOLESALE
   try {
+    const next = row.userGroup === USER_GROUP.WHOLESALE ? USER_GROUP.RETAIL : USER_GROUP.WHOLESALE
+    const action = next === USER_GROUP.WHOLESALE ? '设为批发商' : '取消批发'
+    await ElMessageBox.confirm(`确定将该用户${action}？变更后该用户需重新登录才能生效。`, '提示', { type: 'warning' })
     await updateUserGroup(row.id, next)
-    ElMessage.success('已更新用户分组')
+    ElMessage.success('已更新用户分组，该用户需重新登录')
     loadData()
   } catch {
     // error handled by interceptor

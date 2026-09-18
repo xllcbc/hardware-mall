@@ -350,7 +350,15 @@
           </el-table-column>
           <el-table-column label="批发价(元)" width="150">
             <template #default="{ row }">
-              <el-input-number v-model="row.wholesalePrice" :min="0" :precision="2" :controls="false" placeholder="不设" style="width: 100%" />
+              <el-input-number
+                v-model="row.wholesalePrice"
+                :min="0"
+                :precision="2"
+                :controls="false"
+                size="small"
+                placeholder="不设"
+                class="sku-wholesale-input"
+              />
             </template>
           </el-table-column>
           <el-table-column label="库存" width="120">
@@ -619,6 +627,10 @@ const handleSkuImageUpload = (row: Sku) => {
 const confirmSkuSubmit = async () => {
   skuSubmitLoading.value = true
   try {
+    if (skuList.value.some(sku => sku.wholesalePrice != null && sku.price != null && sku.wholesalePrice >= sku.price)) {
+      ElMessage.error('批发价必须低于零售价')
+      return
+    }
     for (const sku of skuList.value) {
       if (sku.id) {
         await updateSku(sku.id, sku)
@@ -989,7 +1001,8 @@ onMounted(() => {
 }
 
 .sku-price-input,
-.sku-stock-input {
+.sku-stock-input,
+.sku-wholesale-input {
   width: 100%;
 }
 
