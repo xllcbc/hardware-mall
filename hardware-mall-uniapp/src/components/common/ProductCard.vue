@@ -28,6 +28,8 @@ interface Props {
   originalPrice?: number | string
   minPrice?: number | string
   maxPrice?: number | string
+  wholesaleMinPrice?: number | string
+  wholesaleMaxPrice?: number | string
 }
 
 const props = defineProps<Props>()
@@ -42,6 +44,12 @@ const formatPrice = (price: number | string | undefined) => {
 }
 
 const displayPrice = computed(() => {
+  if (props.wholesaleMinPrice != null) {
+    if (props.wholesaleMaxPrice != null && props.wholesaleMaxPrice !== props.wholesaleMinPrice) {
+      return formatPrice(props.wholesaleMinPrice) + '起'
+    }
+    return formatPrice(props.wholesaleMinPrice)
+  }
   if (props.minPrice != null && props.minPrice !== props.originalPrice) {
     return formatPrice(props.minPrice) + '起'
   }

@@ -18,6 +18,7 @@
         <view class="price-wrap">
           <text class="price-symbol">¥</text>
           <text class="price-value">{{ formatPrice(currentSkuPrice) }}</text>
+          <text v-if="showWholesalePrice" class="wholesale-tag">批发价</text>
           <text v-if="currentSku && product.originalPrice" class="original-price">¥{{ formatPrice(product.originalPrice) }}</text>
         </view>
       </view>
@@ -88,6 +89,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { getProductDetail } from '@/api/product'
 import { addToCart as addToCartApi } from '@/api/cart'
 import { useAppStore } from '@/stores/app'
+import { useUserStore } from '@/stores/user'
 import { usePreOrderStore } from '@/stores/preOrder'
 import CountStepper from '@/components/common/CountStepper.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
@@ -95,6 +97,7 @@ import { requireLogin } from '@/utils/auth'
 import type { ProductDetail, SpecTemplate, SpecItem, Sku, SpecVO } from '@/types'
 
 const appStore = useAppStore()
+const userStore = useUserStore()
 const preOrderStore = usePreOrderStore()
 const product = ref<any>({})
 const detailData = ref<ProductDetail | null>(null)
@@ -128,8 +131,18 @@ const currentSku = computed(() => {
   }) || null
 })
 
+const isWholesaleUser = computed(() => userStore.userInfo?.userGroup === 2)
+
+const showWholesalePrice = computed(() =>
+  !!(currentSku.value && isWholesaleUser.value && currentSku.value.wholesalePrice != null)
+)
+
 const currentSkuPrice = computed(() => {
-  return currentSku.value?.price || product.value.originalPrice || 0
+  const sku = currentSku.value
+  if (sku && isWholesaleUser.value && sku.wholesalePrice != null) {
+    return sku.wholesalePrice
+  }
+  return sku?.price || product.value.originalPrice || 0
 })
 
 const currentSkuStock = computed(() => {
@@ -363,6 +376,15 @@ const onShare = () => {
   font-size: 56rpx;
   font-weight: 700;
   color: #C9A86C;
+}
+
+.wholesale-tag {
+  margin-left: 12rpx;
+  padding: 2rpx 12rpx;
+  font-size: 20rpx;
+  color: #FFFFFF;
+  background: #C9A86C;
+  border-radius: 6rpx;
 }
 
 .original-price {

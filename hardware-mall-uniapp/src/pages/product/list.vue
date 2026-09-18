@@ -39,6 +39,7 @@
             :price="product.price"
             :original-price="product.originalPrice"
             :min-price="product.minPrice"
+            :wholesale-min-price="isWholesaleUser ? (product.wholesaleMinPrice ?? undefined) : undefined"
             @click="goProductDetail"
           />
         </view>
@@ -56,7 +57,7 @@
               <view class="list-item-bottom">
                 <view class="list-item-price">
                   <text class="price-symbol">¥</text>
-                  <text class="price-value">{{ product.minPrice ?? product.price ?? product.originalPrice }}</text>
+                  <text class="price-value">{{ (isWholesaleUser && product.wholesaleMinPrice != null) ? product.wholesaleMinPrice : (product.minPrice ?? product.price ?? product.originalPrice) }}</text>
                   <text v-if="product.originalPrice" class="original-price">¥{{ product.originalPrice }}</text>
                 </view>
               </view>
@@ -72,14 +73,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { onPullDownRefresh } from '@dcloudio/uni-app'
 import SearchBar from '@/components/common/SearchBar.vue'
 import ProductCard from '@/components/common/ProductCard.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getProductList } from '@/api/product'
+import { useUserStore } from '@/stores/user'
 import type { Product } from '@/types'
+
+const userStore = useUserStore()
+const isWholesaleUser = computed(() => userStore.userInfo?.userGroup === 2)
 
 const searchKeyword = ref('')
 const products = ref<Product[]>([])

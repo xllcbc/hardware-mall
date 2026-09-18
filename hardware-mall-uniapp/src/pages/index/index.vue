@@ -58,6 +58,7 @@
           :price="product.price"
           :original-price="product.originalPrice"
           :min-price="product.minPrice"
+          :wholesale-min-price="isWholesaleUser ? (product.wholesaleMinPrice ?? undefined) : undefined"
           @click="() => goProductDetail(product.id)"
         />
       </view>
@@ -72,11 +73,15 @@ import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getCategoryList, getRecommendProducts } from '@/api/product'
 import { useAppStore } from '@/stores/app'
+import { useUserStore } from '@/stores/user'
 import type { Category, Product } from '@/types'
 
 interface CategoryItem extends Category {
   isMore?: boolean
 }
+
+const userStore = useUserStore()
+const isWholesaleUser = computed(() => userStore.userInfo?.userGroup === 2)
 
 const categories = ref<Category[]>([])
 const products = ref<Product[]>([])
