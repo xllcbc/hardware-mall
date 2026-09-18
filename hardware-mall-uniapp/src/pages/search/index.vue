@@ -81,6 +81,7 @@
           :original-price="product.originalPrice"
           :min-price="product.minPrice"
           :wholesale-min-price="isWholesaleUser ? (product.wholesaleMinPrice ?? undefined) : undefined"
+          :wholesale-max-price="isWholesaleUser ? (product.wholesaleMaxPrice ?? undefined) : undefined"
           @click="goProductDetail"
         />
       </view>
@@ -90,16 +91,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import ProductCard from '@/components/common/ProductCard.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getProductList } from '@/api/product'
-import { useUserStore } from '@/stores/user'
+import { useIsWholesaleUser } from '@/composables/useWholesaleUser'
 import type { Product } from '@/types'
 
-const userStore = useUserStore()
-const isWholesaleUser = computed(() => userStore.userInfo?.userGroup === 2)
+const isWholesaleUser = useIsWholesaleUser()
 
 const HISTORY_KEY = 'mall_search_history'
 const loaded = ref(false)

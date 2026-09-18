@@ -89,15 +89,14 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { getProductDetail } from '@/api/product'
 import { addToCart as addToCartApi } from '@/api/cart'
 import { useAppStore } from '@/stores/app'
-import { useUserStore } from '@/stores/user'
 import { usePreOrderStore } from '@/stores/preOrder'
+import { useIsWholesaleUser } from '@/composables/useWholesaleUser'
 import CountStepper from '@/components/common/CountStepper.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import { requireLogin } from '@/utils/auth'
 import type { ProductDetail, SpecTemplate, SpecItem, Sku, SpecVO } from '@/types'
 
 const appStore = useAppStore()
-const userStore = useUserStore()
 const preOrderStore = usePreOrderStore()
 const product = ref<any>({})
 const detailData = ref<ProductDetail | null>(null)
@@ -131,7 +130,7 @@ const currentSku = computed(() => {
   }) || null
 })
 
-const isWholesaleUser = computed(() => userStore.userInfo?.userGroup === 2)
+const isWholesaleUser = useIsWholesaleUser()
 
 const showWholesalePrice = computed(() =>
   !!(currentSku.value && isWholesaleUser.value && currentSku.value.wholesalePrice != null)
