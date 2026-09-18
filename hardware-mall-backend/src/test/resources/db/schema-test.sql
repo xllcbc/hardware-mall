@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS `user` (
     `province` VARCHAR(50) DEFAULT NULL,
     `city` VARCHAR(50) DEFAULT NULL,
     `role` TINYINT NOT NULL DEFAULT 1,
+    `user_group` TINYINT NOT NULL DEFAULT 1,
     `status` TINYINT NOT NULL DEFAULT 1,
     `last_login_time` DATETIME DEFAULT NULL,
     `last_login_ip` VARCHAR(50) DEFAULT NULL,
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS `sku` (
     `spu_id` BIGINT NOT NULL,
     `specs` TEXT NOT NULL,
     `price` DECIMAL(10,2) NOT NULL DEFAULT 0,
+    `wholesale_price` DECIMAL(10,2) NULL,
     `stock` INT NOT NULL DEFAULT 0,
     `image` VARCHAR(255) DEFAULT NULL,
     `status` TINYINT NOT NULL DEFAULT 1,
@@ -177,6 +179,7 @@ CREATE TABLE IF NOT EXISTS `order_item` (
     `product_spec` VARCHAR(500) DEFAULT NULL,
     `product_image` VARCHAR(255) DEFAULT NULL,
     `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `price_type` TINYINT NOT NULL DEFAULT 1,
     `quantity` INT NOT NULL DEFAULT 1,
     `subtotal` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
