@@ -59,6 +59,7 @@
                 <view class="list-item-price">
                   <text class="price-symbol">¥</text>
                   <text class="price-value">{{ (isWholesaleUser && product.wholesaleMinPrice != null) ? product.wholesaleMinPrice : (product.minPrice ?? product.price ?? product.originalPrice) }}</text>
+                  <text v-if="isWholesaleUser && product.wholesaleMinPrice != null" class="wholesale-tag">批发价</text>
                   <text v-if="product.originalPrice" class="original-price">¥{{ product.originalPrice }}</text>
                 </view>
               </view>
@@ -293,6 +294,14 @@ const goProductDetail = (id: number) => {
   .price-value {
     font-size: var(--font-size-lg);
     font-weight: 700;
+  }
+  .wholesale-tag {
+    margin-left: 8rpx;
+    padding: 2rpx 10rpx;
+    font-size: 20rpx;
+    color: #FFFFFF;
+    background: #C9A86C;
+    border-radius: 6rpx;
   }
   .original-price {
     font-size: var(--font-size-xs);
