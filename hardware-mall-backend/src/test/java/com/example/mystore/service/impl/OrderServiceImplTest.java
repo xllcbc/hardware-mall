@@ -193,7 +193,7 @@ class OrderServiceImplTest {
     void testCreateOrder_StockInsufficient() {
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(skuService.getSkuById(5L)).thenReturn(sku);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
         when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
 
         CreateOrderRequest.CartItem item = new CreateOrderRequest.CartItem();
@@ -247,7 +247,7 @@ class OrderServiceImplTest {
         when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(skuService.getSkuById(5L)).thenReturn(sku);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
 
         CreateOrderRequest.CartItem item = new CreateOrderRequest.CartItem();
         item.setSkuId(5L);
@@ -488,7 +488,7 @@ class OrderServiceImplTest {
         when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(skuService.getSkuById(5L)).thenReturn(sku);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
         when(spuMapper.selectBatchIds(any())).thenReturn(Collections.emptyList());
 
         CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
@@ -542,8 +542,7 @@ class OrderServiceImplTest {
         spuB.setName("不锈钢合页");
         spuB.setImages(java.util.List.of("img-b.jpg"));
 
-        when(skuService.getSkuById(5L)).thenReturn(skuA);
-        when(skuService.getSkuById(6L)).thenReturn(skuB);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, skuA, 6L, skuB));
         when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(spuA, spuB));
         when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
         when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
@@ -623,7 +622,7 @@ class OrderServiceImplTest {
             pricedSpu.setName("防盗门锁 C级");
             pricedSpu.setImages(java.util.List.of("img-a.jpg"));
 
-            when(skuService.getSkuById(5L)).thenReturn(pricedSku);
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, pricedSku));
             when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));
             when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
             when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
@@ -689,7 +688,7 @@ class OrderServiceImplTest {
             pricedSpu.setName("防盗门锁 C级");
             pricedSpu.setImages(java.util.List.of("img-a.jpg"));
 
-            when(skuService.getSkuById(5L)).thenReturn(pricedSku);
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, pricedSku));
             when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));
             when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
             when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
@@ -728,6 +727,58 @@ class OrderServiceImplTest {
             ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
             verify(orderMapper).insert(orderCaptor.capture());
             assertThat(orderCaptor.getValue().getPayAmount()).isEqualByComparingTo("50.00");
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void order_usesBatchSkuLookupForDuplicateLines() {
+        UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+        try {
+            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(spu));
+            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+                inv.getArgument(0, Order.class).setId(100L);
+                return 1;
+            });
+            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
+                Order order = new Order();
+                order.setId(100L);
+                order.setUserId(2L);
+                order.setOrderNo("SO2");
+                order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+                order.setAddressId(1L);
+                order.setLogisticsId(1L);
+                return order;
+            });
+            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+            CreateOrderRequest.CartItem first = new CreateOrderRequest.CartItem();
+            first.setSkuId(5L);
+            first.setQuantity(1);
+            CreateOrderRequest.CartItem second = new CreateOrderRequest.CartItem();
+            second.setSkuId(5L);
+            second.setQuantity(2);
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+            request.setItems(java.util.List.of(first, second));
+
+            orderService.createOrder(2L, request, "batch-key");
+
+            verify(skuService, times(1)).getSkuMapByIds(any());
+            verify(skuService, never()).getSkuById(any());
+            ArgumentCaptor<java.util.List<OrderItem>> captor = ArgumentCaptor.forClass(java.util.List.class);
+            verify(orderItemMapper).insertBatch(captor.capture());
+            assertThat(captor.getValue()).hasSize(2);
+            assertThat(captor.getValue().get(0).getSkuId()).isEqualTo(5L);
+            assertThat(captor.getValue().get(1).getSkuId()).isEqualTo(5L);
         } finally {
             UserContext.clear();
         }

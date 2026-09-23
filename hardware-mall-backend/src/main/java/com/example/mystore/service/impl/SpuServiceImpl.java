@@ -2,7 +2,6 @@ package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Spu;
@@ -15,6 +14,7 @@ import com.example.mystore.entity.vo.ProductDetailCache;
 import com.example.mystore.entity.vo.ProductListCacheItem;
 import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.entity.vo.ProductSkuVO;
+import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.PriceService;
 import com.example.mystore.service.ProductCacheService;
@@ -22,10 +22,10 @@ import com.example.mystore.service.SpuService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.SpecTemplateService;
 import com.example.mystore.service.SpecItemService;
-import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -51,7 +51,7 @@ public class SpuServiceImpl implements SpuService {
     private final SpecItemService specItemService;
     private final PriceService priceService;
     private final ProductCacheService productCacheService;
-    private final RedisUtil redisUtil;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public Page<Spu> getSpuPage(Long categoryId, String keyword, Integer page, Integer limit, Integer status) {
@@ -112,10 +112,7 @@ public class SpuServiceImpl implements SpuService {
             spu.setIsRecommend(0);
         }
         spuMapper.insert(spu);
-        if (spu.getIsRecommend() == 1) {
-            redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
-        }
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        publishSpuChanged(spu.getId(), spu.getIsRecommend() == 1);
         return spu;
     }
 
@@ -126,6 +123,7 @@ public class SpuServiceImpl implements SpuService {
             throw new BusinessException("商品不存在");
         }
 
+        Integer oldRecommend = exist.getIsRecommend();
         if (StringUtils.hasText(spu.getName())) {
             exist.setName(spu.getName());
         }
@@ -156,11 +154,8 @@ public class SpuServiceImpl implements SpuService {
         exist.setUpdateTime(LocalDateTime.now());
 
         spuMapper.updateById(exist);
-        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + spu.getId());
-        if (exist.getIsRecommend() == 1) {
-            redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
-        }
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        publishSpuChanged(spu.getId(),
+                Integer.valueOf(1).equals(oldRecommend) || Integer.valueOf(1).equals(exist.getIsRecommend()));
         return exist;
     }
 
@@ -172,11 +167,7 @@ public class SpuServiceImpl implements SpuService {
         }
         spu.setDeleteTime(System.currentTimeMillis());
         spuMapper.updateById(spu);
-        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + id);
-        if (spu.getIsRecommend() != null && spu.getIsRecommend() == 1) {
-            redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
-        }
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        publishSpuChanged(id, Integer.valueOf(1).equals(spu.getIsRecommend()));
     }
 
     @Override
@@ -188,11 +179,7 @@ public class SpuServiceImpl implements SpuService {
         spu.setStatus(status);
         spu.setUpdateTime(LocalDateTime.now());
         spuMapper.updateById(spu);
-        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + id);
-        if (spu.getIsRecommend() != null && spu.getIsRecommend() == 1) {
-            redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
-        }
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        publishSpuChanged(id, Integer.valueOf(1).equals(spu.getIsRecommend()));
     }
 
     @Override
@@ -319,7 +306,7 @@ public class SpuServiceImpl implements SpuService {
 
     @Override
     public List<ProductSkuVO> getProductSkuVOs(Long spuId) {
-        return toProductSkuVOs(skuService.getSkusBySpu(spuId, 1));
+        return getProductDetailVO(spuId).getSkus();
     }
 
     private ProductDetailCache buildProductDetailCache(Long id) {
@@ -457,5 +444,13 @@ public class SpuServiceImpl implements SpuService {
             }
             return target;
         }).collect(Collectors.toList());
+    }
+
+    private void publishSpuChanged(Long spuId, boolean recommendAffected) {
+        eventPublisher.publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.SPU_CHANGED,
+                spuId,
+                null,
+                recommendAffected));
     }
 }

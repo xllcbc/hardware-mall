@@ -1,7 +1,6 @@
 package com.example.mystore.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
@@ -9,6 +8,7 @@ import com.example.mystore.entity.vo.ProductDetailCache;
 import com.example.mystore.entity.vo.ProductDetailVO;
 import com.example.mystore.entity.vo.ProductListVO;
 import com.example.mystore.entity.vo.ProductListResult;
+import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.PriceService;
 import com.example.mystore.service.ProductCacheService;
@@ -16,13 +16,13 @@ import com.example.mystore.service.SkuService;
 import com.example.mystore.service.SpecItemService;
 import com.example.mystore.service.SpecTemplateService;
 import com.example.mystore.util.UserContext;
-import com.example.mystore.util.RedisUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
@@ -49,10 +49,10 @@ class SpuServiceImplTest {
     private SpecItemService specItemService;
 
     @Mock
-    private RedisUtil redisUtil;
+    private ProductCacheService productCacheService;
 
     @Mock
-    private ProductCacheService productCacheService;
+    private ApplicationEventPublisher eventPublisher;
 
     @org.mockito.Spy
     private PriceService priceService = new PriceServiceImpl();
@@ -363,13 +363,30 @@ class SpuServiceImplTest {
     }
 
     @Test
+    void getProductSkuVOs_reusesProductDetailCache() {
+        sku1.setSpecs(Collections.emptyList());
+        ProductDetailCache cached = new ProductDetailCache();
+        cached.setSpu(spu1);
+        cached.setSkus(Collections.singletonList(sku1));
+        cached.setSpecTemplates(Collections.emptyList());
+        cached.setSpecItemsMap(Collections.emptyMap());
+        when(productCacheService.getProductDetail(eq(1L), any())).thenReturn(cached);
+
+        var result = spuService.getProductSkuVOs(1L);
+
+        assertThat(result).hasSize(1);
+        verify(skuService, never()).getSkusBySpu(anyLong(), any());
+    }
+
+    @Test
     void testUpdateStatus() {
         when(spuMapper.selectById(1L)).thenReturn(spu1);
 
         spuService.updateStatus(1L, 0);
 
         verify(spuMapper).updateById(org.mockito.Mockito.<Spu>argThat(spu -> spu.getStatus() == 0));
-        verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
+        verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.SPU_CHANGED, 1L, null, true));
     }
 
     @Test
@@ -379,7 +396,8 @@ class SpuServiceImplTest {
         spuService.deleteSpu(1L);
 
         verify(spuMapper).updateById(org.mockito.Mockito.<Spu>argThat(spu -> spu.getDeleteTime() > 0));
-        verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
+        verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.SPU_CHANGED, 1L, null, true));
     }
 
     @Test

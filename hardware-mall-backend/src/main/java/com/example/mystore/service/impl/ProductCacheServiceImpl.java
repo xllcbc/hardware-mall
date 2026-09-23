@@ -17,8 +17,10 @@ import java.util.Locale;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -133,6 +135,16 @@ public class ProductCacheServiceImpl implements ProductCacheService {
                             RedisConstants.PREFIX_SKU_INFO + id,
                             loadedSku,
                             RedisConstants.CACHE_TTL_HOUR,
+                            TimeUnit.SECONDS);
+                }
+            }
+            Set<Long> missingSet = new LinkedHashSet<>(missingIds);
+            for (Long missingId : missingSet) {
+                if (!loadedById.containsKey(missingId)) {
+                    redisUtil.set(
+                            RedisConstants.PREFIX_SKU_INFO + missingId,
+                            RedisConstants.CACHE_NULL,
+                            RedisConstants.CACHE_NULL_TTL,
                             TimeUnit.SECONDS);
                 }
             }

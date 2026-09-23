@@ -126,9 +126,14 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // ① 逐项校验 SKU 并收集（校验顺序与异常语义保持不变）
+        List<Long> requestedSkuIds = request.getItems().stream()
+                .map(CreateOrderRequest.CartItem::getSkuId)
+                .distinct()
+                .toList();
+        Map<Long, Sku> skuMap = skuService.getSkuMapByIds(requestedSkuIds);
         List<Sku> skus = new ArrayList<>();
         for (CreateOrderRequest.CartItem cartItem : request.getItems()) {
-            Sku sku = skuService.getSkuById(cartItem.getSkuId());
+            Sku sku = skuMap.get(cartItem.getSkuId());
             log.info("SKU查询结果, skuId={}, sku={}", cartItem.getSkuId(), sku);
             if (sku == null || sku.getStatus() != 1) {
                 throw new BusinessException("商品不存在或已下架: " + cartItem.getSkuId());

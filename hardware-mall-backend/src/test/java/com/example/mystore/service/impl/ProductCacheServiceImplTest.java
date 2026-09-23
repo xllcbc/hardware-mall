@@ -96,6 +96,13 @@ class ProductCacheServiceImplTest {
     }
 
     @Test
+    void invalidateAfterSpuChange_deletesRecommendCacheWhenAffected() {
+        productCacheService.invalidateAfterSpuChange(11L, true);
+
+        verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
+    }
+
+    @Test
     void getProductDetail_usesSharedDetailCacheKey() {
         ProductDetailCache expected = new ProductDetailCache();
         when(redisUtil.queryWithCache(
@@ -170,6 +177,23 @@ class ProductCacheServiceImplTest {
                 RedisConstants.PREFIX_SKU_INFO + 2L,
                 second,
                 RedisConstants.CACHE_TTL_HOUR,
+                TimeUnit.SECONDS);
+    }
+
+    @Test
+    void getSkusByIds_cachesNullSentinelForMissingIds() {
+        when(redisUtil.multiGet(List.of(RedisConstants.PREFIX_SKU_INFO + 9L)))
+                .thenReturn(Collections.singletonList(null));
+
+        List<Sku> result = productCacheService.getSkusByIds(
+                List.of(9L),
+                ids -> Collections.emptyList());
+
+        assertThat(result).containsExactly((Sku) null);
+        verify(redisUtil).set(
+                RedisConstants.PREFIX_SKU_INFO + 9L,
+                RedisConstants.CACHE_NULL,
+                RedisConstants.CACHE_NULL_TTL,
                 TimeUnit.SECONDS);
     }
 

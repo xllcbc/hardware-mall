@@ -8,7 +8,6 @@ import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.entity.vo.CartItemVO;
 import com.example.mystore.mapper.CartMapper;
-import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.PriceService;
@@ -21,7 +20,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -30,7 +32,6 @@ public class CartServiceImpl implements CartService {
 
     private final CartMapper cartMapper;
     private final SkuService skuService;
-    private final SkuMapper skuMapper;
     private final SpuMapper spuMapper;
     private final PriceService priceService;
 
@@ -40,11 +41,25 @@ public class CartServiceImpl implements CartService {
         wrapper.eq(Cart::getUserId, userId)
                .eq(Cart::getDeleteTime, 0);
         List<Cart> carts = cartMapper.selectList(wrapper);
+        List<Long> skuIds = carts.stream().map(Cart::getSkuId).distinct().toList();
+        Map<Long, Sku> skuMap = skuService.getSkuMapByIds(skuIds);
+        List<Long> spuIds = skuMap.values().stream()
+                .map(Sku::getSpuId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, Spu> spuMap = spuIds.isEmpty() ? Map.of()
+                : spuMapper.selectBatchIds(spuIds).stream()
+                        .collect(Collectors.toMap(Spu::getId, spu -> spu));
+        Map<Long, List<Sku>> skusBySpu = new LinkedHashMap<>();
 
         List<CartItemVO> result = new ArrayList<>();
         for (Cart cart : carts) {
-            Sku sku = skuService.getSkuById(cart.getSkuId());
-            Spu spu = spuMapper.selectById(sku.getSpuId());
+            Sku sku = skuMap.get(cart.getSkuId());
+            if (sku == null) {
+                continue;
+            }
+            Spu spu = spuMap.get(sku.getSpuId());
             if (spu != null && spu.getStatus() == 1 && spu.getDeleteTime() == 0) {
                 CartItemVO vo = new CartItemVO();
                 vo.setCartId(cart.getId());
@@ -59,7 +74,8 @@ public class CartServiceImpl implements CartService {
                     .map(SpecVO::getValue)
                     .collect(Collectors.joining(" ")));
 
-                List<Sku> allSkus = skuService.getSkusBySpu(spu.getId(), 1);
+                List<Sku> allSkus = skusBySpu.computeIfAbsent(
+                        spu.getId(), id -> skuService.getSkusBySpu(id, 1));
                 PriceService.PriceResult priceResult =
                         priceService.resolve(sku, UserContext.getUserGroup());
                 vo.setPrice(priceResult.unitPrice());

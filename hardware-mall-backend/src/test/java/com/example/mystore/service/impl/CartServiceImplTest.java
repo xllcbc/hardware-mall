@@ -20,9 +20,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -46,8 +50,8 @@ class CartServiceImplTest {
         UserContext.setUserGroup(StatusConstants.USER_GROUP_WHOLESALE);
         try {
             when(cartMapper.selectList(any())).thenReturn(List.of(cart()));
-            when(skuService.getSkuById(1L)).thenReturn(sku());
-            when(spuMapper.selectById(1L)).thenReturn(spu());
+            when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
+            when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(spu()));
             when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(sku()));
 
             List<CartItemVO> result = cartService.getCartList(1L);
@@ -65,8 +69,8 @@ class CartServiceImplTest {
         UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
         try {
             when(cartMapper.selectList(any())).thenReturn(List.of(cart()));
-            when(skuService.getSkuById(1L)).thenReturn(sku());
-            when(spuMapper.selectById(1L)).thenReturn(spu());
+            when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
+            when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(spu()));
             when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(sku()));
 
             List<CartItemVO> result = cartService.getCartList(1L);
@@ -98,10 +102,10 @@ class CartServiceImplTest {
         UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
         try {
             when(cartMapper.selectList(any())).thenReturn(List.of(cart()));
-            when(skuService.getSkuById(1L)).thenReturn(sku());
+            when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
             Spu offShelf = spu();
             offShelf.setStatus(0);
-            when(spuMapper.selectById(1L)).thenReturn(offShelf);
+            when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(offShelf));
 
             List<CartItemVO> result = cartService.getCartList(1L);
 
@@ -109,6 +113,29 @@ class CartServiceImplTest {
         } finally {
             UserContext.clear();
         }
+    }
+
+    @Test
+    void cartList_usesBatchSkuLookup() {
+        Cart first = cart();
+        Cart second = cart();
+        second.setId(2L);
+        second.setSkuId(2L);
+        when(cartMapper.selectList(any())).thenReturn(List.of(first, second));
+
+        Sku firstSku = sku();
+        Sku secondSku = sku();
+        secondSku.setId(2L);
+        when(skuService.getSkuMapByIds(any()))
+                .thenReturn(Map.of(1L, firstSku, 2L, secondSku));
+        when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(spu()));
+        when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(firstSku));
+
+        List<CartItemVO> result = cartService.getCartList(1L);
+
+        assertThat(result).hasSize(2);
+        verify(skuService, times(1)).getSkuMapByIds(any());
+        verify(skuService, never()).getSkuById(any());
     }
 
     private Cart cart() {

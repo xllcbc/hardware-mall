@@ -9,6 +9,7 @@ import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.db.SpecItem;
 import com.example.mystore.entity.db.SpecTemplate;
 import com.example.mystore.entity.vo.SpecVO;
+import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpecItemMapper;
 import com.example.mystore.mapper.SpecTemplateMapper;
@@ -21,6 +22,7 @@ import com.example.mystore.service.SpecTemplateService;
 import com.example.mystore.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,6 +55,7 @@ public class SkuServiceImpl implements SkuService {
     private final OssService ossService;
     private final RedisUtil redisUtil;
     private final ProductCacheService productCacheService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public Page<Sku> getSkuPage(Long spuId, Integer page, Integer limit) {
@@ -66,16 +69,8 @@ public class SkuServiceImpl implements SkuService {
 
     @Override
     public Sku getSkuById(Long id) {
-        Sku sku = redisUtil.queryWithCache(
-                RedisConstants.PREFIX_SKU_INFO + id, Sku.class, RedisConstants.CACHE_TTL_HOUR,
-                () -> {
-                    Sku s = skuMapper.selectById(id);
-                    if (s == null || s.getDeleteTime() != 0) {
-                        return null;
-                    }
-                    s.setStock(null);
-                    return s;
-                });
+        List<Sku> skus = productCacheService.getSkusByIds(List.of(id), this::loadSkusForCache);
+        Sku sku = skus.isEmpty() ? null : skus.get(0);
         if (sku == null) {
             throw new BusinessException("SKU不存在");
         }
@@ -255,10 +250,8 @@ public class SkuServiceImpl implements SkuService {
         }
         validateWholesalePrice(sku.getPrice(), sku.getWholesalePrice());
         skuMapper.insert(sku);
-        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + sku.getSpuId());
-        // SKU 价格/上下架直接影响列表展示; 列表缓存是 分类×页码 多 key, 无法逐个枚举, 只能按模式失效
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
         syncStockToCache(sku.getId());
+        publishSkuChanged(sku.getSpuId(), sku.getId());
         return sku;
     }
 
@@ -299,10 +292,8 @@ public class SkuServiceImpl implements SkuService {
         }
         exist.setUpdateTime(LocalDateTime.now());
         skuMapper.updateById(exist);
-        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + exist.getSpuId());
-        redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + exist.getId());
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
         syncStockToCache(exist.getId());
+        publishSkuChanged(exist.getSpuId(), exist.getId());
         return exist;
     }
 
@@ -318,10 +309,12 @@ public class SkuServiceImpl implements SkuService {
         if (sku.getImage() != null) {
             ossService.deleteFile(sku.getImage());
         }
-        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + spuId);
-        redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + id);
-        redisUtil.delete(RedisConstants.PREFIX_SKU_STOCK + id);
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        publishSkuChanged(spuId, id);
+        eventPublisher.publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.STOCK_CHANGED,
+                spuId,
+                id,
+                false));
     }
 
     @Override
@@ -497,11 +490,17 @@ public class SkuServiceImpl implements SkuService {
         tombstone.setDeleteTime(0L);
         tombstone.setUpdateTime(LocalDateTime.now());
         skuMapper.updateById(tombstone);
-        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + tombstone.getSpuId());
-        redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + tombstone.getId());
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
         syncStockToCache(tombstone.getId());
+        publishSkuChanged(tombstone.getSpuId(), tombstone.getId());
         return tombstone;
+    }
+
+    private void publishSkuChanged(Long spuId, Long skuId) {
+        eventPublisher.publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.SKU_CHANGED,
+                spuId,
+                skuId,
+                false));
     }
 
     private void freeDeletedSlot(Sku tombstone) {
