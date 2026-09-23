@@ -18,7 +18,7 @@ export interface Sku {
   spuId: number
   specs: SpecVO[]
   price: number
-  wholesalePrice?: number
+  priceType?: number
   stock: number
   image?: string
   status: number
@@ -62,8 +62,7 @@ export interface ProductListVO {
   originalPrice?: number
   minPrice?: number
   maxPrice?: number
-  wholesaleMinPrice?: number
-  wholesaleMaxPrice?: number
+  priceType?: number
   status: number
 }
 
@@ -76,8 +75,6 @@ export interface ProductDetail {
   specItemsMap: Record<number, SpecItem[]>
   minPrice?: number
   maxPrice?: number
-  wholesaleMinPrice?: number
-  wholesaleMaxPrice?: number
 }
 
 export interface Address {

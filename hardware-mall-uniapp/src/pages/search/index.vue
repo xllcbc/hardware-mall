@@ -80,8 +80,8 @@
           :price="product.price"
           :original-price="product.originalPrice"
           :min-price="product.minPrice"
-          :wholesale-min-price="isWholesaleUser ? (product.wholesaleMinPrice ?? undefined) : undefined"
-          :wholesale-max-price="isWholesaleUser ? (product.wholesaleMaxPrice ?? undefined) : undefined"
+          :max-price="product.maxPrice"
+          :price-type="product.priceType"
           @click="goProductDetail"
         />
       </view>
@@ -96,10 +96,7 @@ import ProductCard from '@/components/common/ProductCard.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getProductList } from '@/api/product'
-import { useIsWholesaleUser } from '@/composables/useWholesaleUser'
 import type { Product } from '@/types'
-
-const isWholesaleUser = useIsWholesaleUser()
 
 const HISTORY_KEY = 'mall_search_history'
 const loaded = ref(false)

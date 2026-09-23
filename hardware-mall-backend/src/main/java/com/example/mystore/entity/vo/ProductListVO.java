@@ -15,7 +15,6 @@ public class ProductListVO implements Serializable {
     private BigDecimal originalPrice;
     private BigDecimal minPrice;
     private BigDecimal maxPrice;
-    private BigDecimal wholesaleMinPrice;
-    private BigDecimal wholesaleMaxPrice;
+    private Integer priceType;
     private Integer status;
 }

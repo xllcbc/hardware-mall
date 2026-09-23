@@ -14,6 +14,7 @@ import com.example.mystore.mapper.SpecItemMapper;
 import com.example.mystore.mapper.SpecTemplateMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.OssService;
+import com.example.mystore.service.ProductCacheService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.SpecItemService;
 import com.example.mystore.service.SpecTemplateService;
@@ -29,10 +30,13 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -48,6 +52,7 @@ public class SkuServiceImpl implements SkuService {
     private final SpecItemService specItemService;
     private final OssService ossService;
     private final RedisUtil redisUtil;
+    private final ProductCacheService productCacheService;
 
     @Override
     public Page<Sku> getSkuPage(Long spuId, Integer page, Integer limit) {
@@ -76,6 +81,70 @@ public class SkuServiceImpl implements SkuService {
         }
         sku.setStock(getStockById(id));
         return sku;
+    }
+
+    @Override
+    public Map<Long, Sku> getSkuMapByIds(Collection<Long> skuIds) {
+        if (skuIds == null || skuIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<Long> distinctIds = skuIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (distinctIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Sku> skus = productCacheService.getSkusByIds(distinctIds, this::loadSkusForCache);
+        Map<Long, Sku> result = new LinkedHashMap<>();
+        for (Sku sku : skus) {
+            if (sku != null && (sku.getDeleteTime() == null || sku.getDeleteTime() == 0L)) {
+                sku.setStock(null);
+                result.put(sku.getId(), sku);
+            }
+        }
+        fillStocks(result.values());
+        return result;
+    }
+
+    private List<Sku> loadSkusForCache(List<Long> skuIds) {
+        return skuMapper.selectBatchIds(skuIds).stream()
+                .filter(sku -> sku.getDeleteTime() == null || sku.getDeleteTime() == 0L)
+                .peek(sku -> sku.setStock(null))
+                .toList();
+    }
+
+    private void fillStocks(Collection<Sku> skus) {
+        if (skus == null || skus.isEmpty()) {
+            return;
+        }
+        List<Sku> skuList = new ArrayList<>(skus);
+        List<String> stockKeys = skuList.stream()
+                .map(sku -> RedisConstants.PREFIX_SKU_STOCK + sku.getId())
+                .toList();
+        List<Object> cachedStocks = redisUtil.multiGet(stockKeys);
+        List<Long> missingStockIds = new ArrayList<>();
+        for (int i = 0; i < skuList.size(); i++) {
+            Object cached = cachedStocks == null ? null : cachedStocks.get(i);
+            if (cached != null && !redisUtil.isNull(cached)) {
+                skuList.get(i).setStock(Integer.parseInt(cached.toString()));
+            } else {
+                missingStockIds.add(skuList.get(i).getId());
+            }
+        }
+        if (missingStockIds.isEmpty()) {
+            return;
+        }
+        Map<Long, Sku> stockRows = skuMapper.selectBatchIds(missingStockIds).stream()
+                .collect(Collectors.toMap(Sku::getId, sku -> sku));
+        for (Sku sku : skuList) {
+            Sku stockRow = stockRows.get(sku.getId());
+            if (stockRow != null && stockRow.getStock() != null) {
+                sku.setStock(stockRow.getStock());
+                redisUtil.set(RedisConstants.PREFIX_SKU_STOCK + sku.getId(), stockRow.getStock());
+            }
+        }
     }
 
     @Override

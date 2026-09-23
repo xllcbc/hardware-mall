@@ -90,7 +90,6 @@ import { getProductDetail } from '@/api/product'
 import { addToCart as addToCartApi } from '@/api/cart'
 import { useAppStore } from '@/stores/app'
 import { usePreOrderStore } from '@/stores/preOrder'
-import { useIsWholesaleUser } from '@/composables/useWholesaleUser'
 import CountStepper from '@/components/common/CountStepper.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import { requireLogin } from '@/utils/auth'
@@ -130,17 +129,12 @@ const currentSku = computed(() => {
   }) || null
 })
 
-const isWholesaleUser = useIsWholesaleUser()
-
 const showWholesalePrice = computed(() =>
-  !!(currentSku.value && isWholesaleUser.value && currentSku.value.wholesalePrice != null)
+  currentSku.value?.priceType === 2
 )
 
 const currentSkuPrice = computed(() => {
   const sku = currentSku.value
-  if (sku && isWholesaleUser.value && sku.wholesalePrice != null) {
-    return sku.wholesalePrice
-  }
   return sku?.price || product.value.originalPrice || 0
 })
 

@@ -39,8 +39,8 @@
             :price="product.price"
             :original-price="product.originalPrice"
             :min-price="product.minPrice"
-            :wholesale-min-price="isWholesaleUser ? (product.wholesaleMinPrice ?? undefined) : undefined"
-            :wholesale-max-price="isWholesaleUser ? (product.wholesaleMaxPrice ?? undefined) : undefined"
+            :max-price="product.maxPrice"
+            :price-type="product.priceType"
             @click="goProductDetail"
           />
         </view>
@@ -58,8 +58,8 @@
               <view class="list-item-bottom">
                 <view class="list-item-price">
                   <text class="price-symbol">¥</text>
-                  <text class="price-value">{{ (isWholesaleUser && product.wholesaleMinPrice != null) ? product.wholesaleMinPrice : (product.minPrice ?? product.price ?? product.originalPrice) }}</text>
-                  <text v-if="isWholesaleUser && product.wholesaleMinPrice != null" class="wholesale-tag">批发价</text>
+                  <text class="price-value">{{ product.minPrice ?? product.price ?? product.originalPrice }}</text>
+                  <text v-if="product.priceType === 2" class="wholesale-tag">批发价</text>
                   <text v-if="product.originalPrice" class="original-price">¥{{ product.originalPrice }}</text>
                 </view>
               </view>
@@ -82,10 +82,7 @@ import ProductCard from '@/components/common/ProductCard.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getProductList } from '@/api/product'
-import { useIsWholesaleUser } from '@/composables/useWholesaleUser'
 import type { Product } from '@/types'
-
-const isWholesaleUser = useIsWholesaleUser()
 
 const searchKeyword = ref('')
 const products = ref<Product[]>([])

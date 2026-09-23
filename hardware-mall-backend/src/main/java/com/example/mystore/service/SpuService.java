@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.ProductListVO;
 import com.example.mystore.entity.vo.ProductDetailVO;
+import com.example.mystore.entity.vo.ProductSkuVO;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -22,4 +23,5 @@ public interface SpuService {
     Page<ProductListVO> getProductListVO(Long categoryId, String keyword, Integer page, Integer limit, Integer status);
     List<ProductListVO> getRecommendProductListVO(Integer limit);
     ProductDetailVO getProductDetailVO(Long id);
+    List<ProductSkuVO> getProductSkuVOs(Long spuId);
 }

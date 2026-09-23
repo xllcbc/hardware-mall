@@ -18,7 +18,7 @@ class SkuServiceLogicTest {
 
     @Test
     void testComputeSpecHash_Consistency() throws Exception {
-        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null);
+        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null, null);
         Method method = SkuServiceImpl.class.getDeclaredMethod("computeSpecHash", List.class);
         method.setAccessible(true);
 
@@ -39,7 +39,7 @@ class SkuServiceLogicTest {
 
     @Test
     void testComputeSpecHash_DifferentSpecs() throws Exception {
-        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null);
+        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null, null);
         Method method = SkuServiceImpl.class.getDeclaredMethod("computeSpecHash", List.class);
         method.setAccessible(true);
 
@@ -67,7 +67,7 @@ class SkuServiceLogicTest {
 
     @Test
     void testNormalizeSpecKey_IgnoresNameAndValue() throws Exception {
-        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null);
+        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null, null);
         Method method = SkuServiceImpl.class.getDeclaredMethod("normalizeSpecKey", List.class);
         method.setAccessible(true);
 
@@ -82,7 +82,7 @@ class SkuServiceLogicTest {
 
     @Test
     void testNormalizeSpecKey_NullTemplateId() throws Exception {
-        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null);
+        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null, null);
         Method method = SkuServiceImpl.class.getDeclaredMethod("normalizeSpecKey", List.class);
         method.setAccessible(true);
 
@@ -98,7 +98,7 @@ class SkuServiceLogicTest {
 
     @Test
     void testNormalizeSpecKey_OrderInsensitive() throws Exception {
-        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null);
+        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null, null);
         Method method = SkuServiceImpl.class.getDeclaredMethod("normalizeSpecKey", List.class);
         method.setAccessible(true);
 
@@ -112,7 +112,7 @@ class SkuServiceLogicTest {
 
     @Test
     void testNormalizeSpecKey_DistinctCombos() throws Exception {
-        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null);
+        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null, null);
         Method method = SkuServiceImpl.class.getDeclaredMethod("normalizeSpecKey", List.class);
         method.setAccessible(true);
 
@@ -128,7 +128,7 @@ class SkuServiceLogicTest {
 
     @Test
     void testComputeSpecHash_Md5HexFormat() throws Exception {
-        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null);
+        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null, null);
         Method method = SkuServiceImpl.class.getDeclaredMethod("computeSpecHash", List.class);
         method.setAccessible(true);
 
@@ -140,7 +140,7 @@ class SkuServiceLogicTest {
 
     @Test
     void testCartesianProduct_2x2() throws Exception {
-        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null);
+        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null, null);
         Method method = SkuServiceImpl.class.getDeclaredMethod("cartesianProduct", List.class);
         method.setAccessible(true);
 
@@ -163,7 +163,7 @@ class SkuServiceLogicTest {
 
     @Test
     void testCartesianProduct_3x2() throws Exception {
-        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null);
+        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null, null);
         Method method = SkuServiceImpl.class.getDeclaredMethod("cartesianProduct", List.class);
         method.setAccessible(true);
 
@@ -180,7 +180,7 @@ class SkuServiceLogicTest {
 
     @Test
     void testCartesianProduct_Empty() throws Exception {
-        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null);
+        SkuServiceImpl service = new SkuServiceImpl(null, null, null, null, null, null, null, null, null);
         Method method = SkuServiceImpl.class.getDeclaredMethod("cartesianProduct", List.class);
         method.setAccessible(true);
 

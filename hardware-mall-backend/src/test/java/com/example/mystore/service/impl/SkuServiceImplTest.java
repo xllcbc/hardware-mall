@@ -7,6 +7,7 @@ import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
+import com.example.mystore.service.ProductCacheService;
 import com.example.mystore.util.RedisUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,9 @@ class SkuServiceImplTest {
 
     @Mock
     private RedisUtil redisUtil;
+
+    @Mock
+    private ProductCacheService productCacheService;
 
     @InjectMocks
     private SkuServiceImpl skuService;
@@ -89,6 +93,37 @@ class SkuServiceImplTest {
         assertThat(result.getPrice()).isEqualByComparingTo(new BigDecimal("199.00"));
         assertThat(result.getStock()).isEqualTo(80);
         verify(skuMapper, never()).selectById(any());
+    }
+
+    @Test
+    void getSkuMapByIds_loadsStockInBatchAndFiltersDeletedSku() {
+        Sku cached = new Sku();
+        cached.setId(1L);
+        cached.setSpuId(1L);
+        cached.setPrice(new BigDecimal("199.00"));
+        cached.setStatus(1);
+        cached.setDeleteTime(0L);
+
+        Sku deleted = new Sku();
+        deleted.setId(2L);
+        deleted.setDeleteTime(System.currentTimeMillis());
+
+        when(productCacheService.getSkusByIds(eq(List.of(1L, 2L)), any()))
+                .thenReturn(Arrays.asList(cached, deleted));
+        when(redisUtil.multiGet(List.of(
+                RedisConstants.PREFIX_SKU_STOCK + 1L)))
+                .thenReturn(Collections.singletonList(null));
+
+        Sku loadedFromDb = new Sku();
+        loadedFromDb.setId(1L);
+        loadedFromDb.setStock(55);
+        when(skuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(loadedFromDb));
+
+        Map<Long, Sku> result = skuService.getSkuMapByIds(List.of(1L, 2L));
+
+        assertThat(result).containsOnlyKeys(1L);
+        assertThat(result.get(1L).getStock()).isEqualTo(55);
+        verify(redisUtil).set(RedisConstants.PREFIX_SKU_STOCK + 1L, 55);
     }
 
     @Test

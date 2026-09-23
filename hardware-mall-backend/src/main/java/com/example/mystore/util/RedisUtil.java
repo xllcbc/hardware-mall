@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -65,6 +66,10 @@ public class RedisUtil {
 
     public Object get(String key) {
         return redisTemplate.opsForValue().get(key);
+    }
+
+    public List<Object> multiGet(Collection<String> keys) {
+        return redisTemplate.opsForValue().multiGet(keys);
     }
 
     @SuppressWarnings("unchecked")

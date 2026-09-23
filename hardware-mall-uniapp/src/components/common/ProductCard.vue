@@ -10,7 +10,7 @@
         <view class="price-wrap">
           <text class="price-symbol">¥</text>
           <text class="price-value">{{ displayPrice }}</text>
-          <text v-if="showWholesalePrice" class="wholesale-tag">批发价</text>
+          <text v-if="showWholesaleTag" class="wholesale-tag">批发价</text>
         </view>
       </view>
     </view>
@@ -29,8 +29,7 @@ interface Props {
   originalPrice?: number | string
   minPrice?: number | string
   maxPrice?: number | string
-  wholesaleMinPrice?: number | string
-  wholesaleMaxPrice?: number | string
+  priceType?: number
 }
 
 const props = defineProps<Props>()
@@ -44,17 +43,14 @@ const formatPrice = (price: number | string | undefined) => {
   return isNaN(num) ? '0.00' : num.toFixed(2)
 }
 
-const showWholesalePrice = computed(() => props.wholesaleMinPrice != null)
+const showWholesaleTag = computed(() => props.priceType === 2)
 
 const displayPrice = computed(() => {
-  if (props.wholesaleMinPrice != null) {
-    if (props.wholesaleMaxPrice != null && props.wholesaleMaxPrice !== props.wholesaleMinPrice) {
-      return formatPrice(props.wholesaleMinPrice) + '起'
+  if (props.minPrice != null) {
+    if (props.maxPrice != null && props.maxPrice !== props.minPrice) {
+      return formatPrice(props.minPrice) + '起'
     }
-    return formatPrice(props.wholesaleMinPrice)
-  }
-  if (props.minPrice != null && props.minPrice !== props.originalPrice) {
-    return formatPrice(props.minPrice) + '起'
+    return formatPrice(props.minPrice)
   }
   return formatPrice(props.price ?? props.originalPrice)
 })
