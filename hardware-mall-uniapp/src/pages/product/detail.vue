@@ -190,6 +190,10 @@ const isSpecAvailable = (templateId: number, itemId: number) => {
 }
 
 const selectSpec = (templateId: number, itemId: number, value: string) => {
+  if (selectedSpecs.value[templateId]?.itemId === itemId) {
+    delete selectedSpecs.value[templateId]
+    return
+  }
   if (!isSpecAvailable(templateId, itemId)) return
   selectedSpecs.value[templateId] = { itemId, value }
 }
