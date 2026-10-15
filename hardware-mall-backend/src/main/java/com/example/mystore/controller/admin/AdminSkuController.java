@@ -3,8 +3,11 @@ package com.example.mystore.controller.admin;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.result.Result;
 import com.example.mystore.entity.db.Sku;
+import com.example.mystore.entity.dto.SaveSkuConfigRequest;
+import com.example.mystore.entity.vo.SkuConfigVO;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.annotation.RequireAdmin;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -64,5 +67,17 @@ public class AdminSkuController {
     @PostMapping("/generate/{spuId}")
     public Result<List<Sku>> generateSkus(@PathVariable Long spuId) {
         return Result.success(skuService.previewSkusByTemplate(spuId));
+    }
+
+    @GetMapping("/config/{spuId}")
+    public Result<SkuConfigVO> getSkuConfig(@PathVariable Long spuId) {
+        return Result.success(skuService.getSkuConfig(spuId));
+    }
+
+    @PutMapping("/config/{spuId}")
+    public Result<SkuConfigVO> saveSkuConfig(
+            @PathVariable Long spuId,
+            @Valid @RequestBody SaveSkuConfigRequest request) {
+        return Result.success(skuService.saveSkuConfig(spuId, request));
     }
 }
