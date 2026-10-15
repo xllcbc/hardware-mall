@@ -3,10 +3,20 @@ package com.example.mystore.service.impl;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Sku;
+import com.example.mystore.entity.db.SpecItem;
+import com.example.mystore.entity.db.SpecTemplate;
 import com.example.mystore.entity.db.Spu;
+import com.example.mystore.entity.dto.SaveSkuConfigRequest;
+import com.example.mystore.entity.dto.SaveSkuRowRequest;
+import com.example.mystore.entity.vo.SkuConfigVO;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.mapper.SkuMapper;
+import com.example.mystore.mapper.SpecItemMapper;
+import com.example.mystore.mapper.SpecTemplateMapper;
 import com.example.mystore.mapper.SpuMapper;
+import com.example.mystore.service.OssService;
+import com.example.mystore.service.SpecItemService;
+import com.example.mystore.service.SpecTemplateService;
 import com.example.mystore.util.RedisUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +30,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,6 +45,21 @@ class SkuServiceImplTest {
 
     @Mock
     private SpuMapper spuMapper;
+
+    @Mock
+    private SpecTemplateMapper specTemplateMapper;
+
+    @Mock
+    private SpecItemMapper specItemMapper;
+
+    @Mock
+    private SpecTemplateService specTemplateService;
+
+    @Mock
+    private SpecItemService specItemService;
+
+    @Mock
+    private OssService ossService;
 
     @Mock
     private RedisUtil redisUtil;
@@ -490,5 +516,228 @@ class SkuServiceImplTest {
         // M4: 删除 SKU 清库存缓存 + 失效列表缓存
         verify(redisUtil).delete(RedisConstants.PREFIX_SKU_STOCK + 1L);
         verify(redisUtil).deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+    }
+
+    @Test
+    void testGetSkuConfig_MergesArchivedOptionsReferencedByLiveSkus() {
+        Spu spu = configSpu();
+        SpecTemplate liveTemplate = specTemplate(1L, 1L, "颜色");
+        SpecItem liveItem = specItem(1L, 1L, "黑色");
+        when(spuMapper.selectById(1L)).thenReturn(spu);
+        when(specTemplateService.getTemplatesByCategory(1L)).thenReturn(Collections.singletonList(liveTemplate));
+        when(specItemService.getItemsByTemplate(1L)).thenReturn(Collections.singletonList(liveItem));
+        when(skuMapper.selectList(any())).thenReturn(Collections.singletonList(sku1));
+
+        SkuConfigVO result = skuService.getSkuConfig(1L);
+
+        assertThat(result.getTemplates()).hasSize(2);
+        assertThat(result.getTemplates().get(0).getTemplateId()).isEqualTo(1L);
+        assertThat(result.getTemplates().get(0).getItems()).hasSize(1);
+        assertThat(result.getTemplates().get(0).getItems().get(0).getArchived()).isFalse();
+        assertThat(result.getTemplates().get(1).getTemplateId()).isEqualTo(2L);
+        assertThat(result.getTemplates().get(1).getArchived()).isTrue();
+        assertThat(result.getTemplates().get(1).getItems().get(0).getItemId()).isEqualTo(4L);
+        assertThat(result.getTemplates().get(1).getItems().get(0).getArchived()).isTrue();
+    }
+
+    @Test
+    void testSaveSkuConfig_UpdatesCreatesDeletesAndInvalidatesCaches() {
+        Spu spu = configSpu();
+        SpecTemplate template = specTemplate(1L, 1L, "颜色");
+        SpecItem existingItem = specItem(1L, 1L, "黑色");
+        SpecItem newItem = specItem(1L, 3L, "金色");
+        Sku existing = configSku(1L, spec(1L, 1L), "10.00", 2);
+        Sku removed = configSku(2L, spec(1L, 2L), "20.00", 3);
+        Sku[] inserted = new Sku[1];
+        AtomicInteger selectCount = new AtomicInteger();
+
+        when(spuMapper.selectById(1L)).thenReturn(spu);
+        when(specTemplateMapper.selectById(1L)).thenReturn(template);
+        when(specItemMapper.selectById(1L)).thenReturn(existingItem);
+        when(specItemMapper.selectById(3L)).thenReturn(newItem);
+        when(skuMapper.selectList(any())).thenAnswer(inv ->
+                selectCount.getAndIncrement() == 0
+                        ? Arrays.asList(existing, removed)
+                        : Arrays.asList(existing, inserted[0]));
+        when(skuMapper.selectById(1L)).thenReturn(existing);
+        when(skuMapper.insert(any(Sku.class))).thenAnswer(inv -> {
+            Sku insertedSku = inv.getArgument(0);
+            insertedSku.setId(3L);
+            inserted[0] = insertedSku;
+            return 1;
+        });
+        when(skuMapper.selectById(3L)).thenAnswer(inv -> inserted[0]);
+        when(specTemplateService.getTemplatesByCategory(1L)).thenReturn(Collections.singletonList(template));
+        when(specItemService.getItemsByTemplate(1L)).thenReturn(Collections.emptyList());
+
+        SaveSkuConfigRequest request = new SaveSkuConfigRequest();
+        request.setSkus(Arrays.asList(
+                saveRow(1L, spec(1L, 1L), "25.00", 6),
+                saveRow(null, spec(1L, 3L), "30.00", 7)
+        ));
+
+        SkuConfigVO result = skuService.saveSkuConfig(1L, request);
+
+        assertThat(result.getSkus()).hasSize(2);
+        assertThat(existing.getPrice()).isEqualByComparingTo("25.00");
+        assertThat(removed.getDeleteTime()).isGreaterThan(0L);
+        assertThat(inserted[0]).isNotNull();
+        assertThat(inserted[0].getSpecHash()).hasSize(32);
+        verify(skuMapper).insert(org.mockito.Mockito.<Sku>argThat(sku ->
+                Long.valueOf(3L).equals(sku.getId()) && sku.getStock() == 7));
+        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku ->
+                Long.valueOf(2L).equals(sku.getId()) && sku.getDeleteTime() > 0));
+        verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
+        verify(redisUtil).deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        verify(redisUtil).delete(RedisConstants.PREFIX_SKU_STOCK + 2L);
+    }
+
+    @Test
+    void testSaveSkuConfig_EmptyRequest_SoftDeletesAllLiveSkus() {
+        Spu spu = configSpu();
+        Sku existing = configSku(1L, spec(1L, 1L), "10.00", 2);
+        when(spuMapper.selectById(1L)).thenReturn(spu);
+        when(skuMapper.selectList(any())).thenReturn(
+                Collections.singletonList(existing),
+                Collections.emptyList());
+        when(specTemplateService.getTemplatesByCategory(1L)).thenReturn(Collections.emptyList());
+
+        SaveSkuConfigRequest request = new SaveSkuConfigRequest();
+        request.setSkus(Collections.emptyList());
+        SkuConfigVO result = skuService.saveSkuConfig(1L, request);
+
+        assertThat(result.getSkus()).isEmpty();
+        assertThat(existing.getDeleteTime()).isGreaterThan(0L);
+        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku ->
+                Long.valueOf(1L).equals(sku.getId()) && sku.getDeleteTime() > 0));
+    }
+
+    @Test
+    void testSaveSkuConfig_DuplicateCombination_Throws() {
+        when(spuMapper.selectById(1L)).thenReturn(configSpu());
+        when(skuMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        SaveSkuConfigRequest request = new SaveSkuConfigRequest();
+        request.setSkus(Arrays.asList(
+                saveRow(null, legacySpec(), "10.00", 1),
+                saveRow(null, legacySpec(), "11.00", 1)
+        ));
+
+        assertThatThrownBy(() -> skuService.saveSkuConfig(1L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("重复");
+    }
+
+    @Test
+    void testSaveSkuConfig_TemplateOutsideCategory_Throws() {
+        Spu spu = configSpu();
+        SpecTemplate otherCategoryTemplate = specTemplate(1L, 2L, "颜色");
+        when(spuMapper.selectById(1L)).thenReturn(spu);
+        when(skuMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(specTemplateMapper.selectById(1L)).thenReturn(otherCategoryTemplate);
+
+        SaveSkuConfigRequest request = new SaveSkuConfigRequest();
+        request.setSkus(Collections.singletonList(saveRow(null, spec(1L, 1L), "10.00", 1)));
+
+        assertThatThrownBy(() -> skuService.saveSkuConfig(1L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("分类");
+    }
+
+    @Test
+    void testSaveSkuConfig_MatchesTombstone_ReusesSkuId() {
+        Spu spu = configSpu();
+        SpecTemplate template = specTemplate(1L, 1L, "颜色");
+        SpecItem item = specItem(1L, 1L, "黑色");
+        Sku deleted = tombstone(9L, 1725000000000L, "auto_c1_i1");
+        when(spuMapper.selectById(1L)).thenReturn(spu);
+        when(skuMapper.selectList(any())).thenReturn(
+                Collections.singletonList(deleted),
+                Collections.singletonList(deleted));
+        when(skuMapper.selectById(9L)).thenReturn(deleted);
+        when(specTemplateMapper.selectById(1L)).thenReturn(template);
+        when(specItemMapper.selectById(1L)).thenReturn(item);
+        when(specTemplateService.getTemplatesByCategory(1L)).thenReturn(Collections.emptyList());
+
+        SaveSkuConfigRequest request = new SaveSkuConfigRequest();
+        request.setSkus(Collections.singletonList(saveRow(null, spec(1L, 1L), "66.00", 9)));
+
+        SkuConfigVO result = skuService.saveSkuConfig(1L, request);
+
+        assertThat(result.getSkus()).hasSize(1);
+        verify(skuMapper, never()).insert(any(Sku.class));
+        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku ->
+                Long.valueOf(9L).equals(sku.getId())
+                        && Long.valueOf(0L).equals(sku.getDeleteTime())
+                        && sku.getStock() == 9));
+    }
+
+    private Spu configSpu() {
+        Spu spu = new Spu();
+        spu.setId(1L);
+        spu.setCategoryId(1L);
+        spu.setName("测试商品");
+        spu.setDeleteTime(0L);
+        return spu;
+    }
+
+    private SpecVO spec(Long templateId, Long itemId) {
+        SpecVO spec = new SpecVO();
+        spec.setTemplateId(templateId);
+        spec.setItemId(itemId);
+        spec.setName("规格" + templateId);
+        spec.setValue("值" + itemId);
+        return spec;
+    }
+
+    private SpecVO legacySpec() {
+        SpecVO spec = new SpecVO();
+        spec.setName("颜色");
+        spec.setValue("默认");
+        return spec;
+    }
+
+    private Sku configSku(Long id, SpecVO spec, String price, int stock) {
+        Sku sku = new Sku();
+        sku.setId(id);
+        sku.setSpuId(1L);
+        sku.setSpecs(Collections.singletonList(spec));
+        sku.setPrice(new BigDecimal(price));
+        sku.setStock(stock);
+        sku.setStatus(1);
+        sku.setDeleteTime(0L);
+        return sku;
+    }
+
+    private SaveSkuRowRequest saveRow(Long id, SpecVO spec, String price, int stock) {
+        SaveSkuRowRequest row = new SaveSkuRowRequest();
+        row.setId(id);
+        row.setSpecs(Collections.singletonList(spec));
+        row.setPrice(new BigDecimal(price));
+        row.setStock(stock);
+        row.setStatus(1);
+        return row;
+    }
+
+    private SpecTemplate specTemplate(Long id, Long categoryId, String name) {
+        SpecTemplate template = new SpecTemplate();
+        template.setId(id);
+        template.setCategoryId(categoryId);
+        template.setName(name);
+        template.setSpecType(1);
+        template.setIsRequired(1);
+        template.setSortOrder(0);
+        template.setDeleteTime(0L);
+        return template;
+    }
+
+    private SpecItem specItem(Long templateId, Long id, String value) {
+        SpecItem item = new SpecItem();
+        item.setId(id);
+        item.setTemplateId(templateId);
+        item.setValue(value);
+        item.setSortOrder(0);
+        item.setDeleteTime(0L);
+        return item;
     }
 }

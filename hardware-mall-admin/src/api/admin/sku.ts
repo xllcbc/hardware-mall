@@ -20,6 +20,44 @@ export interface SpecVO {
   value: string
 }
 
+export interface SkuConfigItem {
+  itemId: number
+  value: string
+  sortOrder?: number
+  archived?: boolean
+}
+
+export interface SkuConfigTemplate {
+  templateId: number
+  name: string
+  specType?: number
+  isRequired?: number
+  sortOrder?: number
+  archived?: boolean
+  items: SkuConfigItem[]
+}
+
+export interface SkuConfig {
+  spuId: number
+  categoryId: number
+  spuName: string
+  templates: SkuConfigTemplate[]
+  skus: Sku[]
+}
+
+export interface SaveSkuConfigRow {
+  id?: number
+  specs: SpecVO[]
+  price: number
+  stock: number
+  image?: string
+  status?: number
+}
+
+export interface SaveSkuConfigRequest {
+  skus: SaveSkuConfigRow[]
+}
+
 export const getSkuList = (spuId: number, params?: any) => {
   return request.get<any>('/admin/sku/list', { params: { spuId, ...params } })
 }
@@ -52,4 +90,12 @@ export const deleteSku = (id: number) => {
 
 export const generateSkus = (spuId: number) => {
   return request.post<Sku[]>(`/admin/sku/generate/${spuId}`)
+}
+
+export const getSkuConfig = (spuId: number) => {
+  return request.get<SkuConfig>(`/admin/sku/config/${spuId}`)
+}
+
+export const saveSkuConfig = (spuId: number, data: SaveSkuConfigRequest) => {
+  return request.put<SkuConfig>(`/admin/sku/config/${spuId}`, data)
 }

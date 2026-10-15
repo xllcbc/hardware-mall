@@ -2,6 +2,8 @@ package com.example.mystore.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.entity.db.Sku;
+import com.example.mystore.entity.dto.SaveSkuConfigRequest;
+import com.example.mystore.entity.vo.SkuConfigVO;
 import com.example.mystore.entity.vo.SpecVO;
 import java.util.List;
 import java.util.Map;
@@ -22,4 +24,6 @@ public interface SkuService {
     void restoreStock(Long skuId, Integer quantity);
     List<Sku> previewSkusByTemplate(Long spuId);
     boolean syncStockToCache(Long skuId);
+    SkuConfigVO getSkuConfig(Long spuId);
+    SkuConfigVO saveSkuConfig(Long spuId, SaveSkuConfigRequest request);
 }

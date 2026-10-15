@@ -8,6 +8,11 @@ import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.db.SpecItem;
 import com.example.mystore.entity.db.SpecTemplate;
+import com.example.mystore.entity.dto.SaveSkuConfigRequest;
+import com.example.mystore.entity.dto.SaveSkuRowRequest;
+import com.example.mystore.entity.vo.SkuConfigItemVO;
+import com.example.mystore.entity.vo.SkuConfigTemplateVO;
+import com.example.mystore.entity.vo.SkuConfigVO;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpecItemMapper;
@@ -31,8 +36,11 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -331,6 +339,109 @@ public class SkuServiceImpl implements SkuService {
         }
     }
 
+    @Override
+    public SkuConfigVO getSkuConfig(Long spuId) {
+        Spu spu = requireSpu(spuId);
+        List<Sku> skus = getSkusBySpu(spuId, null);
+        List<SkuConfigTemplateVO> templates = buildSkuConfigTemplates(spu, skus);
+
+        SkuConfigVO result = new SkuConfigVO();
+        result.setSpuId(spu.getId());
+        result.setCategoryId(spu.getCategoryId());
+        result.setSpuName(spu.getName());
+        result.setTemplates(templates);
+        result.setSkus(skus);
+        return result;
+    }
+
+    @Override
+    @Transactional
+    public SkuConfigVO saveSkuConfig(Long spuId, SaveSkuConfigRequest request) {
+        Spu spu = requireSpu(spuId);
+        if (request == null || request.getSkus() == null) {
+            throw new BusinessException("SKU 配置不能为空");
+        }
+
+        List<Sku> allRows = skuMapper.selectList(new LambdaQueryWrapper<Sku>()
+                .eq(Sku::getSpuId, spuId));
+        Map<Long, Sku> rowsById = new HashMap<>();
+        Map<String, Sku> liveByKey = new HashMap<>();
+        Map<String, Sku> latestTombstoneByKey = new HashMap<>();
+        Set<Long> usedTemplateIds = new HashSet<>();
+        for (Sku row : allRows) {
+            rowsById.put(row.getId(), row);
+            String key = normalizeSpecKey(row.getSpecs());
+            if (row.getSpecs() != null) {
+                for (SpecVO spec : row.getSpecs()) {
+                    if (spec != null && spec.getTemplateId() != null) {
+                        usedTemplateIds.add(spec.getTemplateId());
+                    }
+                }
+            }
+            if (isLive(row)) {
+                liveByKey.putIfAbsent(key, row);
+            } else {
+                Sku current = latestTombstoneByKey.get(key);
+                if (current == null || safeDeleteTime(row) > safeDeleteTime(current)) {
+                    latestTombstoneByKey.put(key, row);
+                }
+            }
+        }
+
+        Set<String> requestedKeys = new HashSet<>();
+        List<Sku> changedSkus = new ArrayList<>();
+        boolean hasLegacyDefault = false;
+        LocalDateTime now = LocalDateTime.now();
+
+        for (SaveSkuRowRequest row : request.getSkus()) {
+            validateSkuConfigRow(row);
+            String key = normalizeSpecKey(row.getSpecs());
+            if (!requestedKeys.add(key)) {
+                throw new BusinessException("存在重复的规格组合");
+            }
+
+            if (isLegacySpecs(row.getSpecs())) {
+                if (hasLegacyDefault) {
+                    throw new BusinessException("默认规格 SKU 只能保留一条");
+                }
+                hasLegacyDefault = true;
+            } else {
+                validateStandardSpecs(spu, row.getSpecs(), usedTemplateIds);
+            }
+
+            Sku target = resolveConfigTarget(row, spuId, key, rowsById, liveByKey, latestTombstoneByKey);
+            if (target == null) {
+                target = new Sku();
+                target.setSpuId(spuId);
+                target.setCreateTime(now);
+                target.setDeleteTime(0L);
+                applySkuConfigRow(target, row, now, true);
+                skuMapper.insert(target);
+            } else {
+                applySkuConfigRow(target, row, now, false);
+                skuMapper.updateById(target);
+            }
+            changedSkus.add(target);
+        }
+
+        List<Sku> deletedSkus = new ArrayList<>();
+        long deleteTime = System.currentTimeMillis();
+        for (Sku sku : allRows) {
+            if (!isLive(sku)) {
+                continue;
+            }
+            if (!requestedKeys.contains(normalizeSpecKey(sku.getSpecs()))) {
+                sku.setDeleteTime(deleteTime);
+                sku.setUpdateTime(now);
+                skuMapper.updateById(sku);
+                deletedSkus.add(sku);
+            }
+        }
+
+        invalidateSkuConfigCaches(spuId, changedSkus, deletedSkus);
+        return getSkuConfig(spuId);
+    }
+
     // 已删除 deductStockFromCache / restoreStockToCache
     // 库存缓存改为事务提交后由 OrderServiceImpl 统一调用 syncStockToCache() 同步
 
@@ -341,6 +452,206 @@ public class SkuServiceImpl implements SkuService {
             }
         }
         return "";
+    }
+
+    private Spu requireSpu(Long spuId) {
+        Spu spu = spuMapper.selectById(spuId);
+        if (spu == null || !isLive(spu)) {
+            throw new BusinessException("商品不存在");
+        }
+        return spu;
+    }
+
+    private boolean isLive(Spu spu) {
+        return spu.getDeleteTime() == null || spu.getDeleteTime() == 0L;
+    }
+
+    private List<SkuConfigTemplateVO> buildSkuConfigTemplates(Spu spu, List<Sku> skus) {
+        Map<Long, SkuConfigTemplateVO> templateMap = new LinkedHashMap<>();
+        Map<Long, Set<Long>> itemIdsByTemplate = new HashMap<>();
+
+        for (SpecTemplate template : specTemplateService.getTemplatesByCategory(spu.getCategoryId())) {
+            SkuConfigTemplateVO vo = new SkuConfigTemplateVO();
+            vo.setTemplateId(template.getId());
+            vo.setName(template.getName());
+            vo.setSpecType(template.getSpecType());
+            vo.setIsRequired(template.getIsRequired());
+            vo.setSortOrder(template.getSortOrder());
+            vo.setArchived(false);
+            vo.setItems(new ArrayList<>());
+
+            Set<Long> itemIds = new HashSet<>();
+            for (SpecItem item : specItemService.getItemsByTemplate(template.getId())) {
+                SkuConfigItemVO itemVO = new SkuConfigItemVO();
+                itemVO.setItemId(item.getId());
+                itemVO.setValue(item.getValue());
+                itemVO.setSortOrder(item.getSortOrder());
+                itemVO.setArchived(false);
+                vo.getItems().add(itemVO);
+                itemIds.add(item.getId());
+            }
+            itemIdsByTemplate.put(template.getId(), itemIds);
+            templateMap.put(template.getId(), vo);
+        }
+
+        for (Sku sku : skus) {
+            if (sku.getSpecs() == null) {
+                continue;
+            }
+            for (SpecVO spec : sku.getSpecs()) {
+                if (spec == null || spec.getTemplateId() == null || spec.getItemId() == null) {
+                    continue;
+                }
+                SkuConfigTemplateVO templateVO = templateMap.get(spec.getTemplateId());
+                if (templateVO == null) {
+                    templateVO = new SkuConfigTemplateVO();
+                    templateVO.setTemplateId(spec.getTemplateId());
+                    templateVO.setName(spec.getName());
+                    templateVO.setSpecType(1);
+                    templateVO.setIsRequired(0);
+                    templateVO.setSortOrder(Integer.MAX_VALUE);
+                    templateVO.setArchived(true);
+                    templateVO.setItems(new ArrayList<>());
+                    templateMap.put(spec.getTemplateId(), templateVO);
+                    itemIdsByTemplate.put(spec.getTemplateId(), new HashSet<>());
+                }
+
+                Set<Long> itemIds = itemIdsByTemplate.get(spec.getTemplateId());
+                if (itemIds.add(spec.getItemId())) {
+                    SkuConfigItemVO itemVO = new SkuConfigItemVO();
+                    itemVO.setItemId(spec.getItemId());
+                    itemVO.setValue(spec.getValue());
+                    itemVO.setSortOrder(Integer.MAX_VALUE);
+                    itemVO.setArchived(true);
+                    templateVO.getItems().add(itemVO);
+                } else if (templateVO.getItems() != null) {
+                    for (SkuConfigItemVO itemVO : templateVO.getItems()) {
+                        if (spec.getItemId().equals(itemVO.getItemId()) && Boolean.TRUE.equals(itemVO.getArchived())) {
+                            itemVO.setValue(spec.getValue());
+                        }
+                    }
+                }
+            }
+        }
+
+        return new ArrayList<>(templateMap.values());
+    }
+
+    private void validateSkuConfigRow(SaveSkuRowRequest row) {
+        if (row == null) {
+            throw new BusinessException("SKU 配置行不能为空");
+        }
+        if (row.getSpecs() == null || row.getSpecs().isEmpty()) {
+            throw new BusinessException("规格组合不能为空");
+        }
+        if (row.getPrice() == null || row.getPrice().compareTo(BigDecimal.ZERO) < 0) {
+            throw new BusinessException("SKU 价格不能小于 0");
+        }
+        if (row.getStock() == null || row.getStock() < 0) {
+            throw new BusinessException("SKU 库存不能小于 0");
+        }
+        if (row.getStatus() != null && row.getStatus() != 0 && row.getStatus() != 1) {
+            throw new BusinessException("SKU 状态不正确");
+        }
+    }
+
+    private boolean isLegacySpecs(List<SpecVO> specs) {
+        if (specs == null || specs.isEmpty()) {
+            return false;
+        }
+        boolean hasLegacy = false;
+        for (SpecVO spec : specs) {
+            if (spec == null || spec.getTemplateId() == null || spec.getItemId() == null) {
+                hasLegacy = true;
+            }
+        }
+        if (hasLegacy) {
+            for (SpecVO spec : specs) {
+                if (spec != null && spec.getTemplateId() != null && spec.getItemId() != null) {
+                    throw new BusinessException("默认规格不能与其他规格组合混用");
+                }
+            }
+        }
+        return hasLegacy;
+    }
+
+    private void validateStandardSpecs(Spu spu, List<SpecVO> specs, Set<Long> usedTemplateIds) {
+        Set<Long> templateIds = new HashSet<>();
+        for (SpecVO spec : specs) {
+            if (spec == null || spec.getTemplateId() == null || spec.getItemId() == null) {
+                throw new BusinessException("规格组合信息不完整");
+            }
+            if (!templateIds.add(spec.getTemplateId())) {
+                throw new BusinessException("同一规格维度只能选择一个规格值");
+            }
+
+            SpecTemplate template = specTemplateMapper.selectById(spec.getTemplateId());
+            boolean isCurrentCategoryTemplate = template != null && spu.getCategoryId().equals(template.getCategoryId());
+            if (!isCurrentCategoryTemplate && !usedTemplateIds.contains(spec.getTemplateId())) {
+                throw new BusinessException("规格不属于当前商品分类");
+            }
+
+            SpecItem item = specItemMapper.selectById(spec.getItemId());
+            if (item == null || !spec.getTemplateId().equals(item.getTemplateId())) {
+                throw new BusinessException("规格值不属于所选规格维度");
+            }
+        }
+    }
+
+    private Sku resolveConfigTarget(
+            SaveSkuRowRequest row,
+            Long spuId,
+            String key,
+            Map<Long, Sku> rowsById,
+            Map<String, Sku> liveByKey,
+            Map<String, Sku> latestTombstoneByKey) {
+        if (row.getId() != null) {
+            Sku existing = rowsById.get(row.getId());
+            if (existing == null || !spuId.equals(existing.getSpuId())) {
+                throw new BusinessException("SKU 不存在");
+            }
+            if (!normalizeSpecKey(existing.getSpecs()).equals(key)) {
+                throw new BusinessException("SKU 规格与配置不匹配，请重新生成组合");
+            }
+            return existing;
+        }
+        Sku live = liveByKey.get(key);
+        return live != null ? live : latestTombstoneByKey.get(key);
+    }
+
+    private void applySkuConfigRow(Sku target, SaveSkuRowRequest row, LocalDateTime now, boolean creating) {
+        target.setSpecs(row.getSpecs());
+        target.setSpecHash(computeSpecHash(row.getSpecs()));
+        target.setPrice(row.getPrice());
+        target.setStock(row.getStock());
+        if (row.getImage() != null) {
+            target.setImage(row.getImage());
+        }
+        if (row.getStatus() != null) {
+            target.setStatus(row.getStatus());
+        } else if (creating) {
+            target.setStatus(1);
+        }
+        target.setDeleteTime(0L);
+        target.setUpdateTime(now);
+    }
+
+    private void invalidateSkuConfigCaches(Long spuId, List<Sku> changedSkus, List<Sku> deletedSkus) {
+        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + spuId);
+        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+
+        for (Sku sku : changedSkus) {
+            redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + sku.getId());
+            syncStockToCache(sku.getId());
+        }
+        for (Sku sku : deletedSkus) {
+            redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + sku.getId());
+            redisUtil.delete(RedisConstants.PREFIX_SKU_STOCK + sku.getId());
+        }
+    }
+
+    private long safeDeleteTime(Sku sku) {
+        return sku.getDeleteTime() == null ? 0L : sku.getDeleteTime();
     }
 
     private String computeSpecHash(List<SpecVO> specs) {
