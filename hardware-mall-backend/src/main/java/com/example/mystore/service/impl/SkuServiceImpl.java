@@ -10,6 +10,7 @@ import com.example.mystore.entity.db.SpecItem;
 import com.example.mystore.entity.db.SpecTemplate;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
+import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpecItemMapper;
 import com.example.mystore.mapper.SpecTemplateMapper;
@@ -39,6 +40,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -145,11 +147,30 @@ public class SkuServiceImpl implements SkuService {
     @Override
     public Integer getStockById(Long skuId) {
         Object cached = redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + skuId);
-        if (cached != null && !redisUtil.isNull(cached)) {
+        if (cached != null) {
+            if (redisUtil.isNull(cached)) {
+                return null;
+            }
             return Integer.parseInt(cached.toString());
         }
         Sku sku = skuMapper.selectById(skuId);
-        return sku == null ? null : sku.getStock();
+        if (sku == null || sku.getStock() == null) {
+            redisUtil.set(RedisConstants.PREFIX_SKU_STOCK + skuId,
+                    RedisConstants.CACHE_NULL,
+                    RedisConstants.CACHE_NULL_TTL,
+                    TimeUnit.SECONDS);
+            return null;
+        }
+        redisUtil.set(RedisConstants.PREFIX_SKU_STOCK + skuId,
+                sku.getStock(),
+                RedisConstants.SKU_STOCK_TTL_SECONDS,
+                TimeUnit.SECONDS);
+        return sku.getStock();
+    }
+
+    @Override
+    public void evictStockCache(Long skuId) {
+        redisUtil.delete(RedisConstants.PREFIX_SKU_STOCK + skuId);
     }
 
     @Override
@@ -250,8 +271,8 @@ public class SkuServiceImpl implements SkuService {
         }
         validateWholesalePrice(sku.getPrice(), sku.getWholesalePrice());
         skuMapper.insert(sku);
-        syncStockToCache(sku.getId());
         publishSkuChanged(sku.getSpuId(), sku.getId());
+        publishStockEvict(sku.getId());
         return sku;
     }
 
@@ -292,8 +313,10 @@ public class SkuServiceImpl implements SkuService {
         }
         exist.setUpdateTime(LocalDateTime.now());
         skuMapper.updateById(exist);
-        syncStockToCache(exist.getId());
         publishSkuChanged(exist.getSpuId(), exist.getId());
+        if (sku.getStock() != null) {
+            publishStockEvict(exist.getId());
+        }
         return exist;
     }
 
@@ -310,11 +333,7 @@ public class SkuServiceImpl implements SkuService {
             ossService.deleteFile(sku.getImage());
         }
         publishSkuChanged(spuId, id);
-        eventPublisher.publishEvent(new ProductCacheInvalidationEvent(
-                ProductCacheInvalidationEvent.Type.STOCK_CHANGED,
-                spuId,
-                id,
-                false));
+        publishStockEvict(id);
     }
 
     @Override
@@ -388,7 +407,10 @@ public class SkuServiceImpl implements SkuService {
         try {
             Sku sku = skuMapper.selectById(skuId);
             if (sku != null && sku.getStock() != null) {
-                redisUtil.set(RedisConstants.PREFIX_SKU_STOCK + skuId, sku.getStock());
+                redisUtil.set(RedisConstants.PREFIX_SKU_STOCK + skuId,
+                        sku.getStock(),
+                        RedisConstants.SKU_STOCK_TTL_SECONDS,
+                        TimeUnit.SECONDS);
                 return true;
             }
             return false;
@@ -490,8 +512,8 @@ public class SkuServiceImpl implements SkuService {
         tombstone.setDeleteTime(0L);
         tombstone.setUpdateTime(LocalDateTime.now());
         skuMapper.updateById(tombstone);
-        syncStockToCache(tombstone.getId());
         publishSkuChanged(tombstone.getSpuId(), tombstone.getId());
+        publishStockEvict(tombstone.getId());
         return tombstone;
     }
 
@@ -501,6 +523,10 @@ public class SkuServiceImpl implements SkuService {
                 spuId,
                 skuId,
                 false));
+    }
+
+    private void publishStockEvict(Long skuId) {
+        eventPublisher.publishEvent(new StockCacheEvent(List.of(skuId)));
     }
 
     private void freeDeletedSlot(Sku tombstone) {

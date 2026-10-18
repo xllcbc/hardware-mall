@@ -22,7 +22,6 @@ public class ProductCacheInvalidationListener {
         try {
             switch (event.type()) {
                 case SKU_CHANGED -> productCacheService.invalidateAfterSkuChange(event.spuId(), event.skuId());
-                case STOCK_CHANGED -> productCacheService.invalidateAfterStockChange(event.skuId());
                 case SPU_CHANGED -> productCacheService.invalidateAfterSpuChange(
                         event.spuId(), event.recommendChanged());
             }

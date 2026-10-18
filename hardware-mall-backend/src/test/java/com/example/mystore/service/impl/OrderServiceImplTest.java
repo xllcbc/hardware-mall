@@ -17,7 +17,7 @@ import com.example.mystore.service.PayService;
 import com.example.mystore.service.PriceService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.WechatOrderShippingService;
-import com.example.mystore.event.StockSyncEvent;
+import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.UserContext;
@@ -914,7 +914,7 @@ class OrderServiceImplTest {
 
         // 库存恢复已迁到退款回调(6→7 确认成功后), refundOrder 不再还库存不发事件
         verify(skuService, never()).restoreStock(any(), any());
-        verify(applicationEventPublisher, never()).publishEvent(any(StockSyncEvent.class));
+        verify(applicationEventPublisher, never()).publishEvent(any(StockCacheEvent.class));
     }
 
     @Test

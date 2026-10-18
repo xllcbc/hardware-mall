@@ -37,17 +37,6 @@ class ProductCacheInvalidationListenerTest {
     }
 
     @Test
-    void stockChanged_invalidatesOnlyStockCache() {
-        listener.onProductCacheInvalidation(new ProductCacheInvalidationEvent(
-                ProductCacheInvalidationEvent.Type.STOCK_CHANGED,
-                11L,
-                22L,
-                false));
-
-        verify(productCacheService).invalidateAfterStockChange(22L);
-    }
-
-    @Test
     void spuChanged_invalidatesRecommendWhenAffected() {
         listener.onProductCacheInvalidation(new ProductCacheInvalidationEvent(
                 ProductCacheInvalidationEvent.Type.SPU_CHANGED,
@@ -73,10 +62,10 @@ class ProductCacheInvalidationListenerTest {
     void redisFailure_doesNotFailCommittedRequest() {
         doThrow(new RuntimeException("redis unavailable"))
                 .when(productCacheService)
-                .invalidateAfterStockChange(22L);
+                .invalidateAfterSkuChange(11L, 22L);
 
         assertThatCode(() -> listener.onProductCacheInvalidation(new ProductCacheInvalidationEvent(
-                ProductCacheInvalidationEvent.Type.STOCK_CHANGED,
+                ProductCacheInvalidationEvent.Type.SKU_CHANGED,
                 11L,
                 22L,
                 false)))

@@ -66,11 +66,6 @@ public class ProductCacheServiceImpl implements ProductCacheService {
     }
 
     @Override
-    public void invalidateAfterStockChange(Long skuId) {
-        redisUtil.delete(RedisConstants.PREFIX_SKU_STOCK + skuId);
-    }
-
-    @Override
     public void invalidateAfterSpuChange(Long spuId, boolean recommendChanged) {
         redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + spuId);
         redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");

@@ -18,8 +18,6 @@ public interface ProductCacheService {
 
     void invalidateAfterSkuChange(Long spuId, Long skuId);
 
-    void invalidateAfterStockChange(Long skuId);
-
     void invalidateAfterSpuChange(Long spuId, boolean recommendChanged);
 
     ProductDetailCache getProductDetail(Long spuId, Supplier<ProductDetailCache> loader);

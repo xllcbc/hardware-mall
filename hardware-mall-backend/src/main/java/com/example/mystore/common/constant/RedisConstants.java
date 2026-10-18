@@ -18,11 +18,13 @@ public class RedisConstants {
     public static final String PREFIX_PRODUCT_SEARCH = "product:search:v1:";
     public static final String PREFIX_SKU_STOCK = "sku:stock:";
     public static final String PREFIX_SKU_INFO = "sku:info:";
+    public static final String PREFIX_STOCK_EVICT_FAILED = "stock:cache:evict:failed";
     public static final String PREFIX_RATE_LIMIT = "rate:limit:";
     public static final String PREFIX_ORDER_IDEMPOTENCY = "order:idem:";
 
     public static final long CACHE_TTL_HOUR = 3600L;
     public static final long CACHE_TTL_DAY = 86400L;
+    public static final long SKU_STOCK_TTL_SECONDS = 300L;
     public static final long PRODUCT_SEARCH_TTL_SECONDS = 600L;
     public static final long PRODUCT_SEARCH_JITTER_SECONDS = 60L;
     public static final long WECHAT_SESSION_TTL = 7200L;

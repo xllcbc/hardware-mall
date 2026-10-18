@@ -8,7 +8,6 @@ public record ProductCacheInvalidationEvent(
 
     public enum Type {
         SKU_CHANGED,
-        STOCK_CHANGED,
         SPU_CHANGED
     }
 }

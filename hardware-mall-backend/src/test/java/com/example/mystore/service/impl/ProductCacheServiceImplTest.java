@@ -131,14 +131,6 @@ class ProductCacheServiceImplTest {
     }
 
     @Test
-    void invalidateAfterStockChange_deletesOnlyStockKey() {
-        productCacheService.invalidateAfterStockChange(22L);
-
-        verify(redisUtil).delete(RedisConstants.PREFIX_SKU_STOCK + 22L);
-        verifyNoMoreInteractions(redisUtil);
-    }
-
-    @Test
     void getSkusByIds_usesBatchCacheWhenAllHit() {
         Sku first = sku(1L);
         Sku second = sku(2L);

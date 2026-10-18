@@ -22,7 +22,7 @@ import com.example.mystore.entity.vo.DashboardStatsVO;
 import com.example.mystore.entity.vo.RecentOrderVO;
 import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.SpecVO;
-import com.example.mystore.event.StockSyncEvent;
+import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.OrderService;
@@ -244,7 +244,7 @@ public class OrderServiceImpl implements OrderService {
         List<Long> skuIds = validated.orderItems().stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
+        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
 
         return order.getId();
     }
@@ -395,7 +395,7 @@ public class OrderServiceImpl implements OrderService {
         List<Long> skuIds = items.stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
+        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
     }
 
     @Override
@@ -763,7 +763,7 @@ public class OrderServiceImpl implements OrderService {
         List<Long> skuIds = items.stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
+        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
 
         return true;
     }

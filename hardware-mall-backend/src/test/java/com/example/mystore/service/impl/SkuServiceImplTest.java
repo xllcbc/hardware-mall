@@ -6,6 +6,7 @@ import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
+import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.ProductCacheService;
@@ -23,6 +24,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -142,11 +144,6 @@ class SkuServiceImplTest {
             return 1;
         });
 
-        Sku persisted = new Sku();
-        persisted.setId(5L);
-        persisted.setStock(10);
-        when(skuMapper.selectById(5L)).thenReturn(persisted);
-
         Sku incoming = new Sku();
         incoming.setSpuId(1L);
         incoming.setSpecs(Collections.emptyList());
@@ -226,6 +223,7 @@ class SkuServiceImplTest {
         assertThat(result.getSpecHash()).hasSize(32).matches("[0-9a-f]{32}");
         verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
                 ProductCacheInvalidationEvent.Type.SKU_CHANGED, 1L, 5L, false));
+        verify(eventPublisher).publishEvent(new StockCacheEvent(List.of(5L)));
     }
 
     @Test
@@ -349,6 +347,7 @@ class SkuServiceImplTest {
         assertThat(result.getPrice()).isEqualByComparingTo(new BigDecimal("66.00"));
         verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
                 ProductCacheInvalidationEvent.Type.SKU_CHANGED, 1L, 9L, false));
+        verify(eventPublisher).publishEvent(new StockCacheEvent(List.of(9L)));
     }
 
     @Test
@@ -534,18 +533,22 @@ class SkuServiceImplTest {
 
         assertThat(result).isEqualTo(50);
         verify(skuMapper).selectById(1L);
+        verify(redisUtil).set(
+                RedisConstants.PREFIX_SKU_STOCK + 1L,
+                50,
+                RedisConstants.SKU_STOCK_TTL_SECONDS,
+                TimeUnit.SECONDS);
     }
 
     @Test
-    void testGetStockById_NullSentinel_FallbackToDb() {
+    void testGetStockById_NullSentinel_ReturnsNullWithoutDb() {
         when(redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + 1L)).thenReturn(RedisConstants.CACHE_NULL);
         when(redisUtil.isNull(RedisConstants.CACHE_NULL)).thenReturn(true);
-        when(skuMapper.selectById(1L)).thenReturn(sku1);
 
         Integer result = skuService.getStockById(1L);
 
-        assertThat(result).isEqualTo(50);
-        verify(skuMapper).selectById(1L);
+        assertThat(result).isNull();
+        verify(skuMapper, never()).selectById(any());
     }
 
     @Test
@@ -556,6 +559,11 @@ class SkuServiceImplTest {
         Integer result = skuService.getStockById(99L);
 
         assertThat(result).isNull();
+        verify(redisUtil).set(
+                RedisConstants.PREFIX_SKU_STOCK + 99L,
+                RedisConstants.CACHE_NULL,
+                RedisConstants.CACHE_NULL_TTL,
+                TimeUnit.SECONDS);
     }
 
     @Test
@@ -565,7 +573,11 @@ class SkuServiceImplTest {
         boolean result = skuService.syncStockToCache(1L);
 
         assertThat(result).isTrue();
-        verify(redisUtil).set(RedisConstants.PREFIX_SKU_STOCK + 1L, 50);
+        verify(redisUtil).set(
+                RedisConstants.PREFIX_SKU_STOCK + 1L,
+                50,
+                RedisConstants.SKU_STOCK_TTL_SECONDS,
+                TimeUnit.SECONDS);
     }
 
     @Test
@@ -618,7 +630,6 @@ class SkuServiceImplTest {
         verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku -> sku.getDeleteTime() > 0));
         verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
                 ProductCacheInvalidationEvent.Type.SKU_CHANGED, 1L, 1L, false));
-        verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
-                ProductCacheInvalidationEvent.Type.STOCK_CHANGED, 1L, 1L, false));
+        verify(eventPublisher).publishEvent(new StockCacheEvent(List.of(1L)));
     }
 }

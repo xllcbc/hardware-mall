@@ -12,6 +12,7 @@ public interface SkuService {
     Sku getSkuById(Long id);
     Map<Long, Sku> getSkuMapByIds(Collection<Long> skuIds);
     Integer getStockById(Long skuId);
+    void evictStockCache(Long skuId);
     List<Sku> getSkusBySpu(Long spuId);
     List<Sku> getSkusBySpu(Long spuId, Integer status);
     Map<Long, List<Sku>> getSkusBySpuIds(List<Long> spuIds);
