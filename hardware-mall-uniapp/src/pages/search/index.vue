@@ -8,6 +8,7 @@
           v-model="keyword"
           placeholder="搜索商品"
           placeholder-class="input-placeholder"
+          confirm-type="search"
           @confirm="onSearch(keyword)"
         />
       </view>
@@ -64,24 +65,47 @@
       </view>
     </scroll-view>
 
-    <scroll-view v-else class="result-content" scroll-y @scrolltolower="loadMore">
+    <scroll-view
+      v-else
+      class="result-content"
+      scroll-y
+      :enable-flex="true"
+      :lower-threshold="120"
+      @scrolltolower="loadMore"
+    >
       <view v-if="loading" class="loading-wrap">
         <LoadingState text="搜索中..." />
       </view>
       <EmptyState v-else-if="!products.length" text="未找到相关商品" />
-      <view v-else class="product-grid">
-        <ProductCard
-          v-for="product in products"
-          :key="product.id"
-          :id="product.id"
-          :image="product.images?.[0]"
-          :name="product.name"
-          :subtitle="product.subtitle"
-          :price="product.price"
-          :original-price="product.originalPrice"
-          :min-price="product.minPrice"
-          @click="goProductDetail"
-        />
+      <view v-else class="result-body">
+        <view class="product-grid">
+          <ProductCard
+            v-for="product in products"
+            :key="product.id"
+            :id="product.id"
+            :image="product.images?.[0]"
+            :name="product.name"
+            :subtitle="product.subtitle"
+            :price="product.price"
+            :original-price="product.originalPrice"
+            :min-price="product.minPrice"
+            @click="goProductDetail"
+          />
+        </view>
+
+        <view class="result-footer">
+          <text v-if="loadingMore" class="load-more-status">加载中...</text>
+          <button
+            v-else-if="!noMore"
+            class="load-more-btn"
+            @tap="loadMore"
+          >
+            加载更多（{{ products.length }} / {{ total }}）
+          </button>
+          <text v-else class="load-more-status">
+            已显示全部 {{ total }} 件商品
+          </text>
+        </view>
       </view>
     </scroll-view>
     </template>
@@ -106,6 +130,7 @@ const hotKeywords = ref(['门锁', '工具箱', '螺丝刀', '水管', '灯具',
 const products = ref<Product[]>([])
 const page = ref(1)
 const pageSize = 10
+const total = ref(0)
 const noMore = ref(false)
 const loadingMore = ref(false)
 
@@ -128,12 +153,15 @@ const onSearch = async (kw: string) => {
   hasSearched.value = true
   saveHistory(kw)
   page.value = 1
+  products.value = []
+  total.value = 0
   noMore.value = false
   loading.value = true
   try {
     const data = await getProductList({ keyword: kw, page: 1, limit: pageSize })
     products.value = data?.records || []
-    if ((data?.total || 0) <= pageSize) noMore.value = true
+    total.value = data?.total || 0
+    noMore.value = products.value.length >= total.value
   } catch (e) {
     console.error('Search failed:', e)
     products.value = []
@@ -143,7 +171,7 @@ const onSearch = async (kw: string) => {
 }
 
 const loadMore = async () => {
-  if (loadingMore.value || noMore.value || !keyword.value) return
+  if (loading.value || loadingMore.value || noMore.value || !keyword.value) return
   loadingMore.value = true
   try {
     const nextPage = page.value + 1
@@ -151,7 +179,8 @@ const loadMore = async () => {
     const list = data?.records || []
     products.value = [...products.value, ...list]
     page.value = nextPage
-    if (list.length < pageSize) noMore.value = true
+    total.value = data?.total || total.value
+    noMore.value = !list.length || products.value.length >= total.value
   } catch (e) {
     console.error(e)
   } finally {
@@ -353,8 +382,14 @@ const goProductDetail = (id: number | string) => {
 
 .result-content {
   flex: 1;
+  height: 0;
+  min-height: 0;
   padding: 24rpx;
   box-sizing: border-box;
+}
+
+.result-body {
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
 }
 
 .loading-wrap {
@@ -368,5 +403,34 @@ const goProductDetail = (id: number | string) => {
   width: 100%;
   box-sizing: border-box;
   overflow: hidden;
+}
+
+.result-footer {
+  display: flex;
+  min-height: 96rpx;
+  align-items: center;
+  justify-content: center;
+  padding: 24rpx 0 8rpx;
+}
+
+.load-more-btn {
+  min-width: 280rpx;
+  margin: 0;
+  padding: 0 32rpx;
+  border: 1rpx solid #D7DCE2;
+  border-radius: 8rpx;
+  background: #FFFFFF;
+  color: #4B5563;
+  font-size: 26rpx;
+  line-height: 72rpx;
+}
+
+.load-more-btn::after {
+  border: 0;
+}
+
+.load-more-status {
+  color: #999999;
+  font-size: 24rpx;
 }
 </style>
