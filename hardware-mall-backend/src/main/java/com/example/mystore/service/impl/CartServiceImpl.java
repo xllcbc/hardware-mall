@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Sku;
@@ -81,7 +82,7 @@ public class CartServiceImpl implements CartService {
                 BigDecimal rate = pricingRuleService.rateFor(
                         UserContext.getLevelId(),
                         spu.getCategoryId(),
-                        Integer.valueOf(1).equals(spu.getExcludeDiscount()));
+                        DiscountConstants.isExcluded(spu.getExcludeDiscount()));
                 BigDecimal unitPrice = priceService.resolveUnitPrice(sku.getPrice(), rate);
                 vo.setPrice(unitPrice);
                 BigDecimal retailMin = allSkus.stream()

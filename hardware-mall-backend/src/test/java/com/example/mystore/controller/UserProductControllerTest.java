@@ -1,5 +1,6 @@
 package com.example.mystore.controller;
 
+import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
@@ -86,7 +87,7 @@ class UserProductControllerTest {
         spu.setSalesCount(0);
         spu.setStatus(StatusConstants.PRODUCT_STATUS_ON_SHELF);
         spu.setIsRecommend(1);
-        spu.setExcludeDiscount(0);
+        spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         spu.setDeleteTime(0L);
         spuMapper.insert(spu);
 

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.WechatConstants;
@@ -171,7 +172,7 @@ public class OrderServiceImpl implements OrderService {
             BigDecimal rate = pricingRuleService.rateFor(
                     levelId,
                     spu.getCategoryId(),
-                    Integer.valueOf(1).equals(spu.getExcludeDiscount()));
+                    DiscountConstants.isExcluded(spu.getExcludeDiscount()));
             BigDecimal unitPrice = priceService.resolveUnitPrice(sku.getPrice(), rate);
             BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             totalAmount = totalAmount.add(subtotal);
