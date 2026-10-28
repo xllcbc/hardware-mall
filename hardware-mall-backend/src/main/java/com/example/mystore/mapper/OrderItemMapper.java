@@ -12,10 +12,10 @@ import java.util.List;
 public interface OrderItemMapper extends BaseMapper<OrderItem> {
 
     @Insert("<script>" +
-            "INSERT INTO order_item(order_id, sku_id, spu_id, product_name, product_spec, product_image, price, quantity, subtotal, price_type, create_time) " +
+            "INSERT INTO order_item(order_id, sku_id, spu_id, product_name, product_spec, product_image, price, level_id, level_name, discount_rate, quantity, subtotal, create_time) " +
             "VALUES " +
             "<foreach collection='items' item='it' separator=','>" +
-            "(#{it.orderId},#{it.skuId},#{it.spuId},#{it.productName},#{it.productSpec},#{it.productImage},#{it.price},#{it.quantity},#{it.subtotal},#{it.priceType},#{it.createTime})" +
+            "(#{it.orderId},#{it.skuId},#{it.spuId},#{it.productName},#{it.productSpec},#{it.productImage},#{it.price},#{it.levelId},#{it.levelName},#{it.discountRate},#{it.quantity},#{it.subtotal},#{it.createTime})" +
             "</foreach>" +
             "</script>")
     int insertBatch(@Param("items") List<OrderItem> items);

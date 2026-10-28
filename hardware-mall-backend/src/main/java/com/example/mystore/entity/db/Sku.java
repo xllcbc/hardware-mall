@@ -21,8 +21,6 @@ public class Sku {
 
     private BigDecimal price;
 
-    private BigDecimal wholesalePrice;
-
     private Integer stock;
 
     private String image;

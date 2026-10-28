@@ -9,6 +9,20 @@ CREATE DATABASE IF NOT EXISTS `hardware_mall`
 
 USE `hardware_mall`;
 
+-- 用户等级表
+CREATE TABLE IF NOT EXISTS `user_level` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '等级ID',
+    `name` VARCHAR(50) NOT NULL COMMENT '等级名称，如：零售/批发A/批发B',
+    `is_retail` TINYINT NOT NULL DEFAULT 0 COMMENT '是否零售等级：1-是（倍率固定1.0，不可改名/删除），0-否',
+    `sort_order` INT NOT NULL DEFAULT 0 COMMENT '排序权重，数值越大越靠前',
+    `status` TINYINT NOT NULL DEFAULT 1 COMMENT '等级状态：1-启用，0-停用',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_name` (`name`),
+    KEY `idx_status_sort` (`status`, `sort_order` DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户等级表';
+
 -- 用户表
 CREATE TABLE IF NOT EXISTS `user` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '用户ID',
@@ -20,7 +34,7 @@ CREATE TABLE IF NOT EXISTS `user` (
     `province` VARCHAR(50) DEFAULT NULL COMMENT '用户所在省份',
     `city` VARCHAR(50) DEFAULT NULL COMMENT '用户所在城市',
     `role` TINYINT NOT NULL DEFAULT 1 COMMENT '用户角色：1-普通用户，2-管理员',
-    `user_group` TINYINT NOT NULL DEFAULT 1 COMMENT '用户分组：1-零售，2-批发商',
+    `level_id` BIGINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '用户等级ID',
     `status` TINYINT NOT NULL DEFAULT 1 COMMENT '用户状态：1-正常，0-禁用',
     `last_login_time` DATETIME DEFAULT NULL COMMENT '最后登录时间',
     `last_login_ip` VARCHAR(50) DEFAULT NULL COMMENT '最后登录IP地址',
@@ -71,6 +85,21 @@ CREATE TABLE IF NOT EXISTS `category` (
     KEY `idx_status_sort` (`status`, `sort_order` DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='商品分类表';
 
+-- 等级分类倍率表
+CREATE TABLE IF NOT EXISTS `level_category_discount` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `level_id` BIGINT UNSIGNED NOT NULL COMMENT '用户等级ID',
+    `category_id` BIGINT UNSIGNED NOT NULL COMMENT '商品分类ID',
+    `rate` DECIMAL(6,4) NOT NULL COMMENT '倍率(0,1]，成交价=零售价×rate',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_level_category` (`level_id`, `category_id`),
+    KEY `idx_category_id` (`category_id`),
+    CONSTRAINT `fk_lcd_level` FOREIGN KEY (`level_id`) REFERENCES `user_level` (`id`),
+    CONSTRAINT `fk_lcd_category` FOREIGN KEY (`category_id`) REFERENCES `category` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='等级分类倍率表';
+
 -- SPU商品型号表
 CREATE TABLE IF NOT EXISTS `spu` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '商品型号ID',
@@ -84,6 +113,7 @@ CREATE TABLE IF NOT EXISTS `spu` (
     `sales_count` INT NOT NULL DEFAULT 0 COMMENT '商品销量',
     `status` TINYINT NOT NULL DEFAULT 1 COMMENT '商品状态：1-上架，0-下架',
     `is_recommend` TINYINT NOT NULL DEFAULT 0 COMMENT '是否推荐商品：1-推荐，0-非推荐',
+    `exclude_discount` TINYINT NOT NULL DEFAULT 0 COMMENT '不参与折扣：1-是，0-否',
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `delete_time` BIGINT DEFAULT 0 COMMENT '删除时间，软删除标识',
@@ -103,7 +133,6 @@ CREATE TABLE IF NOT EXISTS `sku` (
     `spu_id` BIGINT UNSIGNED NOT NULL COMMENT 'SPU ID',
     `specs` JSON NOT NULL COMMENT '规格组合 [{"templateId":1,"itemId":1,"name":"颜色","value":"金色"},...]',
     `price` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT 'SKU价格',
-    `wholesale_price` DECIMAL(10,2) NULL COMMENT '批发价, NULL=不设',
     `stock` INT NOT NULL DEFAULT 0 COMMENT 'SKU库存数量',
     `image` VARCHAR(255) DEFAULT NULL COMMENT 'SKU图片',
     `status` TINYINT NOT NULL DEFAULT 1 COMMENT 'SKU状态：1-启用，0-禁用',
@@ -237,7 +266,9 @@ CREATE TABLE IF NOT EXISTS `order_item` (
     `product_spec` VARCHAR(500) DEFAULT NULL COMMENT '商品规格快照(JSON)',
     `product_image` VARCHAR(255) DEFAULT NULL COMMENT '商品图片快照',
     `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '商品单价快照',
-    `price_type` TINYINT NOT NULL DEFAULT 1 COMMENT '价格类型：1-零售价，2-批发价',
+    `level_id` BIGINT UNSIGNED NULL COMMENT '下单时用户等级ID快照',
+    `level_name` VARCHAR(50) NULL COMMENT '下单时用户等级名称快照',
+    `discount_rate` DECIMAL(6,4) NULL COMMENT '下单时适用倍率快照',
     `quantity` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '购买数量',
     `subtotal` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '小计金额',
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -249,6 +280,9 @@ CREATE TABLE IF NOT EXISTS `order_item` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='订单明细表';
 
 -- ==================== 初始化数据 ====================
+
+INSERT INTO `user_level` (`id`, `name`, `is_retail`, `sort_order`, `status`)
+VALUES (1, '零售', 1, 100, 1);
 
 -- 初始化管理员账号（登录密码由环境变量 ADMIN_PASSWORD 配置）
 INSERT INTO `user` (`openid`, `nickname`, `role`, `status`) VALUES ('admin', '管理员', 2, 1);

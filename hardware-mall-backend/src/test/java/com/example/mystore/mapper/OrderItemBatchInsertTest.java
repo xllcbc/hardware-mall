@@ -1,7 +1,6 @@
 package com.example.mystore.mapper;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
@@ -57,7 +56,9 @@ class OrderItemBatchInsertTest {
         item1.setPrice(new BigDecimal("219.00"));
         item1.setQuantity(1);
         item1.setSubtotal(new BigDecimal("219.00"));
-        item1.setPriceType(StatusConstants.PRICE_TYPE_RETAIL);
+        item1.setLevelId(1L);
+        item1.setLevelName("零售");
+        item1.setDiscountRate(BigDecimal.ONE);
         item1.setCreateTime(LocalDateTime.now());
 
         OrderItem item2 = new OrderItem();
@@ -68,7 +69,9 @@ class OrderItemBatchInsertTest {
         item2.setPrice(new BigDecimal("219.00"));
         item2.setQuantity(1);
         item2.setSubtotal(new BigDecimal("219.00"));
-        item2.setPriceType(StatusConstants.PRICE_TYPE_RETAIL);
+        item2.setLevelId(1L);
+        item2.setLevelName("零售");
+        item2.setDiscountRate(BigDecimal.ONE);
         item2.setCreateTime(LocalDateTime.now());
 
         int rows = orderItemMapper.insertBatch(Arrays.asList(item1, item2));

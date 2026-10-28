@@ -1,6 +1,5 @@
 package com.example.mystore.entity.vo;
 
-import com.example.mystore.entity.db.OrderItem;
 import lombok.Data;
 import java.io.Serializable;
 import java.math.BigDecimal;
@@ -35,5 +34,5 @@ public class OrderVO implements Serializable {
     private LocalDateTime shipTime;
     private LocalDateTime receiveTime;
     private LocalDateTime createTime;
-    private List<OrderItem> items;
+    private List<OrderItemVO> items;
 }

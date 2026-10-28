@@ -14,9 +14,11 @@ import com.example.mystore.entity.vo.ProductDetailCache;
 import com.example.mystore.entity.vo.ProductListCacheItem;
 import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.entity.vo.ProductSkuVO;
+import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.PriceService;
+import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.ProductCacheService;
 import com.example.mystore.service.SpuService;
 import com.example.mystore.service.SkuService;
@@ -50,6 +52,7 @@ public class SpuServiceImpl implements SpuService {
     private final SpecTemplateService specTemplateService;
     private final SpecItemService specItemService;
     private final PriceService priceService;
+    private final PricingRuleService pricingRuleService;
     private final ProductCacheService productCacheService;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -105,6 +108,9 @@ public class SpuServiceImpl implements SpuService {
         spu.setUpdateTime(LocalDateTime.now());
         spu.setSalesCount(0);
         spu.setDeleteTime(0L);
+        if (spu.getExcludeDiscount() == null) {
+            spu.setExcludeDiscount(0);
+        }
         if (spu.getStatus() == null) {
             spu.setStatus(StatusConstants.PRODUCT_STATUS_ON_SHELF);
         }
@@ -150,6 +156,9 @@ public class SpuServiceImpl implements SpuService {
         }
         if (spu.getWeight() != null) {
             exist.setWeight(spu.getWeight());
+        }
+        if (spu.getExcludeDiscount() != null) {
+            exist.setExcludeDiscount(spu.getExcludeDiscount());
         }
         exist.setUpdateTime(LocalDateTime.now());
 
@@ -239,7 +248,6 @@ public class SpuServiceImpl implements SpuService {
                 BigDecimal maxPrice = skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice());
                 item.setRetailMinPrice(minPrice);
                 item.setRetailMaxPrice(maxPrice);
-                applyWholesaleEffectiveRange(item, skus);
             } else {
                 item.setRetailMinPrice(spu.getOriginalPrice());
                 item.setRetailMaxPrice(spu.getOriginalPrice());
@@ -285,7 +293,6 @@ public class SpuServiceImpl implements SpuService {
             if (!skus.isEmpty()) {
                 item.setRetailMinPrice(skus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
                 item.setRetailMaxPrice(skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
-                applyWholesaleEffectiveRange(item, skus);
             } else {
                 item.setRetailMinPrice(spu.getOriginalPrice());
                 item.setRetailMaxPrice(spu.getOriginalPrice());
@@ -361,7 +368,11 @@ public class SpuServiceImpl implements SpuService {
     }
 
     private ProductDetailVO toProductDetailView(ProductDetailCache cache) {
-        List<ProductSkuVO> skus = toProductSkuVOs(cache.getSkus());
+        BigDecimal rate = pricingRuleService.rateFor(
+                UserContext.getLevelId(),
+                cache.getSpu().getCategoryId(),
+                Integer.valueOf(1).equals(cache.getSpu().getExcludeDiscount()));
+        List<ProductSkuVO> skus = toProductSkuVOs(cache.getSkus(), rate);
         BigDecimal minPrice = null;
         BigDecimal maxPrice = null;
         if (!skus.isEmpty()) {
@@ -369,24 +380,24 @@ public class SpuServiceImpl implements SpuService {
                     .orElse(cache.getSpu().getOriginalPrice());
             maxPrice = skus.stream().map(ProductSkuVO::getPrice).max(BigDecimal::compareTo)
                     .orElse(cache.getSpu().getOriginalPrice());
+        } else if (cache.getSpu().getOriginalPrice() != null) {
+            minPrice = priceService.resolveUnitPrice(cache.getSpu().getOriginalPrice(), rate);
+            maxPrice = minPrice;
         }
         return new ProductDetailVO(cache.getSpu(), skus, cache.getSpecTemplates(),
                 cache.getSpecItemsMap(), minPrice, maxPrice);
     }
 
-    private List<ProductSkuVO> toProductSkuVOs(List<Sku> skus) {
+    private List<ProductSkuVO> toProductSkuVOs(List<Sku> skus, BigDecimal rate) {
         if (skus == null || skus.isEmpty()) {
             return Collections.emptyList();
         }
-        Integer userGroup = StatusConstants.normalizeUserGroup(UserContext.getUserGroup());
         return skus.stream().map(sku -> {
-            PriceService.PriceResult priceResult = priceService.resolve(sku, userGroup);
             ProductSkuVO vo = new ProductSkuVO();
             vo.setId(sku.getId());
             vo.setSpuId(sku.getSpuId());
             vo.setSpecs(sku.getSpecs());
-            vo.setPrice(priceResult.unitPrice());
-            vo.setPriceType(priceResult.priceType());
+            vo.setPrice(sku.getPrice() == null ? null : priceService.resolveUnitPrice(sku.getPrice(), rate));
             vo.setStock(skuService.getStockById(sku.getId()));
             vo.setImage(sku.getImage());
             vo.setStatus(sku.getStatus());
@@ -402,27 +413,16 @@ public class SpuServiceImpl implements SpuService {
         item.setSubtitle(spu.getSubtitle());
         item.setImages(spu.getImages());
         item.setOriginalPrice(spu.getOriginalPrice());
+        item.setExcludeDiscount(spu.getExcludeDiscount());
         item.setStatus(spu.getStatus());
         return item;
-    }
-
-    private void applyWholesaleEffectiveRange(ProductListCacheItem item, List<Sku> skus) {
-        boolean hasWholesalePrice = skus.stream().anyMatch(sku -> sku.getWholesalePrice() != null);
-        if (!hasWholesalePrice) {
-            return;
-        }
-        List<BigDecimal> effectivePrices = skus.stream()
-                .map(sku -> priceService.resolve(sku, StatusConstants.USER_GROUP_WHOLESALE).unitPrice())
-                .collect(Collectors.toList());
-        item.setWholesaleMinPrice(effectivePrices.stream().min(BigDecimal::compareTo).orElse(null));
-        item.setWholesaleMaxPrice(effectivePrices.stream().max(BigDecimal::compareTo).orElse(null));
     }
 
     private List<ProductListVO> toUserPricingViews(List<ProductListCacheItem> records) {
         if (records == null || records.isEmpty()) {
             return Collections.emptyList();
         }
-        Integer userGroup = StatusConstants.normalizeUserGroup(UserContext.getUserGroup());
+        Long levelId = UserContext.getLevelId();
         return records.stream().map(source -> {
             ProductListVO target = new ProductListVO();
             target.setId(source.getId());
@@ -432,18 +432,54 @@ public class SpuServiceImpl implements SpuService {
             target.setImages(source.getImages());
             target.setOriginalPrice(source.getOriginalPrice());
             target.setStatus(source.getStatus());
-            if (userGroup == StatusConstants.USER_GROUP_WHOLESALE
-                    && source.getWholesaleMinPrice() != null) {
-                target.setMinPrice(source.getWholesaleMinPrice());
-                target.setMaxPrice(source.getWholesaleMaxPrice());
-                target.setPriceType(StatusConstants.PRICE_TYPE_WHOLESALE);
-            } else {
-                target.setMinPrice(source.getRetailMinPrice());
-                target.setMaxPrice(source.getRetailMaxPrice());
-                target.setPriceType(StatusConstants.PRICE_TYPE_RETAIL);
+            BigDecimal rate = pricingRuleService.rateFor(
+                    levelId,
+                    source.getCategoryId(),
+                    Integer.valueOf(1).equals(source.getExcludeDiscount()));
+            if (source.getRetailMinPrice() != null) {
+                target.setMinPrice(priceService.resolveUnitPrice(source.getRetailMinPrice(), rate));
+            }
+            if (source.getRetailMaxPrice() != null) {
+                target.setMaxPrice(priceService.resolveUnitPrice(source.getRetailMaxPrice(), rate));
             }
             return target;
         }).collect(Collectors.toList());
+    }
+
+    @Override
+    public Page<UserLevelProductPreviewVO> getUserLevelProductPreview(
+            Long levelId, Long categoryId, Integer page, Integer limit) {
+        ProductListResult result = productCacheService.getProductList(
+                categoryId, page, limit, StatusConstants.PRODUCT_STATUS_ON_SHELF,
+                () -> buildProductListResult(categoryId, null, page, limit, StatusConstants.PRODUCT_STATUS_ON_SHELF));
+        Page<UserLevelProductPreviewVO> voPage = new Page<>(page, limit,
+                result == null ? 0 : result.getTotal());
+        if (result == null || result.getRecords() == null) {
+            return voPage;
+        }
+        List<UserLevelProductPreviewVO> records = result.getRecords().stream().map(item -> {
+            UserLevelProductPreviewVO vo = new UserLevelProductPreviewVO();
+            vo.setId(item.getId());
+            vo.setCategoryId(item.getCategoryId());
+            vo.setName(item.getName());
+            vo.setImages(item.getImages());
+            vo.setOriginalPrice(item.getOriginalPrice());
+            vo.setRetailMinPrice(item.getRetailMinPrice());
+            vo.setRetailMaxPrice(item.getRetailMaxPrice());
+            vo.setExcludeDiscount(item.getExcludeDiscount());
+            BigDecimal rate = pricingRuleService.rateFor(
+                    levelId, item.getCategoryId(), Integer.valueOf(1).equals(item.getExcludeDiscount()));
+            vo.setDiscountRate(rate);
+            if (item.getRetailMinPrice() != null) {
+                vo.setMinPrice(priceService.resolveUnitPrice(item.getRetailMinPrice(), rate));
+            }
+            if (item.getRetailMaxPrice() != null) {
+                vo.setMaxPrice(priceService.resolveUnitPrice(item.getRetailMaxPrice(), rate));
+            }
+            return vo;
+        }).collect(Collectors.toList());
+        voPage.setRecords(records);
+        return voPage;
     }
 
     private void publishSpuChanged(Long spuId, boolean recommendAffected) {

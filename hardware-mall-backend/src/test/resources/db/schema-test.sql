@@ -1,6 +1,17 @@
 -- H2 兼容的测试数据库 schema
 -- 用于 JUnit 集成测试
 
+CREATE TABLE IF NOT EXISTS `user_level` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(50) NOT NULL,
+    `is_retail` TINYINT NOT NULL DEFAULT 0,
+    `sort_order` INT NOT NULL DEFAULT 0,
+    `status` TINYINT NOT NULL DEFAULT 1,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (`name`)
+);
+
 CREATE TABLE IF NOT EXISTS `user` (
     `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `openid` VARCHAR(64) NOT NULL,
@@ -11,7 +22,7 @@ CREATE TABLE IF NOT EXISTS `user` (
     `province` VARCHAR(50) DEFAULT NULL,
     `city` VARCHAR(50) DEFAULT NULL,
     `role` TINYINT NOT NULL DEFAULT 1,
-    `user_group` TINYINT NOT NULL DEFAULT 1,
+    `level_id` BIGINT NOT NULL DEFAULT 1,
     `status` TINYINT NOT NULL DEFAULT 1,
     `last_login_time` DATETIME DEFAULT NULL,
     `last_login_ip` VARCHAR(50) DEFAULT NULL,
@@ -48,6 +59,16 @@ CREATE TABLE IF NOT EXISTS `category` (
     `delete_time` BIGINT DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS `level_category_discount` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `level_id` BIGINT NOT NULL,
+    `category_id` BIGINT NOT NULL,
+    `rate` DECIMAL(6,4) NOT NULL,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (`level_id`, `category_id`)
+);
+
 CREATE TABLE IF NOT EXISTS `spu` (
     `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `category_id` BIGINT NOT NULL,
@@ -60,6 +81,7 @@ CREATE TABLE IF NOT EXISTS `spu` (
     `sales_count` INT NOT NULL DEFAULT 0,
     `status` TINYINT NOT NULL DEFAULT 1,
     `is_recommend` TINYINT NOT NULL DEFAULT 0,
+    `exclude_discount` TINYINT NOT NULL DEFAULT 0,
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `delete_time` BIGINT DEFAULT 0
@@ -70,7 +92,6 @@ CREATE TABLE IF NOT EXISTS `sku` (
     `spu_id` BIGINT NOT NULL,
     `specs` TEXT NOT NULL,
     `price` DECIMAL(10,2) NOT NULL DEFAULT 0,
-    `wholesale_price` DECIMAL(10,2) NULL,
     `stock` INT NOT NULL DEFAULT 0,
     `image` VARCHAR(255) DEFAULT NULL,
     `status` TINYINT NOT NULL DEFAULT 1,
@@ -179,7 +200,9 @@ CREATE TABLE IF NOT EXISTS `order_item` (
     `product_spec` VARCHAR(500) DEFAULT NULL,
     `product_image` VARCHAR(255) DEFAULT NULL,
     `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    `price_type` TINYINT NOT NULL DEFAULT 1,
+    `level_id` BIGINT DEFAULT NULL,
+    `level_name` VARCHAR(50) DEFAULT NULL,
+    `discount_rate` DECIMAL(6,4) DEFAULT NULL,
     `quantity` INT NOT NULL DEFAULT 1,
     `subtotal` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

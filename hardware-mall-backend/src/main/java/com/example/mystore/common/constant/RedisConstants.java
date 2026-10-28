@@ -12,10 +12,12 @@ public class RedisConstants {
     public static final long WECHAT_ACCESS_TOKEN_TTL = 7000L;
     public static final String PREFIX_CATEGORY_LIST = "category:list";
     public static final String PREFIX_LOGISTICS_ENABLED = "logistics:enabled";
-    public static final String PREFIX_PRODUCT_DETAIL = "product:detail:v3:";
-    public static final String PREFIX_PRODUCT_RECOMMEND = "product:recommend:v3";
-    public static final String PREFIX_PRODUCT_LIST = "product:list:v3:";
-    public static final String PREFIX_PRODUCT_SEARCH = "product:search:v1:";
+    public static final String PREFIX_PRODUCT_DETAIL = "product:detail:v4:";
+    public static final String PREFIX_PRODUCT_RECOMMEND = "product:recommend:v4";
+    public static final String PREFIX_PRODUCT_LIST = "product:list:v4:";
+    public static final String PREFIX_PRODUCT_SEARCH = "product:search:v2:";
+    public static final String PREFIX_PRICING_LEVEL = "pricing:level:";
+    public static final String PREFIX_PRICING_RETAIL_LEVEL_ID = "pricing:retail-level-id";
     public static final String PREFIX_SKU_STOCK = "sku:stock:";
     public static final String PREFIX_SKU_INFO = "sku:info:";
     public static final String PREFIX_STOCK_EVICT_FAILED = "stock:cache:evict:failed";

@@ -215,6 +215,16 @@
             <span class="price">¥{{ Number(row.price).toFixed(2) }}</span>
           </template>
         </el-table-column>
+        <el-table-column prop="levelName" label="下单等级" width="110">
+          <template #default="{ row }">
+            <span>{{ row.levelName || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="discountRate" label="倍率" width="90">
+          <template #default="{ row }">
+            <span>{{ row.discountRate != null ? Number(row.discountRate).toFixed(4) : '-' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="quantity" label="数量" width="80" />
         <el-table-column prop="subtotal" label="小计" width="100">
           <template #default="{ row }">

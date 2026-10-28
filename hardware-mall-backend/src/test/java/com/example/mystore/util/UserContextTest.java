@@ -13,15 +13,15 @@ class UserContextTest {
     }
 
     @Test
-    void setAndGetUserGroup() {
-        UserContext.setUserGroup(2);
-        assertThat(UserContext.getUserGroup()).isEqualTo(2);
+    void setAndGetLevelId() {
+        UserContext.setLevelId(2L);
+        assertThat(UserContext.getLevelId()).isEqualTo(2L);
     }
 
     @Test
-    void clearRemovesUserGroup() {
-        UserContext.setUserGroup(2);
+    void clearRemovesLevelId() {
+        UserContext.setLevelId(2L);
         UserContext.clear();
-        assertThat(UserContext.getUserGroup()).isNull();
+        assertThat(UserContext.getLevelId()).isNull();
     }
 }

@@ -5,7 +5,6 @@ export interface Sku {
   spuId: number
   specs: SpecVO[]
   price: number
-  wholesalePrice?: number
   stock: number
   image?: string
   status?: number

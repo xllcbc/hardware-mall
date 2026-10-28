@@ -4,11 +4,15 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.config.OssProperties;
 import com.example.mystore.entity.db.User;
+import com.example.mystore.entity.vo.UserAdminVO;
 import com.example.mystore.mapper.UserMapper;
+import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.UserService;
+import com.example.mystore.service.UserLevelService;
 import com.example.mystore.util.JwtUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.WechatUtil;
@@ -33,6 +37,8 @@ public class UserServiceImpl implements UserService {
     private final JwtUtil jwtUtil;
     private final RedisUtil redisUtil;
     private final OssProperties ossProperties;
+    private final PricingRuleService pricingRuleService;
+    private final UserLevelService userLevelService;
 
     @Override
     public User login(String code) {
@@ -49,7 +55,7 @@ public class UserServiceImpl implements UserService {
             user.setOpenid(openid);
             user.setRole(StatusConstants.USER_ROLE_REGULAR);
             user.setStatus(StatusConstants.USER_STATUS_NORMAL);
-            user.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+            user.setLevelId(pricingRuleService.resolveRetailLevelId());
             user.setCreateTime(LocalDateTime.now());
             userMapper.insert(user);
         } else {
@@ -152,7 +158,7 @@ public class UserServiceImpl implements UserService {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);
         claims.put("role", user.getRole());
-        claims.put("userGroup", StatusConstants.normalizeUserGroup(user.getUserGroup()));
+        claims.put("levelId", user.getLevelId());
         String newToken = jwtUtil.generateToken(claims);
 
         redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + userId, newToken);
@@ -167,7 +173,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public Page<User> getUserPage(Integer page, Integer limit, String province, String city, Integer status) {
+    public Page<UserAdminVO> getUserPage(Integer page, Integer limit, String province, String city, Integer status) {
         Page<User> pageParam = new Page<>(page, limit);
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(province)) {
@@ -180,7 +186,10 @@ public class UserServiceImpl implements UserService {
             wrapper.eq(User::getStatus, status);
         }
         wrapper.orderByDesc(User::getCreateTime);
-        return userMapper.selectPage(pageParam, wrapper);
+        Page<User> source = userMapper.selectPage(pageParam, wrapper);
+        Page<UserAdminVO> result = new Page<>(source.getCurrent(), source.getSize(), source.getTotal());
+        result.setRecords(source.getRecords().stream().map(this::toAdminVO).toList());
+        return result;
     }
 
     @Override
@@ -200,25 +209,46 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public void updateUserGroup(Long id, Integer userGroup) {
-        if (userGroup == null
-                || (userGroup != StatusConstants.USER_GROUP_RETAIL
-                    && userGroup != StatusConstants.USER_GROUP_WHOLESALE)) {
-            throw new BusinessException("无效的用户分组");
+    public void updateUserLevel(Long id, Long levelId) {
+        if (levelId == null) {
+            throw new BusinessException("用户等级不能为空");
         }
         User user = userMapper.selectById(id);
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
-        if (userGroup.equals(user.getUserGroup())) {
+        var level = userLevelService.getById(levelId);
+        if (level.getStatus() == null
+                || level.getStatus() != UserLevelStatusConstants.STATUS_ENABLED) {
+            throw new BusinessException("目标等级未启用");
+        }
+        if (levelId.equals(user.getLevelId())) {
             return;
         }
-        Integer oldGroup = user.getUserGroup();
-        user.setUserGroup(userGroup);
+        Long oldLevelId = user.getLevelId();
+        user.setLevelId(levelId);
         user.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(user);
-        log.info("用户分组变更, userId={}, {} -> {}", id, oldGroup, userGroup);
+        log.info("用户等级变更, userId={}, levelId: {} -> {}", id, oldLevelId, levelId);
         invalidateUserTokens(id);
+    }
+
+    private UserAdminVO toAdminVO(User user) {
+        UserAdminVO vo = new UserAdminVO();
+        vo.setId(user.getId());
+        vo.setNickname(user.getNickname());
+        vo.setAvatarUrl(user.getAvatarUrl());
+        vo.setPhone(user.getPhone());
+        vo.setProvince(user.getProvince());
+        vo.setCity(user.getCity());
+        vo.setRole(user.getRole());
+        vo.setLevelId(user.getLevelId());
+        vo.setLevelName(userLevelService.getName(user.getLevelId()));
+        vo.setStatus(user.getStatus());
+        vo.setLastLoginTime(user.getLastLoginTime());
+        vo.setLastLoginIp(user.getLastLoginIp());
+        vo.setCreateTime(user.getCreateTime());
+        return vo;
     }
 
     private void invalidateUserTokens(Long userId) {

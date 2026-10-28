@@ -35,7 +35,7 @@ public class JwtInterceptor implements HandlerInterceptor {
 
         if (StringUtil.isEmpty(token)) {
             if (isOptionalAuth(handler)) {
-                UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+                UserContext.setLevelId(null);
                 log.debug("JWT拦截-匿名访问 | URI: {}", uri);
                 return true;
             }
@@ -67,11 +67,19 @@ public class JwtInterceptor implements HandlerInterceptor {
             }
             Long userId = jwtUtil.getUserIdFromToken(token);
             Integer role = jwtUtil.getRoleFromToken(token);
-            Integer userGroup = jwtUtil.getUserGroupFromToken(token);
+            Long levelId = jwtUtil.getLevelIdFromToken(token);
+            if (Integer.valueOf(StatusConstants.USER_ROLE_REGULAR).equals(role)
+                    && (levelId == null || levelId <= 0)) {
+                log.warn("JWT拦截-普通用户Token缺少有效等级 | URI: {}", uri);
+                response.setStatus(401);
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write("{\"code\":401,\"message\":\"登录状态已更新，请重新登录\"}");
+                return false;
+            }
             UserContext.setUserId(userId);
             UserContext.setRole(role);
-            UserContext.setUserGroup(StatusConstants.normalizeUserGroup(userGroup));
-            log.debug("JWT验证通过 | URI: {} | userId: {} | role: {} | userGroup: {}", uri, userId, role, userGroup);
+            UserContext.setLevelId(levelId);
+            log.debug("JWT验证通过 | URI: {} | userId: {} | role: {} | levelId: {}", uri, userId, role, levelId);
             return true;
         } catch (Exception e) {
             log.warn("JWT拦截-Token无效 | URI: {} | 原因: {}", uri, e.getMessage());

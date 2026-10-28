@@ -11,6 +11,7 @@ import com.example.mystore.mapper.CartMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.PriceService;
+import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.util.UserContext;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +35,7 @@ public class CartServiceImpl implements CartService {
     private final SkuService skuService;
     private final SpuMapper spuMapper;
     private final PriceService priceService;
+    private final PricingRuleService pricingRuleService;
 
 @Override
     public List<CartItemVO> getCartList(Long userId) {
@@ -76,13 +78,26 @@ public class CartServiceImpl implements CartService {
 
                 List<Sku> allSkus = skusBySpu.computeIfAbsent(
                         spu.getId(), id -> skuService.getSkusBySpu(id, 1));
-                PriceService.PriceResult priceResult =
-                        priceService.resolve(sku, UserContext.getUserGroup());
-                vo.setPrice(priceResult.unitPrice());
-                vo.setMinPrice(allSkus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(sku.getPrice()));
-                vo.setMaxPrice(allSkus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(sku.getPrice()));
+                BigDecimal rate = pricingRuleService.rateFor(
+                        UserContext.getLevelId(),
+                        spu.getCategoryId(),
+                        Integer.valueOf(1).equals(spu.getExcludeDiscount()));
+                BigDecimal unitPrice = priceService.resolveUnitPrice(sku.getPrice(), rate);
+                vo.setPrice(unitPrice);
+                BigDecimal retailMin = allSkus.stream()
+                        .map(Sku::getPrice)
+                        .filter(Objects::nonNull)
+                        .min(BigDecimal::compareTo)
+                        .orElse(sku.getPrice());
+                BigDecimal retailMax = allSkus.stream()
+                        .map(Sku::getPrice)
+                        .filter(Objects::nonNull)
+                        .max(BigDecimal::compareTo)
+                        .orElse(sku.getPrice());
+                vo.setMinPrice(priceService.resolveUnitPrice(retailMin, rate));
+                vo.setMaxPrice(priceService.resolveUnitPrice(retailMax, rate));
                 vo.setQuantity(cart.getQuantity());
-                vo.setSubtotal(priceResult.unitPrice().multiply(BigDecimal.valueOf(cart.getQuantity())));
+                vo.setSubtotal(unitPrice.multiply(BigDecimal.valueOf(cart.getQuantity())));
                 vo.setStock(sku.getStock());
                 result.add(vo);
             }

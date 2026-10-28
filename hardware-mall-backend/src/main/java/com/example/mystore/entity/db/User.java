@@ -28,7 +28,7 @@ public class User {
     
     private Integer role;
     
-    private Integer userGroup;
+    private Long levelId;
     
     private Integer status;
     

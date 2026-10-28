@@ -109,6 +109,17 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="折扣规则" width="120">
+          <template #default="{ row }">
+            <el-tag
+              :type="row.excludeDiscount === 1 ? 'info' : 'success'"
+              size="small"
+              effect="light"
+            >
+              {{ row.excludeDiscount === 1 ? '不参与折扣' : '参与折扣' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag
@@ -279,6 +290,16 @@
             inactive-text="不推荐"
           />
         </el-form-item>
+        <el-form-item label="折扣规则">
+          <el-switch
+            v-model="form.excludeDiscount"
+            :active-value="1"
+            :inactive-value="0"
+            active-text="不参与折扣"
+            inactive-text="参与折扣"
+          />
+          <span class="form-tip">开启后该商品的所有等级均按零售价计算</span>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -345,19 +366,6 @@
                 :controls="false"
                 size="small"
                 class="sku-price-input"
-              />
-            </template>
-          </el-table-column>
-          <el-table-column label="批发价(元)" width="150">
-            <template #default="{ row }">
-              <el-input-number
-                v-model="row.wholesalePrice"
-                :min="0"
-                :precision="2"
-                :controls="false"
-                size="small"
-                placeholder="不设"
-                class="sku-wholesale-input"
               />
             </template>
           </el-table-column>
@@ -440,6 +448,7 @@ const form = reactive({
   weight: null as number | null,
   status: 1,
   isRecommend: 0,
+  excludeDiscount: 0,
   images: [] as string[]
 })
 
@@ -521,6 +530,7 @@ const handleAdd = () => {
     weight: null,
     status: 1,
     isRecommend: 0,
+    excludeDiscount: 0,
     images: []
   })
   dialogVisible.value = true
@@ -538,6 +548,7 @@ const handleEdit = (row: any) => {
     weight: row.weight,
     status: row.status,
     isRecommend: row.isRecommend || 0,
+    excludeDiscount: row.excludeDiscount || 0,
     images: row.images ? [...row.images] : []
   })
   dialogVisible.value = true
@@ -627,10 +638,6 @@ const handleSkuImageUpload = (row: Sku) => {
 const confirmSkuSubmit = async () => {
   skuSubmitLoading.value = true
   try {
-    if (skuList.value.some(sku => sku.wholesalePrice != null && sku.price != null && sku.wholesalePrice >= sku.price)) {
-      ElMessage.error('批发价必须低于零售价')
-      return
-    }
     for (const sku of skuList.value) {
       if (sku.id) {
         await updateSku(sku.id, sku)
@@ -639,7 +646,6 @@ const confirmSkuSubmit = async () => {
           spuId: currentSpu.value!.id!,
           specs: sku.specs,
           price: sku.price,
-          wholesalePrice: sku.wholesalePrice,
           stock: sku.stock,
           image: sku.image,
           status: sku.status || 1
@@ -1002,10 +1008,6 @@ onMounted(() => {
 
 .sku-price-input,
 .sku-stock-input,
-.sku-wholesale-input {
-  width: 100%;
-}
-
 :deep(.el-table) {
   --el-table-border-color: transparent;
 }

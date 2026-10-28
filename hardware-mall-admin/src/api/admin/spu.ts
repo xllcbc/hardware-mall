@@ -12,6 +12,7 @@ export interface Spu {
   salesCount?: number
   status?: number
   isRecommend?: number
+  excludeDiscount?: number
   createTime?: string
   updateTime?: string
   deleteTime?: number

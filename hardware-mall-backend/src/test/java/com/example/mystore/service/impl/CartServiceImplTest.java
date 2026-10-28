@@ -1,6 +1,5 @@
 package com.example.mystore.service.impl;
 
-import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
@@ -9,6 +8,7 @@ import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.mapper.CartMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.PriceService;
+import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.util.UserContext;
 import org.junit.jupiter.api.Test;
@@ -24,6 +24,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -42,23 +43,27 @@ class CartServiceImplTest {
     @Spy
     private PriceService priceService = new PriceServiceImpl();
 
+    @Mock
+    private PricingRuleService pricingRuleService;
+
     @InjectMocks
     private CartServiceImpl cartService;
 
     @Test
-    void wholesaleUser_cartShowsWholesalePriceAndSubtotal() {
-        UserContext.setUserGroup(StatusConstants.USER_GROUP_WHOLESALE);
+    void customLevel_cartUsesCategoryRate() {
+        UserContext.setLevelId(2L);
         try {
             when(cartMapper.selectList(any())).thenReturn(List.of(cart()));
             when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
             when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(spu()));
             when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(sku()));
+            when(pricingRuleService.rateFor(2L, 1L, false)).thenReturn(new BigDecimal("0.8000"));
 
             List<CartItemVO> result = cartService.getCartList(1L);
 
             CartItemVO vo = result.get(0);
-            assertThat(vo.getPrice()).isEqualByComparingTo("18.00");
-            assertThat(vo.getSubtotal()).isEqualByComparingTo("36.00");
+            assertThat(vo.getPrice()).isEqualByComparingTo("20.00");
+            assertThat(vo.getSubtotal()).isEqualByComparingTo("40.00");
         } finally {
             UserContext.clear();
         }
@@ -66,12 +71,13 @@ class CartServiceImplTest {
 
     @Test
     void retailUser_cartShowsRetailPriceAndSubtotal() {
-        UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+        UserContext.setLevelId(1L);
         try {
             when(cartMapper.selectList(any())).thenReturn(List.of(cart()));
             when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
             when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(spu()));
             when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(sku()));
+            when(pricingRuleService.rateFor(1L, 1L, false)).thenReturn(BigDecimal.ONE);
 
             List<CartItemVO> result = cartService.getCartList(1L);
 
@@ -85,21 +91,16 @@ class CartServiceImplTest {
 
     @Test
     void emptyCart_returnsEmptyList() {
-        UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
-        try {
-            when(cartMapper.selectList(any())).thenReturn(List.of());
+        when(cartMapper.selectList(any())).thenReturn(List.of());
 
-            List<CartItemVO> result = cartService.getCartList(1L);
+        List<CartItemVO> result = cartService.getCartList(1L);
 
-            assertThat(result).isEmpty();
-        } finally {
-            UserContext.clear();
-        }
+        assertThat(result).isEmpty();
     }
 
     @Test
     void offShelfSpu_lineIsSkipped() {
-        UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+        UserContext.setLevelId(1L);
         try {
             when(cartMapper.selectList(any())).thenReturn(List.of(cart()));
             when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
@@ -130,6 +131,7 @@ class CartServiceImplTest {
                 .thenReturn(Map.of(1L, firstSku, 2L, secondSku));
         when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(spu()));
         when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(firstSku));
+        when(pricingRuleService.rateFor(any(), eq(1L), eq(false))).thenReturn(BigDecimal.ONE);
 
         List<CartItemVO> result = cartService.getCartList(1L);
 
@@ -153,7 +155,6 @@ class CartServiceImplTest {
         sku.setId(1L);
         sku.setSpuId(1L);
         sku.setPrice(new BigDecimal("25.00"));
-        sku.setWholesalePrice(new BigDecimal("18.00"));
         sku.setStock(10);
         sku.setStatus(1);
         SpecVO spec = new SpecVO();
@@ -165,8 +166,10 @@ class CartServiceImplTest {
     private Spu spu() {
         Spu spu = new Spu();
         spu.setId(1L);
+        spu.setCategoryId(1L);
         spu.setStatus(1);
         spu.setDeleteTime(0L);
+        spu.setExcludeDiscount(0);
         spu.setName("测试");
         spu.setImages(List.of("img"));
         return spu;

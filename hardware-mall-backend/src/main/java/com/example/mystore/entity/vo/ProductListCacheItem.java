@@ -16,7 +16,6 @@ public class ProductListCacheItem implements Serializable {
     private BigDecimal originalPrice;
     private BigDecimal retailMinPrice;
     private BigDecimal retailMaxPrice;
-    private BigDecimal wholesaleMinPrice;
-    private BigDecimal wholesaleMaxPrice;
+    private Integer excludeDiscount;
     private Integer status;
 }

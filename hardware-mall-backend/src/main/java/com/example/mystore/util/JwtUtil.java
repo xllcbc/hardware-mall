@@ -55,11 +55,11 @@ public class JwtUtil {
         return null;
     }
 
-    public Integer getUserGroupFromToken(String token) {
+    public Long getLevelIdFromToken(String token) {
         Claims claims = parseToken(token);
-        Object group = claims.get("userGroup");
-        if (group instanceof Number) {
-            return ((Number) group).intValue();
+        Object levelId = claims.get("levelId");
+        if (levelId instanceof Number) {
+            return ((Number) levelId).longValue();
         }
         return null;
     }

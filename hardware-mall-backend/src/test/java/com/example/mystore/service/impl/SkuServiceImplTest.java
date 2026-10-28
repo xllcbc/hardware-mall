@@ -227,54 +227,6 @@ class SkuServiceImplTest {
     }
 
     @Test
-    void createSku_rejectsWholesalePriceNotBelowRetail() {
-        when(spuMapper.selectById(1L)).thenReturn(new Spu());
-
-        Sku sku = new Sku();
-        sku.setSpuId(1L);
-        sku.setPrice(new BigDecimal("20.00"));
-        sku.setWholesalePrice(new BigDecimal("20.00"));
-        assertThatThrownBy(() -> skuService.createSku(sku))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("批发价");
-    }
-
-    @Test
-    void updateSku_rejectsWholesalePriceNotBelowRetail() {
-        Sku exist = new Sku();
-        exist.setId(1L);
-        exist.setSpuId(1L);
-        exist.setPrice(new BigDecimal("20.00"));
-        when(skuMapper.selectById(1L)).thenReturn(exist);
-
-        Sku incoming = new Sku();
-        incoming.setId(1L);
-        incoming.setWholesalePrice(new BigDecimal("20.00"));
-
-        assertThatThrownBy(() -> skuService.updateSku(incoming))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("批发价");
-        verify(skuMapper, never()).updateById(any(Sku.class));
-    }
-
-    @Test
-    void updateSku_nullWholesalePrice_clearsIt() {
-        Sku exist = new Sku();
-        exist.setId(1L);
-        exist.setSpuId(1L);
-        exist.setPrice(new BigDecimal("20.00"));
-        exist.setWholesalePrice(new BigDecimal("18.00"));
-        when(skuMapper.selectById(1L)).thenReturn(exist);
-
-        Sku incoming = new Sku();
-        incoming.setId(1L);
-
-        skuService.updateSku(incoming);
-
-        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(s -> s.getWholesalePrice() == null));
-    }
-
-    @Test
     void testUpdateSku_PriceChange_InvalidatesListCache() {
         when(skuMapper.selectById(1L)).thenReturn(sku1);
 
@@ -348,29 +300,6 @@ class SkuServiceImplTest {
         verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
                 ProductCacheInvalidationEvent.Type.SKU_CHANGED, 1L, 9L, false));
         verify(eventPublisher).publishEvent(new StockCacheEvent(List.of(9L)));
-    }
-
-    @Test
-    void resurrectSku_persistsWholesalePrice() {
-        Sku deleted = tombstone(9L, 1725000000000L, "auto_c1_i1");
-        when(spuMapper.selectById(1L)).thenReturn(new Spu());
-        when(skuMapper.selectList(any())).thenReturn(Collections.singletonList(deleted));
-
-        Sku incoming = new Sku();
-        incoming.setSpuId(1L);
-        SpecVO spec = new SpecVO();
-        spec.setTemplateId(1L);
-        spec.setItemId(1L);
-        incoming.setSpecs(Arrays.asList(spec));
-        incoming.setPrice(new BigDecimal("66.00"));
-        incoming.setWholesalePrice(new BigDecimal("18.00"));
-
-        skuService.createSku(incoming);
-
-        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(
-                s -> Long.valueOf(9L).equals(s.getId())
-                        && s.getWholesalePrice() != null
-                        && s.getWholesalePrice().compareTo(new BigDecimal("18.00")) == 0));
     }
 
     @Test

@@ -15,7 +15,9 @@ import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.PriceService;
+import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.SkuService;
+import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.util.RedisLockUtil;
@@ -38,6 +40,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -83,6 +86,10 @@ class OrderServiceImplTest {
     private PaymentRecordMapper paymentRecordMapper;
     @Mock
     private WechatOrderShippingService wechatOrderShippingService;
+    @Mock
+    private PricingRuleService pricingRuleService;
+    @Mock
+    private UserLevelService userLevelService;
 
     @Spy
     private PriceService priceService = new PriceServiceImpl();
@@ -133,8 +140,14 @@ class OrderServiceImplTest {
 
         spu = new Spu();
         spu.setId(1L);
+        spu.setCategoryId(1L);
         spu.setName("防盗门锁 C级");
         spu.setSalesCount(52);
+        spu.setExcludeDiscount(0);
+        lenient().when(pricingRuleService.rateFor(any(), any(), anyBoolean()))
+                .thenReturn(BigDecimal.ONE);
+        lenient().when(pricingRuleService.resolveRetailLevelId()).thenReturn(1L);
+        lenient().when(userLevelService.getName(any())).thenReturn("零售");
     }
 
     @Test
@@ -602,9 +615,10 @@ class OrderServiceImplTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void wholesaleUser_getsWholesalePriceAndPriceType() {
-        UserContext.setUserGroup(StatusConstants.USER_GROUP_WHOLESALE);
+    void customLevel_getsDiscountedPriceAndSnapshot() {
+        UserContext.setLevelId(2L);
         try {
+            when(pricingRuleService.rateFor(2L, 1L, false)).thenReturn(new BigDecimal("0.8000"));
             when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
             when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
@@ -613,14 +627,15 @@ class OrderServiceImplTest {
             pricedSku.setId(5L);
             pricedSku.setSpuId(1L);
             pricedSku.setPrice(new BigDecimal("25.00"));
-            pricedSku.setWholesalePrice(new BigDecimal("18.00"));
             pricedSku.setStock(40);
             pricedSku.setStatus(1);
 
             Spu pricedSpu = new Spu();
             pricedSpu.setId(1L);
+            pricedSpu.setCategoryId(1L);
             pricedSpu.setName("防盗门锁 C级");
             pricedSpu.setImages(java.util.List.of("img-a.jpg"));
+            pricedSpu.setExcludeDiscount(0);
 
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, pricedSku));
             when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));
@@ -654,13 +669,14 @@ class OrderServiceImplTest {
             ArgumentCaptor<java.util.List<OrderItem>> captor = ArgumentCaptor.forClass(java.util.List.class);
             verify(orderItemMapper).insertBatch(captor.capture());
             OrderItem item = captor.getValue().get(0);
-            assertThat(item.getPrice()).isEqualByComparingTo("18.00");
-            assertThat(item.getPriceType()).isEqualTo(StatusConstants.PRICE_TYPE_WHOLESALE);
-            assertThat(item.getSubtotal()).isEqualByComparingTo("36.00");
+            assertThat(item.getPrice()).isEqualByComparingTo("20.00");
+            assertThat(item.getLevelId()).isEqualTo(2L);
+            assertThat(item.getDiscountRate()).isEqualByComparingTo("0.8000");
+            assertThat(item.getSubtotal()).isEqualByComparingTo("40.00");
 
             ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
             verify(orderMapper).insert(orderCaptor.capture());
-            assertThat(orderCaptor.getValue().getPayAmount()).isEqualByComparingTo("36.00");
+            assertThat(orderCaptor.getValue().getPayAmount()).isEqualByComparingTo("40.00");
         } finally {
             UserContext.clear();
         }
@@ -668,8 +684,8 @@ class OrderServiceImplTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void retailUser_getsRetailPriceAndPriceType() {
-        UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+    void retailUser_getsRetailPriceAndSnapshot() {
+        UserContext.setLevelId(1L);
         try {
             when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
             when(addressMapper.selectById(1L)).thenReturn(address);
@@ -679,14 +695,15 @@ class OrderServiceImplTest {
             pricedSku.setId(5L);
             pricedSku.setSpuId(1L);
             pricedSku.setPrice(new BigDecimal("25.00"));
-            pricedSku.setWholesalePrice(new BigDecimal("18.00"));
             pricedSku.setStock(40);
             pricedSku.setStatus(1);
 
             Spu pricedSpu = new Spu();
             pricedSpu.setId(1L);
+            pricedSpu.setCategoryId(1L);
             pricedSpu.setName("防盗门锁 C级");
             pricedSpu.setImages(java.util.List.of("img-a.jpg"));
+            pricedSpu.setExcludeDiscount(0);
 
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, pricedSku));
             when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));
@@ -721,7 +738,8 @@ class OrderServiceImplTest {
             verify(orderItemMapper).insertBatch(captor.capture());
             OrderItem item = captor.getValue().get(0);
             assertThat(item.getPrice()).isEqualByComparingTo("25.00");
-            assertThat(item.getPriceType()).isEqualTo(StatusConstants.PRICE_TYPE_RETAIL);
+            assertThat(item.getLevelId()).isEqualTo(1L);
+            assertThat(item.getDiscountRate()).isEqualByComparingTo("1.0000");
             assertThat(item.getSubtotal()).isEqualByComparingTo("50.00");
 
             ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
@@ -733,9 +751,49 @@ class OrderServiceImplTest {
     }
 
     @Test
+    void orderSnapshot_isVisibleToAdminOnly() {
+        Order order = new Order();
+        order.setId(100L);
+        order.setOrderNo("SO-SNAPSHOT");
+        order.setUserId(2L);
+        order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+        order.setAddressId(1L);
+        order.setLogisticsId(1L);
+        when(orderMapper.selectOne(any())).thenReturn(order);
+        when(orderMapper.selectById(100L)).thenReturn(order);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(paymentRecordMapper.selectOne(any())).thenReturn(null);
+
+        OrderItem item = new OrderItem();
+        item.setId(1L);
+        item.setOrderId(100L);
+        item.setSkuId(5L);
+        item.setSpuId(1L);
+        item.setProductName("防盗门锁 C级");
+        item.setPrice(new BigDecimal("20.00"));
+        item.setLevelId(2L);
+        item.setLevelName("批发A");
+        item.setDiscountRate(new BigDecimal("0.8000"));
+        item.setQuantity(1);
+        item.setSubtotal(new BigDecimal("20.00"));
+        when(orderItemMapper.selectList(any())).thenReturn(List.of(item));
+
+        OrderVO userView = orderService.getOrderByOrderNo("SO-SNAPSHOT");
+        assertThat(userView.getItems().get(0).getLevelId()).isNull();
+        assertThat(userView.getItems().get(0).getLevelName()).isNull();
+        assertThat(userView.getItems().get(0).getDiscountRate()).isNull();
+
+        OrderVO adminView = orderService.getAdminOrderById(100L);
+        assertThat(adminView.getItems().get(0).getLevelId()).isEqualTo(2L);
+        assertThat(adminView.getItems().get(0).getLevelName()).isEqualTo("批发A");
+        assertThat(adminView.getItems().get(0).getDiscountRate()).isEqualByComparingTo("0.8000");
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void order_usesBatchSkuLookupForDuplicateLines() {
-        UserContext.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+        UserContext.setLevelId(1L);
         try {
             when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
             when(addressMapper.selectById(1L)).thenReturn(address);

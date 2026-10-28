@@ -131,7 +131,8 @@ const menuItems = [
   { path: '/spec', title: '规格管理', icon: 'SetUp' },
   { path: '/category', title: '分类管理', icon: 'Grid' },
   { path: '/logistics', title: '物流管理', icon: 'Van' },
-  { path: '/user', title: '用户管理', icon: 'User' }
+  { path: '/user', title: '用户管理', icon: 'User' },
+  { path: '/user-level', title: '用户群体管理', icon: 'PriceTag' }
 ]
 
 const currentPageTitle = computed(() => {

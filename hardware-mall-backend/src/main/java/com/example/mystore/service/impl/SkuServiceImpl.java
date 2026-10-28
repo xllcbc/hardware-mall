@@ -269,7 +269,6 @@ public class SkuServiceImpl implements SkuService {
         if (sku.getStock() == null) {
             sku.setStock(0);
         }
-        validateWholesalePrice(sku.getPrice(), sku.getWholesalePrice());
         skuMapper.insert(sku);
         publishSkuChanged(sku.getSpuId(), sku.getId());
         publishStockEvict(sku.getId());
@@ -298,10 +297,6 @@ public class SkuServiceImpl implements SkuService {
         if (sku.getPrice() != null) {
             exist.setPrice(sku.getPrice());
         }
-        BigDecimal effectivePrice = sku.getPrice() != null ? sku.getPrice() : exist.getPrice();
-        validateWholesalePrice(effectivePrice, sku.getWholesalePrice());
-        // 管理端提交整行, wholesalePrice 为 null 表示清除批发价
-        exist.setWholesalePrice(sku.getWholesalePrice());
         if (sku.getStock() != null) {
             exist.setStock(sku.getStock());
         }
@@ -481,18 +476,6 @@ public class SkuServiceImpl implements SkuService {
         return sku.getDeleteTime() == null || sku.getDeleteTime() == 0L;
     }
 
-    private void validateWholesalePrice(BigDecimal retailPrice, BigDecimal wholesalePrice) {
-        if (wholesalePrice == null) {
-            return;
-        }
-        if (wholesalePrice.signum() < 0) {
-            throw new BusinessException("批发价不能为负");
-        }
-        if (retailPrice != null && wholesalePrice.compareTo(retailPrice) >= 0) {
-            throw new BusinessException("批发价必须低于零售价");
-        }
-    }
-
     private Sku resurrectSku(Sku tombstone, Sku incoming) {
         tombstone.setSpecs(incoming.getSpecs());
         tombstone.setSpecHash(computeSpecHash(incoming.getSpecs()));
@@ -505,9 +488,6 @@ public class SkuServiceImpl implements SkuService {
         if (incoming.getImage() != null) {
             tombstone.setImage(incoming.getImage());
         }
-        BigDecimal effectivePrice = incoming.getPrice() != null ? incoming.getPrice() : tombstone.getPrice();
-        validateWholesalePrice(effectivePrice, incoming.getWholesalePrice());
-        tombstone.setWholesalePrice(incoming.getWholesalePrice());
         tombstone.setStatus(1);
         tombstone.setDeleteTime(0L);
         tombstone.setUpdateTime(LocalDateTime.now());

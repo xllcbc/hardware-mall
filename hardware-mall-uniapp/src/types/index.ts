@@ -18,7 +18,6 @@ export interface Sku {
   spuId: number
   specs: SpecVO[]
   price: number
-  priceType?: number
   stock: number
   image?: string
   status: number
@@ -62,7 +61,6 @@ export interface ProductListVO {
   originalPrice?: number
   minPrice?: number
   maxPrice?: number
-  priceType?: number
   status: number
 }
 
@@ -162,5 +160,5 @@ export interface UserInfo {
   avatarUrl?: string
   phone?: string
   role: number
-  userGroup?: number
+  levelId?: number
 }

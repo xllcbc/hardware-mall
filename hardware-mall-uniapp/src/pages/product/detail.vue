@@ -18,8 +18,6 @@
         <view class="price-wrap">
           <text class="price-symbol">¥</text>
           <text class="price-value">{{ formatPrice(currentSkuPrice) }}</text>
-          <text v-if="showWholesalePrice" class="wholesale-tag">批发价</text>
-          <text v-if="currentSku && product.originalPrice" class="original-price">¥{{ formatPrice(product.originalPrice) }}</text>
         </view>
       </view>
 
@@ -129,13 +127,9 @@ const currentSku = computed(() => {
   }) || null
 })
 
-const showWholesalePrice = computed(() =>
-  currentSku.value?.priceType === 2
-)
-
 const currentSkuPrice = computed(() => {
   const sku = currentSku.value
-  return sku?.price || product.value.originalPrice || 0
+  return sku?.price || 0
 })
 
 const currentSkuStock = computed(() => {
@@ -369,22 +363,6 @@ const onShare = () => {
   font-size: 56rpx;
   font-weight: 700;
   color: #C9A86C;
-}
-
-.wholesale-tag {
-  margin-left: 12rpx;
-  padding: 2rpx 12rpx;
-  font-size: 20rpx;
-  color: #FFFFFF;
-  background: #C9A86C;
-  border-radius: 6rpx;
-}
-
-.original-price {
-  font-size: 24rpx;
-  color: #999999;
-  text-decoration: line-through;
-  margin-left: 16rpx;
 }
 
 .product-meta {

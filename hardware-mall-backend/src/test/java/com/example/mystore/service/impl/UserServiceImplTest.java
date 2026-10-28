@@ -5,7 +5,11 @@ import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.config.OssProperties;
 import com.example.mystore.entity.db.User;
+import com.example.mystore.entity.db.UserLevel;
+import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.mapper.UserMapper;
+import com.example.mystore.service.PricingRuleService;
+import com.example.mystore.service.UserLevelService;
 import com.example.mystore.util.JwtUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.WechatUtil;
@@ -46,6 +50,12 @@ class UserServiceImplTest {
     @Mock
     private OssProperties ossProperties;
 
+    @Mock
+    private PricingRuleService pricingRuleService;
+
+    @Mock
+    private UserLevelService userLevelService;
+
     @InjectMocks
     private UserServiceImpl userService;
 
@@ -60,6 +70,7 @@ class UserServiceImplTest {
         user.setPhone("13800001001");
         user.setRole(StatusConstants.USER_ROLE_REGULAR);
         user.setStatus(StatusConstants.USER_STATUS_NORMAL);
+        user.setLevelId(1L);
     }
 
     @Test
@@ -218,28 +229,45 @@ class UserServiceImplTest {
     }
 
     @Test
-    void updateUserGroup_persistsWholesale() {
+    void updateUserLevel_persistsTargetLevel() {
         User u = new User();
         u.setId(5L);
-        u.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+        u.setLevelId(1L);
         when(userMapper.selectById(5L)).thenReturn(u);
-        userService.updateUserGroup(5L, StatusConstants.USER_GROUP_WHOLESALE);
-        assertThat(u.getUserGroup()).isEqualTo(StatusConstants.USER_GROUP_WHOLESALE);
+        UserLevel level = new UserLevel();
+        level.setId(2L);
+        level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
+        when(userLevelService.getById(2L)).thenReturn(level);
+        userService.updateUserLevel(5L, 2L);
+        assertThat(u.getLevelId()).isEqualTo(2L);
         verify(userMapper).updateById(u);
     }
 
     @Test
-    void updateUserGroup_rejectsUnknownValue() {
-        assertThatThrownBy(() -> userService.updateUserGroup(5L, 99))
+    void updateUserLevel_rejectsDisabledLevel() {
+        User u = new User();
+        u.setId(5L);
+        u.setLevelId(1L);
+        when(userMapper.selectById(5L)).thenReturn(u);
+        UserLevel level = new UserLevel();
+        level.setId(2L);
+        level.setStatus(UserLevelStatusConstants.STATUS_DISABLED);
+        when(userLevelService.getById(2L)).thenReturn(level);
+
+        assertThatThrownBy(() -> userService.updateUserLevel(5L, 2L))
                 .isInstanceOf(BusinessException.class);
     }
 
     @Test
-    void updateUserGroup_invalidatesExistingTokens() {
+    void updateUserLevel_invalidatesExistingTokens() {
         User u = new User();
         u.setId(5L);
-        u.setUserGroup(StatusConstants.USER_GROUP_RETAIL);
+        u.setLevelId(1L);
         when(userMapper.selectById(5L)).thenReturn(u);
+        UserLevel level = new UserLevel();
+        level.setId(2L);
+        level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
+        when(userLevelService.getById(2L)).thenReturn(level);
 
         Set<String> tokens = new HashSet<>();
         tokens.add("live_token");
@@ -247,7 +275,7 @@ class UserServiceImplTest {
         when(jwtUtil.getExpirationFromToken("live_token"))
                 .thenReturn(System.currentTimeMillis() + 3600_000L);
 
-        userService.updateUserGroup(5L, StatusConstants.USER_GROUP_WHOLESALE);
+        userService.updateUserLevel(5L, 2L);
 
         verify(redisUtil).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
                 eq("1"), anyLong(), eq(TimeUnit.SECONDS));
@@ -255,13 +283,17 @@ class UserServiceImplTest {
     }
 
     @Test
-    void updateUserGroup_sameGroup_doesNotTouchTokens() {
+    void updateUserLevel_sameLevel_doesNotTouchTokens() {
         User u = new User();
         u.setId(5L);
-        u.setUserGroup(StatusConstants.USER_GROUP_WHOLESALE);
+        u.setLevelId(2L);
         when(userMapper.selectById(5L)).thenReturn(u);
+        UserLevel level = new UserLevel();
+        level.setId(2L);
+        level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
+        when(userLevelService.getById(2L)).thenReturn(level);
 
-        userService.updateUserGroup(5L, StatusConstants.USER_GROUP_WHOLESALE);
+        userService.updateUserLevel(5L, 2L);
 
         verify(userMapper, never()).updateById(any(User.class));
         verifyNoInteractions(redisUtil);
@@ -273,6 +305,7 @@ class UserServiceImplTest {
         user.setId(2L);
         user.setStatus(1);
         user.setRole(1);
+        user.setLevelId(1L);
         when(userMapper.selectById(2L)).thenReturn(user);
         when(jwtUtil.generateToken(anyMap())).thenReturn("new_token");
         when(jwtUtil.getExpirationFromToken("old_token")).thenReturn(System.currentTimeMillis() + 3600000);
@@ -283,6 +316,7 @@ class UserServiceImplTest {
         verify(jwtUtil).generateToken(argThat(claims ->
                 claims.containsKey("userId") && claims.get("userId").equals(2L)
                         && claims.containsKey("role")
+                        && claims.get("levelId").equals(1L)
         ));
         verify(redisUtil).sAdd("user:tokens:" + 2L, "new_token");
         verify(redisUtil).sRemove("user:tokens:" + 2L, "old_token");

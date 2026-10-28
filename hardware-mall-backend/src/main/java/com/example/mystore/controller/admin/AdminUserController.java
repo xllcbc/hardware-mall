@@ -2,7 +2,7 @@ package com.example.mystore.controller.admin;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.result.Result;
-import com.example.mystore.entity.db.User;
+import com.example.mystore.entity.vo.UserAdminVO;
 import com.example.mystore.service.UserService;
 import com.example.mystore.annotation.RequireAdmin;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +19,7 @@ public class AdminUserController {
     private final UserService userService;
 
     @GetMapping("/list")
-    public Result<Page<User>> getUserList(
+    public Result<Page<UserAdminVO>> getUserList(
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "20") Integer limit,
             @RequestParam(required = false) String province,
@@ -47,11 +47,11 @@ public class AdminUserController {
         return Result.success();
     }
 
-    @PutMapping("/{id}/group")
-    public Result<Void> updateUserGroup(
+    @PutMapping("/{id}/level")
+    public Result<Void> updateUserLevel(
             @PathVariable Long id,
-            @RequestBody Map<String, Integer> params) {
-        userService.updateUserGroup(id, params.get("userGroup"));
+            @RequestBody Map<String, Long> params) {
+        userService.updateUserLevel(id, params.get("levelId"));
         return Result.success();
     }
 }

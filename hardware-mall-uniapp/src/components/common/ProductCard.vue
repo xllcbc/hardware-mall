@@ -10,7 +10,6 @@
         <view class="price-wrap">
           <text class="price-symbol">¥</text>
           <text class="price-value">{{ displayPrice }}</text>
-          <text v-if="showWholesaleTag" class="wholesale-tag">批发价</text>
         </view>
       </view>
     </view>
@@ -29,7 +28,6 @@ interface Props {
   originalPrice?: number | string
   minPrice?: number | string
   maxPrice?: number | string
-  priceType?: number
 }
 
 const props = defineProps<Props>()
@@ -42,8 +40,6 @@ const formatPrice = (price: number | string | undefined) => {
   const num = typeof price === 'string' ? parseFloat(price) : price
   return isNaN(num) ? '0.00' : num.toFixed(2)
 }
-
-const showWholesaleTag = computed(() => props.priceType === 2)
 
 const displayPrice = computed(() => {
   if (props.minPrice != null) {
@@ -156,16 +152,5 @@ const onClick = () => {
   white-space: nowrap;
   max-width: 100%;
 }
-
-.wholesale-tag {
-  flex-shrink: 0;
-  margin-left: 12rpx;
-  padding: 2rpx 12rpx;
-  font-size: 20rpx;
-  color: #FFFFFF;
-  background: #C9A86C;
-  border-radius: 6rpx;
-}
-
 
 </style>

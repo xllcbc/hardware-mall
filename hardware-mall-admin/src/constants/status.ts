@@ -73,17 +73,6 @@ export const USER_STATUS_TEXT: Record<number, string> = {
   [USER_STATUS.DISABLED]: '禁用',
 }
 
-// ==================== 用户分组(定价维度) ====================
-export const USER_GROUP = {
-  RETAIL: 1,     // 零售
-  WHOLESALE: 2,  // 批发商
-} as const
-
-export const USER_GROUP_TEXT: Record<number, string> = {
-  [USER_GROUP.RETAIL]: '零售',
-  [USER_GROUP.WHOLESALE]: '批发商',
-}
-
 // ==================== 商品状态 ====================
 export const PRODUCT_STATUS = {
   ON_SHELF: 1,    // 上架
