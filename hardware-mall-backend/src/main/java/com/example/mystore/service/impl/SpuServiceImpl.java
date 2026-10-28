@@ -2,6 +2,7 @@ package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Spu;
@@ -109,7 +110,7 @@ public class SpuServiceImpl implements SpuService {
         spu.setSalesCount(0);
         spu.setDeleteTime(0L);
         if (spu.getExcludeDiscount() == null) {
-            spu.setExcludeDiscount(0);
+            spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         }
         if (spu.getStatus() == null) {
             spu.setStatus(StatusConstants.PRODUCT_STATUS_ON_SHELF);
@@ -371,7 +372,7 @@ public class SpuServiceImpl implements SpuService {
         BigDecimal rate = pricingRuleService.rateFor(
                 UserContext.getLevelId(),
                 cache.getSpu().getCategoryId(),
-                Integer.valueOf(1).equals(cache.getSpu().getExcludeDiscount()));
+                DiscountConstants.isExcluded(cache.getSpu().getExcludeDiscount()));
         List<ProductSkuVO> skus = toProductSkuVOs(cache.getSkus(), rate);
         BigDecimal minPrice = null;
         BigDecimal maxPrice = null;
@@ -435,7 +436,7 @@ public class SpuServiceImpl implements SpuService {
             BigDecimal rate = pricingRuleService.rateFor(
                     levelId,
                     source.getCategoryId(),
-                    Integer.valueOf(1).equals(source.getExcludeDiscount()));
+                    DiscountConstants.isExcluded(source.getExcludeDiscount()));
             if (source.getRetailMinPrice() != null) {
                 target.setMinPrice(priceService.resolveUnitPrice(source.getRetailMinPrice(), rate));
             }
@@ -468,7 +469,7 @@ public class SpuServiceImpl implements SpuService {
             vo.setRetailMaxPrice(item.getRetailMaxPrice());
             vo.setExcludeDiscount(item.getExcludeDiscount());
             BigDecimal rate = pricingRuleService.rateFor(
-                    levelId, item.getCategoryId(), Integer.valueOf(1).equals(item.getExcludeDiscount()));
+                    levelId, item.getCategoryId(), DiscountConstants.isExcluded(item.getExcludeDiscount()));
             vo.setDiscountRate(rate);
             if (item.getRetailMinPrice() != null) {
                 vo.setMinPrice(priceService.resolveUnitPrice(item.getRetailMinPrice(), rate));

@@ -160,7 +160,7 @@
         </el-table-column>
         <el-table-column label="折扣规则" width="120">
           <template #default="{ row }">
-            {{ row.excludeDiscount === 1 ? '不参与折扣' : '参与折扣' }}
+            {{ getExcludeDiscountText(row.excludeDiscount) }}
           </template>
         </el-table-column>
       </el-table>
@@ -197,6 +197,7 @@ import {
   type UserLevelProductPreview
 } from '@/api/admin/userLevel'
 import { getCategoryList, type Category } from '@/api/admin/category'
+import { getExcludeDiscountText } from '@/constants/discount'
 
 const route = useRoute()
 const isPrototypeRoute = computed(

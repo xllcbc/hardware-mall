@@ -1,5 +1,6 @@
 package com.example.mystore.service.impl;
 
+import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
@@ -67,7 +68,8 @@ class SpuServiceImplTest {
 
     @Test
     void productList_appliesCategoryRateToRetailRange() {
-        ProductListCacheItem item = listItem(1L, "100.00", "200.00", 0);
+        ProductListCacheItem item = listItem(
+                1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         when(productCacheService.getProductList(eq(1L), eq(1), eq(10), eq(1), any()))
                 .thenReturn(new ProductListResult(List.of(item), 1));
         when(pricingRuleService.rateFor(2L, 1L, false)).thenReturn(new BigDecimal("0.8000"));
@@ -82,7 +84,8 @@ class SpuServiceImplTest {
 
     @Test
     void productList_excludeDiscountKeepsRetail() {
-        ProductListCacheItem item = listItem(1L, "100.00", "200.00", 1);
+        ProductListCacheItem item = listItem(
+                1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
         when(productCacheService.getProductList(any(), anyInt(), anyInt(), anyInt(), any()))
                 .thenReturn(new ProductListResult(List.of(item), 1));
         when(pricingRuleService.rateFor(2L, 1L, true)).thenReturn(BigDecimal.ONE);
@@ -97,7 +100,7 @@ class SpuServiceImplTest {
 
     @Test
     void productDetail_appliesRateAndReadsFreshStock() {
-        Spu spu = spu(1L, 1L, 0);
+        Spu spu = spu(1L, 1L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         Sku sku = sku(10L, 1L, "10.00");
         ProductDetailCache cache = detailCache(spu, List.of(sku));
         when(productCacheService.getProductDetail(eq(1L), any())).thenReturn(cache);
@@ -114,7 +117,7 @@ class SpuServiceImplTest {
 
     @Test
     void productDetail_withoutSkuUsesOriginalPriceTimesRate() {
-        Spu spu = spu(1L, 1L, 0);
+        Spu spu = spu(1L, 1L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         spu.setOriginalPrice(new BigDecimal("10.00"));
         when(productCacheService.getProductDetail(eq(1L), any()))
                 .thenReturn(detailCache(spu, Collections.emptyList()));
@@ -130,7 +133,7 @@ class SpuServiceImplTest {
 
     @Test
     void productSkusReuseDetailCache() {
-        Spu spu = spu(1L, 1L, 0);
+        Spu spu = spu(1L, 1L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         ProductDetailCache cache = detailCache(spu, List.of(sku(10L, 1L, "10.00")));
         when(productCacheService.getProductDetail(eq(1L), any())).thenReturn(cache);
         when(pricingRuleService.rateFor(any(), any(), anyBoolean())).thenReturn(BigDecimal.ONE);
@@ -142,7 +145,8 @@ class SpuServiceImplTest {
 
     @Test
     void levelPreviewUsesNeutralListCacheAndTargetLevelRate() {
-        ProductListCacheItem item = listItem(1L, "100.00", "200.00", 0);
+        ProductListCacheItem item = listItem(
+                1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         when(productCacheService.getProductList(any(), anyInt(), anyInt(), anyInt(), any()))
                 .thenReturn(new ProductListResult(List.of(item), 1));
         when(pricingRuleService.rateFor(2L, 1L, false)).thenReturn(new BigDecimal("0.7000"));
@@ -164,20 +168,20 @@ class SpuServiceImplTest {
         spuService.createSpu(incoming);
 
         verify(spuMapper).insert(org.mockito.ArgumentMatchers.<Spu>argThat(
-                spu -> spu.getExcludeDiscount() == 0));
+                spu -> spu.getExcludeDiscount() == DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED));
     }
 
     @Test
     void updateSpuCopiesExcludeDiscountAndPublishesEvent() {
-        Spu exist = spu(1L, 1L, 0);
+        Spu exist = spu(1L, 1L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         when(spuMapper.selectById(1L)).thenReturn(exist);
         Spu update = new Spu();
         update.setId(1L);
-        update.setExcludeDiscount(1);
+        update.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
 
         spuService.updateSpu(update);
 
-        assertThat(exist.getExcludeDiscount()).isEqualTo(1);
+        assertThat(exist.getExcludeDiscount()).isEqualTo(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
         verify(eventPublisher).publishEvent(any(ProductCacheInvalidationEvent.class));
     }
 
