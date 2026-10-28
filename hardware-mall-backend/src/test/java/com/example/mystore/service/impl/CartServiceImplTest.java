@@ -1,5 +1,6 @@
 package com.example.mystore.service.impl;
 
+import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
@@ -169,7 +170,7 @@ class CartServiceImplTest {
         spu.setCategoryId(1L);
         spu.setStatus(1);
         spu.setDeleteTime(0L);
-        spu.setExcludeDiscount(0);
+        spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         spu.setName("测试");
         spu.setImages(List.of("img"));
         return spu;

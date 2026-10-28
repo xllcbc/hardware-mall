@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
+import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.exception.BusinessException;
@@ -143,7 +144,7 @@ class OrderServiceImplTest {
         spu.setCategoryId(1L);
         spu.setName("防盗门锁 C级");
         spu.setSalesCount(52);
-        spu.setExcludeDiscount(0);
+        spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         lenient().when(pricingRuleService.rateFor(any(), any(), anyBoolean()))
                 .thenReturn(BigDecimal.ONE);
         lenient().when(pricingRuleService.resolveRetailLevelId()).thenReturn(1L);
@@ -635,7 +636,7 @@ class OrderServiceImplTest {
             pricedSpu.setCategoryId(1L);
             pricedSpu.setName("防盗门锁 C级");
             pricedSpu.setImages(java.util.List.of("img-a.jpg"));
-            pricedSpu.setExcludeDiscount(0);
+            pricedSpu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
 
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, pricedSku));
             when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));
@@ -703,7 +704,7 @@ class OrderServiceImplTest {
             pricedSpu.setCategoryId(1L);
             pricedSpu.setName("防盗门锁 C级");
             pricedSpu.setImages(java.util.List.of("img-a.jpg"));
-            pricedSpu.setExcludeDiscount(0);
+            pricedSpu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
 
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, pricedSku));
             when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));

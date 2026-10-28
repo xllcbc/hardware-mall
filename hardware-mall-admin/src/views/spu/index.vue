@@ -112,11 +112,11 @@
         <el-table-column label="折扣规则" width="120">
           <template #default="{ row }">
             <el-tag
-              :type="row.excludeDiscount === 1 ? 'info' : 'success'"
+              :type="getExcludeDiscountTagType(row.excludeDiscount)"
               size="small"
               effect="light"
             >
-              {{ row.excludeDiscount === 1 ? '不参与折扣' : '参与折扣' }}
+              {{ getExcludeDiscountText(row.excludeDiscount) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -293,10 +293,10 @@
         <el-form-item label="折扣规则">
           <el-switch
             v-model="form.excludeDiscount"
-            :active-value="1"
-            :inactive-value="0"
-            active-text="不参与折扣"
-            inactive-text="参与折扣"
+            :active-value="DISCOUNT_PARTICIPATION.DISABLED"
+            :inactive-value="DISCOUNT_PARTICIPATION.ENABLED"
+            :active-text="DISCOUNT_PARTICIPATION_TEXT[DISCOUNT_PARTICIPATION.DISABLED]"
+            :inactive-text="DISCOUNT_PARTICIPATION_TEXT[DISCOUNT_PARTICIPATION.ENABLED]"
           />
           <span class="form-tip">开启后该商品的所有等级均按零售价计算</span>
         </el-form-item>
@@ -563,6 +563,12 @@ import {
   IMAGE_UPLOAD_ACCEPT,
   validateImageFile
 } from '@/constants/upload'
+import {
+  DISCOUNT_PARTICIPATION,
+  DISCOUNT_PARTICIPATION_TEXT,
+  getExcludeDiscountTagType,
+  getExcludeDiscountText
+} from '@/constants/discount'
 
 interface SkuConfigRow extends Sku {
   rowKey: string
@@ -620,7 +626,7 @@ const form = reactive({
   weight: null as number | null,
   status: 1,
   isRecommend: 0,
-  excludeDiscount: 0,
+  excludeDiscount: DISCOUNT_PARTICIPATION.ENABLED,
   images: [] as string[]
 })
 
@@ -702,7 +708,7 @@ const handleAdd = () => {
     weight: null,
     status: 1,
     isRecommend: 0,
-    excludeDiscount: 0,
+    excludeDiscount: DISCOUNT_PARTICIPATION.ENABLED,
     images: []
   })
   dialogVisible.value = true
@@ -720,7 +726,7 @@ const handleEdit = (row: any) => {
     weight: row.weight,
     status: row.status,
     isRecommend: row.isRecommend || 0,
-    excludeDiscount: row.excludeDiscount || 0,
+    excludeDiscount: row.excludeDiscount ?? DISCOUNT_PARTICIPATION.ENABLED,
     images: row.images ? [...row.images] : []
   })
   dialogVisible.value = true
