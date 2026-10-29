@@ -72,10 +72,20 @@ const router = createRouter({
 
 router.beforeEach((to, _from, next) => {
   const authStore = useAuthStore()
+  const isPrototypePreview =
+    import.meta.env.DEV &&
+    (
+      (to.path === '/user-level' && to.query.prototype === '1') ||
+      (
+        ['/spu', '/user'].includes(to.path) &&
+        to.query.prototype === 'price-view'
+      )
+    )
+
   if (to.path === '/login') {
     next()
   } else {
-    if (authStore.isLoggedIn) {
+    if (authStore.isLoggedIn || isPrototypePreview) {
       next()
     } else {
       next('/login')

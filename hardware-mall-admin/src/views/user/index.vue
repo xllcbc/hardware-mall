@@ -1,4 +1,7 @@
 <template>
+  <LevelUsersPrototype v-if="isLevelUsersPrototype && LevelUsersPrototype" />
+
+  <template v-else>
   <div class="user-management">
     <div class="page-header animate-fade-in-down">
       <div class="header-content">
@@ -162,11 +165,12 @@
       </template>
     </el-dialog>
   </div>
+  </template>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, watch, computed, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { provinceCityOptions } from '@/utils/regions'
 import { getUserList, updateUserStatus, updateUserRegion, updateUserLevel } from '@/api/admin/user'
@@ -174,6 +178,13 @@ import { getUserLevelList, type UserLevel } from '@/api/admin/userLevel'
 import { USER_ROLE, USER_ROLE_TEXT, USER_STATUS, USER_STATUS_TEXT } from '@/constants/status'
 
 const router = useRouter()
+const route = useRoute()
+const isLevelUsersPrototype = computed(
+  () => import.meta.env.DEV && route.query.prototype === 'price-view'
+)
+const LevelUsersPrototype = import.meta.env.DEV
+  ? defineAsyncComponent(() => import('./__prototype/LevelUsersPrototype.vue'))
+  : null
 const loading = ref(false)
 const tableData = ref<any[]>([])
 
@@ -296,9 +307,13 @@ const loadLevels = async () => {
   }
 }
 
-onMounted(() => {
-  loadLevels()
-  loadData()
+watch(isLevelUsersPrototype, (isPrototype) => {
+  if (!isPrototype) {
+    loadLevels()
+    loadData()
+  }
+}, {
+  immediate: true
 })
 </script>
 

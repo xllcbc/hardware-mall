@@ -1,5 +1,7 @@
 <template>
-  <div class="user-level-management">
+  <UserLevelPrototype v-if="isPrototypeRoute && UserLevelPrototype" />
+
+  <div v-else class="user-level-management">
     <div class="page-header animate-fade-in-down">
       <div class="header-content">
         <h2 class="page-title">用户群体管理</h2>
@@ -176,7 +178,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, defineAsyncComponent, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   copyUserLevelDiscounts,
@@ -195,6 +198,13 @@ import {
 } from '@/api/admin/userLevel'
 import { getCategoryList, type Category } from '@/api/admin/category'
 
+const route = useRoute()
+const isPrototypeRoute = computed(
+  () => import.meta.env.DEV && route.query.prototype === '1'
+)
+const UserLevelPrototype = import.meta.env.DEV
+  ? defineAsyncComponent(() => import('./__prototype/UserLevelPrototype.vue'))
+  : null
 const loading = ref(false)
 const submitLoading = ref(false)
 const matrixLoading = ref(false)
@@ -387,9 +397,13 @@ const formatRange = (min?: number, max?: number) => {
 const formatRate = (rate?: number) =>
   rate == null ? '-' : Number(rate).toFixed(4)
 
-onMounted(() => {
-  loadLevels()
-  loadCategories()
+watch(isPrototypeRoute, (isPrototype) => {
+  if (!isPrototype) {
+    loadLevels()
+    loadCategories()
+  }
+}, {
+  immediate: true
 })
 </script>
 

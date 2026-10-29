@@ -1,4 +1,7 @@
 <template>
+  <PriceViewPrototype v-if="isPriceViewPrototype && PriceViewPrototype" />
+
+  <template v-else>
   <div class="spu-management">
     <el-image-viewer
       v-if="previewVisible"
@@ -400,10 +403,12 @@
       </template>
     </el-dialog>
   </div>
+  </template>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, defineAsyncComponent, ref, reactive, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ElImageViewer } from 'element-plus'
 import { getCategoryList } from '@/api/admin/category'
@@ -411,6 +416,13 @@ import { getSpuList, createSpu, updateSpu, deleteSpu, updateSpuStatus, Spu } fro
 import { getSkusBySpu, getSkuCounts, createSku, updateSku, deleteSku, generateSkus, Sku } from '@/api/admin/sku'
 import { uploadProductImage } from '@/api/admin/upload'
 
+const route = useRoute()
+const isPriceViewPrototype = computed(
+  () => import.meta.env.DEV && route.query.prototype === 'price-view'
+)
+const PriceViewPrototype = import.meta.env.DEV
+  ? defineAsyncComponent(() => import('./__prototype/PriceViewPrototype.vue'))
+  : null
 const loading = ref(false)
 const submitLoading = ref(false)
 const skuSubmitLoading = ref(false)
@@ -722,10 +734,14 @@ const confirmSubmit = async () => {
   }
 }
 
-onMounted(() => {
-  loadCategoryList().then(() => {
-    loadData()
-  })
+watch(isPriceViewPrototype, (isPrototype) => {
+  if (!isPrototype) {
+    loadCategoryList().then(() => {
+      loadData()
+    })
+  }
+}, {
+  immediate: true
 })
 </script>
 
