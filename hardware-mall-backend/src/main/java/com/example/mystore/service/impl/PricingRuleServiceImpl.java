@@ -150,8 +150,10 @@ public class PricingRuleServiceImpl implements PricingRuleService {
             throw new BusinessException("零售等级没有可复制的倍率矩阵");
         }
         Map<Long, BigDecimal> sourceRates = loadRates(sourceLevelId);
+        levelCategoryDiscountMapper.delete(new LambdaQueryWrapper<LevelCategoryDiscount>()
+                .eq(LevelCategoryDiscount::getLevelId, levelId));
         for (Map.Entry<Long, BigDecimal> entry : sourceRates.entrySet()) {
-            upsertRate(levelId, entry.getKey(), entry.getValue());
+            insertRate(levelId, entry.getKey(), entry.getValue());
         }
         eventPublisher.publishEvent(new PricingCacheInvalidationEvent(
                 PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, levelId));
@@ -216,18 +218,22 @@ public class PricingRuleServiceImpl implements PricingRuleService {
                         .eq(LevelCategoryDiscount::getCategoryId, categoryId)
                         .last("LIMIT 1"));
         if (existing == null) {
-            LevelCategoryDiscount row = new LevelCategoryDiscount();
-            row.setLevelId(levelId);
-            row.setCategoryId(categoryId);
-            row.setRate(rate);
-            row.setCreateTime(LocalDateTime.now());
-            row.setUpdateTime(LocalDateTime.now());
-            levelCategoryDiscountMapper.insert(row);
+            insertRate(levelId, categoryId, rate);
             return;
         }
         existing.setRate(rate);
         existing.setUpdateTime(LocalDateTime.now());
         levelCategoryDiscountMapper.updateById(existing);
+    }
+
+    private void insertRate(Long levelId, Long categoryId, BigDecimal rate) {
+        LevelCategoryDiscount row = new LevelCategoryDiscount();
+        row.setLevelId(levelId);
+        row.setCategoryId(categoryId);
+        row.setRate(rate);
+        row.setCreateTime(LocalDateTime.now());
+        row.setUpdateTime(LocalDateTime.now());
+        levelCategoryDiscountMapper.insert(row);
     }
 
     private UserLevel requireLevel(Long levelId) {
