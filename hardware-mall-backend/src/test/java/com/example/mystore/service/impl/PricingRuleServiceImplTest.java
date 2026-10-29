@@ -13,6 +13,7 @@ import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.util.RedisUtil;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -154,7 +155,7 @@ class PricingRuleServiceImplTest {
     }
 
     @Test
-    void copyDiscounts_publishesPricingInvalidationInsteadOfEvictingInTransaction() {
+    void copyDiscounts_replacesTargetMatrixAndPreservesSourceGap() {
         when(userLevelMapper.selectById(2L)).thenReturn(customLevel(2L));
         when(userLevelMapper.selectById(3L)).thenReturn(customLevel(3L));
         LevelCategoryDiscount source = new LevelCategoryDiscount();
@@ -162,10 +163,21 @@ class PricingRuleServiceImplTest {
         source.setCategoryId(9L);
         source.setRate(new BigDecimal("0.6000"));
         when(levelCategoryDiscountMapper.selectList(any())).thenReturn(List.of(source));
-        when(levelCategoryDiscountMapper.selectOne(any())).thenReturn(null);
+        when(levelCategoryDiscountMapper.delete(any())).thenReturn(1);
 
         pricingRuleService.copyDiscounts(2L, 3L);
 
+        verify(levelCategoryDiscountMapper).delete(any());
+        ArgumentCaptor<LevelCategoryDiscount> inserted = ArgumentCaptor.forClass(LevelCategoryDiscount.class);
+        verify(levelCategoryDiscountMapper).insert(inserted.capture());
+        assertThat(inserted.getAllValues())
+                .singleElement()
+                .satisfies(row -> {
+                    assertThat(row.getLevelId()).isEqualTo(2L);
+                    assertThat(row.getCategoryId()).isEqualTo(9L);
+                    assertThat(row.getRate()).isEqualByComparingTo("0.6000");
+                });
+        verify(levelCategoryDiscountMapper, never()).updateById(any(LevelCategoryDiscount.class));
         verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
                 PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, 2L));
         verify(redisUtil, never()).delete(anyString());
