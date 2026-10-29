@@ -10,12 +10,14 @@ import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.entity.dto.LevelDiscountItemRequest;
 import com.example.mystore.entity.vo.LevelDiscountVO;
 import com.example.mystore.entity.vo.PricingLevelCache;
+import com.example.mystore.event.PricingCacheInvalidationEvent;
 import com.example.mystore.mapper.CategoryMapper;
 import com.example.mystore.mapper.LevelCategoryDiscountMapper;
 import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +38,7 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     private final LevelCategoryDiscountMapper levelCategoryDiscountMapper;
     private final CategoryMapper categoryMapper;
     private final RedisUtil redisUtil;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public BigDecimal rateFor(Long levelId, Long categoryId, boolean excludeDiscount) {
@@ -112,7 +115,8 @@ public class PricingRuleServiceImpl implements PricingRuleService {
             validateRate(item.getRate());
             upsertRate(levelId, item.getCategoryId(), item.getRate());
         }
-        evictLevelCache(levelId);
+        eventPublisher.publishEvent(new PricingCacheInvalidationEvent(
+                PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, levelId));
     }
 
     @Override
@@ -126,7 +130,8 @@ public class PricingRuleServiceImpl implements PricingRuleService {
         for (Category category : categories) {
             upsertRate(levelId, category.getId(), rate);
         }
-        evictLevelCache(levelId);
+        eventPublisher.publishEvent(new PricingCacheInvalidationEvent(
+                PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, levelId));
     }
 
     @Override
@@ -148,7 +153,8 @@ public class PricingRuleServiceImpl implements PricingRuleService {
         for (Map.Entry<Long, BigDecimal> entry : sourceRates.entrySet()) {
             upsertRate(levelId, entry.getKey(), entry.getValue());
         }
-        evictLevelCache(levelId);
+        eventPublisher.publishEvent(new PricingCacheInvalidationEvent(
+                PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, levelId));
     }
 
     @Override
@@ -169,13 +175,13 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     @Override
     public void evictLevelCache(Long levelId) {
         if (levelId != null) {
-            redisUtil.delete(RedisConstants.PREFIX_PRICING_LEVEL + levelId);
+            redisUtil.evictWithLock(RedisConstants.PREFIX_PRICING_LEVEL + levelId);
         }
     }
 
     @Override
     public void evictRetailLevelIdCache() {
-        redisUtil.delete(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID);
+        redisUtil.evictWithLock(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID);
     }
 
     private PricingLevelCache getLevelCache(Long levelId) {

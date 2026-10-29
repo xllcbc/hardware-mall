@@ -7,12 +7,14 @@ import com.example.mystore.entity.db.LevelCategoryDiscount;
 import com.example.mystore.entity.db.User;
 import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.entity.vo.UserLevelVO;
+import com.example.mystore.event.PricingCacheInvalidationEvent;
 import com.example.mystore.mapper.LevelCategoryDiscountMapper;
 import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.UserLevelService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -29,6 +31,7 @@ public class UserLevelServiceImpl implements UserLevelService {
     private final LevelCategoryDiscountMapper levelCategoryDiscountMapper;
     private final UserMapper userMapper;
     private final PricingRuleService pricingRuleService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public List<UserLevelVO> list() {
@@ -108,6 +111,7 @@ public class UserLevelServiceImpl implements UserLevelService {
     }
 
     @Override
+    @Transactional
     public void updateStatus(Long id, Integer status) {
         UserLevel level = getById(id);
         if (Integer.valueOf(UserLevelStatusConstants.IS_RETAIL).equals(level.getIsRetail())) {
@@ -124,8 +128,8 @@ public class UserLevelServiceImpl implements UserLevelService {
         level.setStatus(status);
         level.setUpdateTime(LocalDateTime.now());
         userLevelMapper.updateById(level);
-        pricingRuleService.evictLevelCache(id);
-        pricingRuleService.evictRetailLevelIdCache();
+        eventPublisher.publishEvent(new PricingCacheInvalidationEvent(
+                PricingCacheInvalidationEvent.Type.LEVEL_AVAILABILITY_CHANGED, id));
     }
 
     @Override
@@ -143,8 +147,8 @@ public class UserLevelServiceImpl implements UserLevelService {
         levelCategoryDiscountMapper.delete(new LambdaQueryWrapper<LevelCategoryDiscount>()
                 .eq(LevelCategoryDiscount::getLevelId, id));
         userLevelMapper.deleteById(id);
-        pricingRuleService.evictLevelCache(id);
-        pricingRuleService.evictRetailLevelIdCache();
+        eventPublisher.publishEvent(new PricingCacheInvalidationEvent(
+                PricingCacheInvalidationEvent.Type.LEVEL_AVAILABILITY_CHANGED, id));
     }
 
     @Override

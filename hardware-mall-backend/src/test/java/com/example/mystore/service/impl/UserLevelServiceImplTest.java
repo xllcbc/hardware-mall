@@ -3,6 +3,7 @@ package com.example.mystore.service.impl;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.UserLevel;
+import com.example.mystore.event.PricingCacheInvalidationEvent;
 import com.example.mystore.mapper.LevelCategoryDiscountMapper;
 import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.mapper.UserMapper;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -28,6 +30,8 @@ class UserLevelServiceImplTest {
     private UserMapper userMapper;
     @Mock
     private PricingRuleService pricingRuleService;
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private UserLevelServiceImpl userLevelService;
@@ -61,5 +65,40 @@ class UserLevelServiceImplTest {
         assertThatThrownBy(() -> userLevelService.updateStatus(2L, UserLevelStatusConstants.STATUS_ENABLED))
                 .isInstanceOf(BusinessException.class);
         verify(userLevelMapper, never()).updateById(any(UserLevel.class));
+    }
+
+    @Test
+    void statusChange_publishesPricingOnlyInvalidation() {
+        UserLevel level = customLevel(2L);
+        when(userLevelMapper.selectById(2L)).thenReturn(level);
+        when(pricingRuleService.isComplete(2L)).thenReturn(true);
+
+        userLevelService.updateStatus(2L, UserLevelStatusConstants.STATUS_ENABLED);
+
+        verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
+                PricingCacheInvalidationEvent.Type.LEVEL_AVAILABILITY_CHANGED, 2L));
+        verify(pricingRuleService, never()).evictLevelCache(any());
+        verify(pricingRuleService, never()).evictRetailLevelIdCache();
+    }
+
+    @Test
+    void delete_publishesPricingOnlyInvalidation() {
+        when(userLevelMapper.selectById(2L)).thenReturn(customLevel(2L));
+        when(userMapper.selectCount(any())).thenReturn(0L);
+
+        userLevelService.delete(2L);
+
+        verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
+                PricingCacheInvalidationEvent.Type.LEVEL_AVAILABILITY_CHANGED, 2L));
+        verify(pricingRuleService, never()).evictLevelCache(any());
+        verify(pricingRuleService, never()).evictRetailLevelIdCache();
+    }
+
+    private UserLevel customLevel(Long id) {
+        UserLevel level = new UserLevel();
+        level.setId(id);
+        level.setIsRetail(UserLevelStatusConstants.NOT_RETAIL);
+        level.setStatus(UserLevelStatusConstants.STATUS_DISABLED);
+        return level;
     }
 }
