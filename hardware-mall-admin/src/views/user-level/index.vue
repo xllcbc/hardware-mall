@@ -178,7 +178,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, h, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -228,6 +228,90 @@ const previewPagination = reactive({ page: 1, limit: 20, total: 0 })
 const copySourceLevels = computed(() =>
   levelList.value.filter(level => level.id !== currentLevel.value?.id && level.isRetail !== 1)
 )
+
+interface PricingImpactOptions {
+  level: UserLevel
+  categoryCount: number
+  title: string
+  description: string
+  confirmButtonText: string
+  sourceLevel?: UserLevel
+}
+
+const renderImpactRow = (label: string, value: string) =>
+  h('div', {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: '20px'
+    }
+  }, [
+    h('span', { style: { color: 'var(--el-text-color-secondary)' } }, label),
+    h('strong', {
+      style: {
+        color: 'var(--el-text-color-primary)',
+        textAlign: 'right',
+        wordBreak: 'break-word'
+      }
+    }, value)
+  ])
+
+const confirmPricingImpact = async ({
+  level,
+  categoryCount,
+  title,
+  description,
+  confirmButtonText,
+  sourceLevel
+}: PricingImpactOptions) => {
+  const rows = [
+    renderImpactRow('等级名称', level.name),
+    renderImpactRow('用户数', `${Number(level.userCount || 0).toLocaleString('zh-CN')} 人`),
+    renderImpactRow('分类数量', `${categoryCount} 个`)
+  ]
+  if (sourceLevel) {
+    rows.push(renderImpactRow('来源等级', sourceLevel.name))
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      h('div', {
+        style: {
+          display: 'grid',
+          gap: '12px'
+        }
+      }, [
+        h('p', {
+          style: {
+            margin: '0',
+            color: 'var(--el-text-color-regular)',
+            lineHeight: '1.6'
+          }
+        }, description),
+        h('div', {
+          style: {
+            display: 'grid',
+            gap: '8px',
+            padding: '12px',
+            border: '1px solid var(--el-border-color-lighter)',
+            borderRadius: '6px',
+            background: 'var(--el-fill-color-lighter)'
+          }
+        }, rows)
+      ]),
+      title,
+      {
+        type: 'warning',
+        confirmButtonText,
+        cancelButtonText: '取消'
+      }
+    )
+    return true
+  } catch {
+    return false
+  }
+}
 
 const loadLevels = async () => {
   loading.value = true
@@ -319,6 +403,14 @@ const saveMatrix = async () => {
     ElMessage.warning('请至少配置一个分类倍率')
     return
   }
+  const confirmed = await confirmPricingImpact({
+    level: currentLevel.value,
+    categoryCount: discountList.value.length,
+    title: '确认保存倍率矩阵',
+    description: '保存后将立即影响该等级用户的商品取价。',
+    confirmButtonText: '确认保存'
+  })
+  if (!confirmed) return
   matrixLoading.value = true
   try {
     await saveUserLevelDiscounts(currentLevel.value.id, items)
@@ -341,6 +433,14 @@ const fillAll = async () => {
     ElMessage.warning('倍率必须在 (0, 1] 之间')
     return
   }
+  const confirmed = await confirmPricingImpact({
+    level: currentLevel.value,
+    categoryCount: discountList.value.length,
+    title: '确认一键填充',
+    description: `将把全部分类倍率覆盖为 ${rate.toFixed(4)}，保存后将立即影响该等级用户的商品取价。`,
+    confirmButtonText: '确认填充'
+  })
+  if (!confirmed) return
   await fillUserLevelDiscounts(currentLevel.value.id, rate)
   ElMessage.success('已填充全部分类')
   discountList.value = await getUserLevelDiscounts(currentLevel.value.id) || []
@@ -351,6 +451,20 @@ const copyMatrix = async () => {
     ElMessage.warning('请选择来源等级')
     return
   }
+  const sourceLevel = levelList.value.find(level => level.id === copySourceLevelId.value)
+  if (!sourceLevel) {
+    ElMessage.warning('来源等级不存在，请重新选择')
+    return
+  }
+  const confirmed = await confirmPricingImpact({
+    level: currentLevel.value,
+    categoryCount: discountList.value.length,
+    title: '确认复制倍率矩阵',
+    description: '目标等级现有倍率将被来源等级的已配置矩阵替换，来源缺失的分类仍会保持缺口。',
+    confirmButtonText: '确认复制',
+    sourceLevel
+  })
+  if (!confirmed) return
   matrixLoading.value = true
   try {
     await copyUserLevelDiscounts(currentLevel.value.id, copySourceLevelId.value)
