@@ -212,7 +212,7 @@ class UserServiceImplTest {
         Set<String> tokens = new HashSet<>();
         tokens.add("expired_token");
         tokens.add("live_token");
-        when(redisUtil.sMembers("user:tokens:2", String.class)).thenReturn(tokens);
+        when(redisUtil.sMembers(RedisConstants.PREFIX_USER_TOKENS + 2L, String.class)).thenReturn(tokens);
 
         when(jwtUtil.getExpirationFromToken("expired_token"))
                 .thenThrow(new ExpiredJwtException(null, null, "JWT expired"));
@@ -223,10 +223,10 @@ class UserServiceImplTest {
 
         verify(userMapper).updateById(argThat((User u) -> u.getStatus() == StatusConstants.USER_STATUS_DISABLED));
         verify(redisUtil).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
-                eq("1"), anyLong(), eq(TimeUnit.SECONDS));
+                eq(RedisConstants.TOKEN_BLACKLIST_VALUE), anyLong(), eq(TimeUnit.SECONDS));
         verify(redisUtil, never()).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "expired_token"),
                 any(), anyLong(), any(TimeUnit.class));
-        verify(redisUtil).delete("user:tokens:2");
+        verify(redisUtil).delete(RedisConstants.PREFIX_USER_TOKENS + 2L);
     }
 
     @Test
@@ -272,15 +272,15 @@ class UserServiceImplTest {
 
         Set<String> tokens = new HashSet<>();
         tokens.add("live_token");
-        when(redisUtil.sMembers("user:tokens:5", String.class)).thenReturn(tokens);
+        when(redisUtil.sMembers(RedisConstants.PREFIX_USER_TOKENS + 5L, String.class)).thenReturn(tokens);
         when(jwtUtil.getExpirationFromToken("live_token"))
                 .thenReturn(System.currentTimeMillis() + 3600_000L);
 
         userService.updateUserLevel(5L, 2L);
 
         verify(redisUtil).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
-                eq("1"), anyLong(), eq(TimeUnit.SECONDS));
-        verify(redisUtil).delete("user:tokens:5");
+                eq(RedisConstants.TOKEN_BLACKLIST_VALUE), anyLong(), eq(TimeUnit.SECONDS));
+        verify(redisUtil).delete(RedisConstants.PREFIX_USER_TOKENS + 5L);
     }
 
     @Test
@@ -296,23 +296,23 @@ class UserServiceImplTest {
 
         Set<String> tokens = new HashSet<>();
         tokens.add("live_token");
-        when(redisUtil.sMembers("user:tokens:5", String.class)).thenReturn(tokens);
+        when(redisUtil.sMembers(RedisConstants.PREFIX_USER_TOKENS + 5L, String.class)).thenReturn(tokens);
         when(jwtUtil.getExpirationFromToken("live_token"))
                 .thenReturn(System.currentTimeMillis() + 3600_000L);
         doThrow(new RedisConnectionFailureException("redis unavailable"))
                 .doNothing()
                 .when(redisUtil).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
-                        eq("1"), anyLong(), eq(TimeUnit.SECONDS));
+                        eq(RedisConstants.TOKEN_BLACKLIST_VALUE), anyLong(), eq(TimeUnit.SECONDS));
 
         assertThatThrownBy(() -> userService.updateUserLevel(5L, 2L))
                 .isInstanceOf(RedisConnectionFailureException.class);
         userService.updateUserLevel(5L, 2L);
 
         verify(userMapper, never()).updateById(any(User.class));
-        verify(redisUtil, times(2)).sMembers("user:tokens:5", String.class);
+        verify(redisUtil, times(2)).sMembers(RedisConstants.PREFIX_USER_TOKENS + 5L, String.class);
         verify(redisUtil, times(2)).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
-                eq("1"), anyLong(), eq(TimeUnit.SECONDS));
-        verify(redisUtil).delete("user:tokens:5");
+                eq(RedisConstants.TOKEN_BLACKLIST_VALUE), anyLong(), eq(TimeUnit.SECONDS));
+        verify(redisUtil).delete(RedisConstants.PREFIX_USER_TOKENS + 5L);
     }
 
     @Test
@@ -334,8 +334,8 @@ class UserServiceImplTest {
                         && claims.containsKey("role")
                         && claims.get("levelId").equals(1L)
         ));
-        verify(redisUtil).sAdd("user:tokens:" + 2L, "new_token");
-        verify(redisUtil).sRemove("user:tokens:" + 2L, "old_token");
+        verify(redisUtil).sAdd(RedisConstants.PREFIX_USER_TOKENS + 2L, "new_token");
+        verify(redisUtil).sRemove(RedisConstants.PREFIX_USER_TOKENS + 2L, "old_token");
     }
 
     @Test

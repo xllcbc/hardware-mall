@@ -166,7 +166,8 @@ public class UserServiceImpl implements UserService {
 
         long ttl = (jwtUtil.getExpirationFromToken(oldToken) - System.currentTimeMillis()) / 1000;
         if (ttl > 0) {
-            redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + oldToken, "1", ttl, TimeUnit.SECONDS);
+            redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + oldToken,
+                    RedisConstants.TOKEN_BLACKLIST_VALUE, ttl, TimeUnit.SECONDS);
         }
 
         return newToken;
@@ -257,7 +258,8 @@ public class UserServiceImpl implements UserService {
                 try {
                     long ttl = (jwtUtil.getExpirationFromToken(token) - System.currentTimeMillis()) / 1000;
                     if (ttl > 0) {
-                        redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + token, "1", ttl, TimeUnit.SECONDS);
+                        redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + token,
+                                RedisConstants.TOKEN_BLACKLIST_VALUE, ttl, TimeUnit.SECONDS);
                     }
                 } catch (JwtException e) {
                     // 已自然过期或损坏的死 token 无需拉黑（拦截器本就会 401），跳过继续
@@ -273,7 +275,8 @@ public class UserServiceImpl implements UserService {
         redisUtil.sRemove(RedisConstants.PREFIX_USER_TOKENS + userId, token);
         long ttl = (jwtUtil.getExpirationFromToken(token) - System.currentTimeMillis()) / 1000;
         if (ttl > 0) {
-            redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + token, "1", ttl, TimeUnit.SECONDS);
+            redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + token,
+                    RedisConstants.TOKEN_BLACKLIST_VALUE, ttl, TimeUnit.SECONDS);
         }
     }
 
