@@ -4,17 +4,19 @@ import { ElMessage } from 'element-plus'
 import router from '@/router'
 import { useAuthStore } from '@/stores/auth'
 
-const http = axios.create({
+export const http = axios.create({
   baseURL: '/api',
   timeout: 10000
 })
 
 export interface RequestConfig extends AxiosRequestConfig {
   skipAuthRefresh?: boolean
+  skipErrorMessage?: boolean
 }
 
 interface RetryConfig extends InternalAxiosRequestConfig {
   skipAuthRefresh?: boolean
+  skipErrorMessage?: boolean
   _retry?: boolean
 }
 
@@ -65,7 +67,9 @@ http.interceptors.response.use(
           .then((data) => Promise.resolve(data))
           .catch(() => Promise.reject(new Error(res.message || '登录已过期')))
       }
-      ElMessage.error(res.message || '请求失败')
+      if (!config.skipErrorMessage) {
+        ElMessage.error(res.message || '请求失败')
+      }
       return Promise.reject(new Error(res.message || '请求失败'))
     }
     return res.data
@@ -82,7 +86,12 @@ http.interceptors.response.use(
       return handle401(config).catch(() => forceLogout(error))
     }
     if (error.response?.status === 413) {
-      ElMessage.error('图片过大，请压缩后重新上传')
+      if (!config?.skipErrorMessage) {
+        ElMessage.error('图片过大，请压缩后重新上传')
+      }
+      return Promise.reject(error)
+    }
+    if (config?.skipErrorMessage) {
       return Promise.reject(error)
     }
     ElMessage.error(error.message || '网络错误')

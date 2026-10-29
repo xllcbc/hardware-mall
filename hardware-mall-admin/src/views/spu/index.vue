@@ -538,6 +538,10 @@ import {
   SpecVO
 } from '@/api/admin/sku'
 import { uploadProductImage } from '@/api/admin/upload'
+import {
+  IMAGE_UPLOAD_ACCEPT,
+  validateImageFile
+} from '@/constants/upload'
 
 interface SkuConfigRow extends Sku {
   rowKey: string
@@ -922,20 +926,21 @@ const applyBatchValue = () => {
 const handleSkuImageUpload = (row: SkuConfigRow) => {
   const input = document.createElement('input')
   input.type = 'file'
-  input.accept = 'image/*'
+  input.accept = IMAGE_UPLOAD_ACCEPT
   input.onchange = async (e: any) => {
     const file = e.target.files[0]
     if (!file) return
-    if (file.size > 10 * 1024 * 1024) {
-      ElMessage.error('图片过大，请上传 10MB 以内的图片')
+    const validationError = validateImageFile(file)
+    if (validationError) {
+      ElMessage.error(validationError)
       return
     }
     try {
       const result = await uploadProductImage(file, currentSpu.value?.categoryId)
       row.image = result.url
       ElMessage.success('图片上传成功')
-    } catch {
-      ElMessage.error('图片上传失败')
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '图片上传失败')
     }
   }
   input.click()
@@ -976,15 +981,9 @@ const confirmSkuSubmit = async () => {
 }
 
 const beforeImageUpload = (file: File) => {
-  const isImage = file.type === 'image/jpeg' || file.type === 'image/png' || file.type === 'image/gif' || file.type === 'image/jpg'
-  const isLt5M = file.size / 1024 / 1024 < 5
-
-  if (!isImage) {
-    ElMessage.error('只能上传 JPG、PNG、GIF 格式的图片!')
-    return false
-  }
-  if (!isLt5M) {
-    ElMessage.error('图片大小不能超过 5MB!')
+  const validationError = validateImageFile(file)
+  if (validationError) {
+    ElMessage.error(validationError)
     return false
   }
   return true
@@ -999,7 +998,7 @@ const handleImageUpload = async (options: any) => {
     ElMessage.success('图片上传成功')
     onSuccess()
   } catch (error) {
-    ElMessage.error('图片上传失败')
+    ElMessage.error(error instanceof Error ? error.message : '图片上传失败')
     onError(error)
   }
 }
