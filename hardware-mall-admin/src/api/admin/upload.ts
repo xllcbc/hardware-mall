@@ -1,38 +1,37 @@
 import request from '@/utils/request'
+import {
+  getUploadErrorMessage,
+  IMAGE_UPLOAD_TIMEOUT_MS
+} from '@/constants/upload'
 
 export interface UploadResult {
   url: string
 }
 
-export const uploadProductImage = (file: File, categoryId?: number) => {
+const uploadFile = async (url: string, file: File, categoryId?: number) => {
   const formData = new FormData()
   formData.append('file', file)
   if (categoryId != null) {
     formData.append('categoryId', String(categoryId))
   }
-  return request.post<UploadResult>('/admin/upload/product', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  })
+  try {
+    return await request.post<UploadResult>(url, formData, {
+      timeout: IMAGE_UPLOAD_TIMEOUT_MS,
+      skipErrorMessage: true
+    })
+  } catch (error) {
+    throw new Error(getUploadErrorMessage(error))
+  }
+}
+
+export const uploadProductImage = (file: File, categoryId?: number) => {
+  return uploadFile('/admin/upload/product', file, categoryId)
 }
 
 export const uploadAvatar = (file: File) => {
-  const formData = new FormData()
-  formData.append('file', file)
-  return request.post<UploadResult>('/admin/upload/avatar', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  })
+  return uploadFile('/admin/upload/avatar', file)
 }
 
 export const uploadBanner = (file: File) => {
-  const formData = new FormData()
-  formData.append('file', file)
-  return request.post<UploadResult>('/admin/upload/banner', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  })
+  return uploadFile('/admin/upload/banner', file)
 }

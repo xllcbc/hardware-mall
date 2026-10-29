@@ -1,7 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.aliyun.oss.OSS;
-import com.aliyun.oss.OSSClientBuilder;
+import com.aliyun.oss.model.ObjectMetadata;
 import com.aliyun.oss.model.PutObjectRequest;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.config.OssProperties;
@@ -11,7 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
@@ -21,10 +21,12 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class OssServiceImpl implements OssService {
 
+    private final OSS ossClient;
     private final OssProperties ossProperties;
 
     @Override
     public String uploadFile(MultipartFile file, String dir) {
+        long startedAt = System.nanoTime();
         String extension = "";
         String originalFilename = file.getOriginalFilename();
         if (originalFilename != null && originalFilename.contains(".")) {
@@ -36,23 +38,27 @@ public class OssServiceImpl implements OssService {
                 + extension;
 
         String objectName = dir + newFilename;
+        log.info("OSS 上传开始: bucket={}, object={}, size={}B",
+                ossProperties.getBucketName(), objectName, file.getSize());
 
-        OSS ossClient = new OSSClientBuilder().build(
-                "https://oss-" + ossProperties.getRegion() + ".aliyuncs.com",
-                ossProperties.getAccessKeyId(),
-                ossProperties.getAccessKeySecret()
-        );
-
-        try {
+        try (InputStream inputStream = file.getInputStream()) {
+            ObjectMetadata metadata = new ObjectMetadata();
+            metadata.setContentLength(file.getSize());
+            if (file.getContentType() != null && !file.getContentType().isBlank()) {
+                metadata.setContentType(file.getContentType());
+            }
             ossClient.putObject(new PutObjectRequest(
                     ossProperties.getBucketName(),
                     objectName,
-                    new ByteArrayInputStream(file.getBytes())
+                    inputStream,
+                    metadata
             ));
+            log.info("OSS 上传完成: object={}, elapsedMs={}",
+                    objectName, elapsedMillis(startedAt));
         } catch (Exception e) {
-            throw new BusinessException("文件上传失败: " + e.getMessage());
-        } finally {
-            ossClient.shutdown();
+            log.error("OSS 上传失败: bucket={}, object={}, size={}B, elapsedMs={}",
+                    ossProperties.getBucketName(), objectName, file.getSize(), elapsedMillis(startedAt), e);
+            throw new BusinessException("图片上传失败，请稍后重试");
         }
 
         return ossProperties.getDomain() + "/" + objectName;
@@ -69,17 +75,14 @@ public class OssServiceImpl implements OssService {
             return;
         }
         String objectName = url.substring(prefix.length());
-        OSS ossClient = new OSSClientBuilder().build(
-                "https://oss-" + ossProperties.getRegion() + ".aliyuncs.com",
-                ossProperties.getAccessKeyId(),
-                ossProperties.getAccessKeySecret()
-        );
         try {
             ossClient.deleteObject(ossProperties.getBucketName(), objectName);
         } catch (Exception e) {
             log.warn("OSS 删除失败, objectName={}, error={}", objectName, e.getMessage());
-        } finally {
-            ossClient.shutdown();
         }
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 }

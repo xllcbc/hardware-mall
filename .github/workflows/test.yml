@@ -54,10 +54,11 @@ jobs:
           node-version: 18
           cache: npm
           cache-dependency-path: hardware-mall-admin/package-lock.json
-      - name: Build admin
+      - name: Test and build admin
         working-directory: hardware-mall-admin
         run: |
           npm ci
+          npm test
           npm run build
 
   uniapp-build:
