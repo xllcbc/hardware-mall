@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
@@ -187,6 +188,20 @@ class ProductCacheServiceImplTest {
                 RedisConstants.CACHE_NULL,
                 RedisConstants.CACHE_NULL_TTL,
                 TimeUnit.SECONDS);
+    }
+
+    @Test
+    void getSkusByIds_nullSentinelHit_preservesNullPlaceholderWithoutLoading() {
+        when(redisUtil.multiGet(List.of(RedisConstants.PREFIX_SKU_INFO + 9L)))
+                .thenReturn(Collections.singletonList(RedisConstants.CACHE_NULL));
+        when(redisUtil.isNull(RedisConstants.CACHE_NULL)).thenReturn(true);
+
+        List<Sku> result = productCacheService.getSkusByIds(List.of(9L), ids -> {
+            throw new AssertionError("空值哨兵命中时不应回源数据库");
+        });
+
+        assertThat(result).containsExactly((Sku) null);
+        verify(redisUtil, never()).set(any(), any(), anyLong(), any());
     }
 
     private Sku sku(Long id) {
