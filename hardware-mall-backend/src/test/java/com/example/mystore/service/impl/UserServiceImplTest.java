@@ -20,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.RedisConnectionFailureException;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -283,7 +284,7 @@ class UserServiceImplTest {
     }
 
     @Test
-    void updateUserLevel_sameLevel_doesNotTouchTokens() {
+    void updateUserLevel_sameLevel_retryInvalidatesTokensAfterFirstFailure() {
         User u = new User();
         u.setId(5L);
         u.setLevelId(2L);
@@ -293,10 +294,25 @@ class UserServiceImplTest {
         level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
         when(userLevelService.getById(2L)).thenReturn(level);
 
+        Set<String> tokens = new HashSet<>();
+        tokens.add("live_token");
+        when(redisUtil.sMembers("user:tokens:5", String.class)).thenReturn(tokens);
+        when(jwtUtil.getExpirationFromToken("live_token"))
+                .thenReturn(System.currentTimeMillis() + 3600_000L);
+        doThrow(new RedisConnectionFailureException("redis unavailable"))
+                .doNothing()
+                .when(redisUtil).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
+                        eq("1"), anyLong(), eq(TimeUnit.SECONDS));
+
+        assertThatThrownBy(() -> userService.updateUserLevel(5L, 2L))
+                .isInstanceOf(RedisConnectionFailureException.class);
         userService.updateUserLevel(5L, 2L);
 
         verify(userMapper, never()).updateById(any(User.class));
-        verifyNoInteractions(redisUtil);
+        verify(redisUtil, times(2)).sMembers("user:tokens:5", String.class);
+        verify(redisUtil, times(2)).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
+                eq("1"), anyLong(), eq(TimeUnit.SECONDS));
+        verify(redisUtil).delete("user:tokens:5");
     }
 
     @Test

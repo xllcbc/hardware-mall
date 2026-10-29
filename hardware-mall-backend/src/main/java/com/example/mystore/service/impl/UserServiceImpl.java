@@ -222,14 +222,13 @@ public class UserServiceImpl implements UserService {
                 || level.getStatus() != UserLevelStatusConstants.STATUS_ENABLED) {
             throw new BusinessException("目标等级未启用");
         }
-        if (levelId.equals(user.getLevelId())) {
-            return;
-        }
         Long oldLevelId = user.getLevelId();
-        user.setLevelId(levelId);
-        user.setUpdateTime(LocalDateTime.now());
-        userMapper.updateById(user);
-        log.info("用户等级变更, userId={}, levelId: {} -> {}", id, oldLevelId, levelId);
+        if (!levelId.equals(oldLevelId)) {
+            user.setLevelId(levelId);
+            user.setUpdateTime(LocalDateTime.now());
+            userMapper.updateById(user);
+            log.info("用户等级变更, userId={}, levelId: {} -> {}", id, oldLevelId, levelId);
+        }
         invalidateUserTokens(id);
     }
 
