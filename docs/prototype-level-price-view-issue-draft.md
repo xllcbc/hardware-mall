@@ -1,5 +1,11 @@
 # Implementation issue draft: 分级价格视图与用户等级筛选
 
+Created issue：
+
+```text
+https://github.com/xllcbc/hardware-mall/issues/11
+```
+
 推荐标题：
 
 ```text

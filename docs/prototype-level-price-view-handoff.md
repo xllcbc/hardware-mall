@@ -6,6 +6,8 @@
 
 原型分支：`codex/prototype-level-price-view`
 
+Implementation issue：[#11](https://github.com/xllcbc/hardware-mall/issues/11)
+
 ## 原型要回答的问题
 
 如何在不新增独立页面的前提下，让管理员：
@@ -168,6 +170,7 @@ keyword
 ## 主 Session 交接提示
 
 ```text
+Implementation issue: https://github.com/xllcbc/hardware-mall/issues/11
 先读取 docs/prototype-level-price-view-handoff.md。
 正式实现必须从最新 main 开始，不要复制原型 mock 数据或原型路由旁路。
 商品页以最新 main 的两步式 SKU 配置为基线，只增加价格视角、后端价格字段和紧凑列布局。
