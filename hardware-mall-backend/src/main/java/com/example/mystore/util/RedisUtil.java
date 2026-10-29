@@ -81,6 +81,20 @@ public class RedisUtil {
         redisTemplate.delete(key);
     }
 
+    /**
+     * 与缓存重建使用同一把锁删除缓存，避免并发读在重建过程中把旧值重新写回。
+     */
+    public void evictWithLock(String key) {
+        while (!redisLockUtil.tryLock(key)) {
+            sleepQuietly(nextSleep());
+        }
+        try {
+            delete(key);
+        } finally {
+            redisLockUtil.unlock(key);
+        }
+    }
+
     public void delete(Collection<String> keys) {
         redisTemplate.delete(keys);
     }
