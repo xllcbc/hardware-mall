@@ -124,7 +124,10 @@ public class SkuServiceImpl implements SkuService {
         List<Long> missingStockIds = new ArrayList<>();
         for (int i = 0; i < skuList.size(); i++) {
             Object cached = cachedStocks == null ? null : cachedStocks.get(i);
-            if (cached != null && !redisUtil.isNull(cached)) {
+            if (redisUtil.isNull(cached)) {
+                continue;
+            }
+            if (cached != null) {
                 skuList.get(i).setStock(Integer.parseInt(cached.toString()));
             } else {
                 missingStockIds.add(skuList.get(i).getId());
@@ -139,7 +142,11 @@ public class SkuServiceImpl implements SkuService {
             Sku stockRow = stockRows.get(sku.getId());
             if (stockRow != null && stockRow.getStock() != null) {
                 sku.setStock(stockRow.getStock());
-                redisUtil.set(RedisConstants.PREFIX_SKU_STOCK + sku.getId(), stockRow.getStock());
+                redisUtil.set(
+                        RedisConstants.PREFIX_SKU_STOCK + sku.getId(),
+                        stockRow.getStock(),
+                        RedisConstants.SKU_STOCK_TTL_SECONDS,
+                        TimeUnit.SECONDS);
             }
         }
     }

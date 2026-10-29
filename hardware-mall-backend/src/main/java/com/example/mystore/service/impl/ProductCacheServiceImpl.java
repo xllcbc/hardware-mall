@@ -106,7 +106,10 @@ public class ProductCacheServiceImpl implements ProductCacheService {
         List<Long> missingIds = new ArrayList<>();
         for (int i = 0; i < skuIds.size(); i++) {
             Object value = cachedValues.get(i);
-            if (value instanceof Sku sku && !redisUtil.isNull(value)) {
+            if (redisUtil.isNull(value)) {
+                continue;
+            }
+            if (value instanceof Sku sku) {
                 result.set(i, sku);
             } else {
                 missingIds.add(skuIds.get(i));

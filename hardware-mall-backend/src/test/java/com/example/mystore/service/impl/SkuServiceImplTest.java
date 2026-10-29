@@ -130,7 +130,45 @@ class SkuServiceImplTest {
 
         assertThat(result).containsOnlyKeys(1L);
         assertThat(result.get(1L).getStock()).isEqualTo(55);
-        verify(redisUtil).set(RedisConstants.PREFIX_SKU_STOCK + 1L, 55);
+        verify(redisUtil).set(
+                RedisConstants.PREFIX_SKU_STOCK + 1L,
+                55,
+                RedisConstants.SKU_STOCK_TTL_SECONDS,
+                TimeUnit.SECONDS);
+    }
+
+    @Test
+    void getSkuMapByIds_stockNullSentinel_returnsNullStockWithoutDbQuery() {
+        when(productCacheService.getSkusByIds(eq(List.of(1L, 2L)), any()))
+                .thenReturn(Arrays.asList(sku1, sku2));
+        when(redisUtil.multiGet(List.of(
+                RedisConstants.PREFIX_SKU_STOCK + 1L,
+                RedisConstants.PREFIX_SKU_STOCK + 2L)))
+                .thenReturn(Arrays.asList(RedisConstants.CACHE_NULL, 30));
+        when(redisUtil.isNull(RedisConstants.CACHE_NULL)).thenReturn(true);
+
+        Map<Long, Sku> result = skuService.getSkuMapByIds(List.of(1L, 2L));
+
+        assertThat(result.get(1L).getStock()).isNull();
+        assertThat(result.get(2L).getStock()).isEqualTo(30);
+        verify(skuMapper, never()).selectBatchIds(any());
+    }
+
+    @Test
+    void getSkuMapByIds_allStockHits_returnsCachedStocksWithoutDbQuery() {
+        when(productCacheService.getSkusByIds(eq(List.of(1L, 2L)), any()))
+                .thenReturn(Arrays.asList(sku1, sku2));
+        when(redisUtil.multiGet(List.of(
+                RedisConstants.PREFIX_SKU_STOCK + 1L,
+                RedisConstants.PREFIX_SKU_STOCK + 2L)))
+                .thenReturn(Arrays.asList(50, 30));
+
+        Map<Long, Sku> result = skuService.getSkuMapByIds(List.of(1L, 2L));
+
+        assertThat(result.get(1L).getStock()).isEqualTo(50);
+        assertThat(result.get(2L).getStock()).isEqualTo(30);
+        verify(skuMapper, never()).selectBatchIds(any());
+        verify(redisUtil, never()).set(any(), any(), anyLong(), any());
     }
 
     @Test
