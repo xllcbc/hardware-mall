@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.entity.db.Category;
 import com.example.mystore.entity.db.LevelCategoryDiscount;
@@ -103,7 +104,7 @@ class PricingRuleServiceCopyMatrixTest {
         category.setParentId(0L);
         category.setName(name);
         category.setSortOrder(0);
-        category.setStatus(1);
+        category.setStatus(StatusConstants.CATEGORY_STATUS_ENABLED);
         category.setDeleteTime(0L);
         categoryMapper.insert(category);
         return category.getId();
