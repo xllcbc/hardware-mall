@@ -16,8 +16,11 @@
     <view class="product-content">
       <view class="price-section">
         <view class="price-wrap">
-          <text class="price-symbol">¥</text>
-          <text class="price-value">{{ formatPrice(currentSkuPrice) }}</text>
+          <template v-if="displayPrice !== null">
+            <text class="price-symbol">¥</text>
+            <text class="price-value">{{ formatPrice(displayPrice) }}</text>
+          </template>
+          <text v-else class="price-placeholder">请选择规格</text>
           <text v-if="currentSku && product.originalPrice" class="original-price">¥{{ formatPrice(product.originalPrice) }}</text>
         </view>
       </view>
@@ -128,9 +131,18 @@ const currentSku = computed(() => {
   }) || null
 })
 
-const currentSkuPrice = computed(() => {
-  return currentSku.value?.price || product.value.originalPrice || 0
+const selectedSkuPrice = computed(() => {
+  return currentSku.value?.price ?? null
 })
+
+const availableMinPrice = computed<number | null>(() => {
+  const value = detailData.value?.minPrice
+  if (value == null) return null
+  const numericValue = Number(value)
+  return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null
+})
+
+const displayPrice = computed(() => selectedSkuPrice.value ?? availableMinPrice.value)
 
 const currentSkuStock = computed(() => {
   return currentSku.value?.stock || 0
@@ -198,10 +210,10 @@ const selectSpec = (templateId: number, itemId: number, value: string) => {
   selectedSpecs.value[templateId] = { itemId, value }
 }
 
-const formatPrice = (price: number | string | undefined) => {
-  if (!price) return '0.00'
+const formatPrice = (price: number | string | null | undefined) => {
+  if (price == null || price === '') return ''
   const num = typeof price === 'string' ? parseFloat(price) : price
-  return isNaN(num) ? '0.00' : num.toFixed(2)
+  return Number.isFinite(num) ? num.toFixed(2) : ''
 }
 
 onMounted(async () => {
@@ -238,7 +250,7 @@ const toggleFavorite = () => {
     id: product.value.id,
     name: product.value.name || '',
     image: product.value.images?.[0] || '/static/images/face.jpg',
-    minPrice: detailData.value?.minPrice || currentSkuPrice.value,
+    minPrice: detailData.value?.minPrice || selectedSkuPrice.value || product.value.originalPrice || 0,
     originalPrice: product.value.originalPrice
   })
 }
@@ -301,7 +313,7 @@ const buyNow = async () => {
     productName: product.value.name,
     productImage: currentSku.value.image || product.value.images?.[0] || '/static/images/face.jpg',
     spec: specStr,
-    price: currentSkuPrice.value,
+    price: currentSku.value.price,
     quantity: quantity.value
   })
 
@@ -367,6 +379,11 @@ const onShare = () => {
   font-size: 56rpx;
   font-weight: 700;
   color: #C9A86C;
+}
+
+.price-placeholder {
+  font-size: 30rpx;
+  color: #999999;
 }
 
 .original-price {
