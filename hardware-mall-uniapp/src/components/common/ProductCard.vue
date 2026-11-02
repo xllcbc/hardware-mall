@@ -42,8 +42,11 @@ const formatPrice = (price: number | string | undefined) => {
 }
 
 const displayPrice = computed(() => {
-  if (props.minPrice != null && props.minPrice !== props.originalPrice) {
-    return formatPrice(props.minPrice) + '起'
+  if (props.minPrice != null) {
+    if (props.maxPrice != null && props.maxPrice !== props.minPrice) {
+      return formatPrice(props.minPrice) + '起'
+    }
+    return formatPrice(props.minPrice)
   }
   return formatPrice(props.price ?? props.originalPrice)
 })
@@ -149,6 +152,5 @@ const onClick = () => {
   white-space: nowrap;
   max-width: 100%;
 }
-
 
 </style>

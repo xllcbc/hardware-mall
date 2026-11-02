@@ -4,6 +4,7 @@ public class UserContext {
 
     private static final ThreadLocal<Long> userIdHolder = new ThreadLocal<>();
     private static final ThreadLocal<Integer> roleHolder = new ThreadLocal<>();
+    private static final ThreadLocal<Long> levelIdHolder = new ThreadLocal<>();
 
     public static void setUserId(Long userId) {
         userIdHolder.set(userId);
@@ -21,8 +22,17 @@ public class UserContext {
         return roleHolder.get();
     }
 
+    public static void setLevelId(Long levelId) {
+        levelIdHolder.set(levelId);
+    }
+
+    public static Long getLevelId() {
+        return levelIdHolder.get();
+    }
+
     public static void clear() {
         userIdHolder.remove();
         roleHolder.remove();
+        levelIdHolder.remove();
     }
 }

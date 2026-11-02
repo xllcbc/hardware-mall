@@ -25,6 +25,12 @@ public class OrderItem {
 
     private BigDecimal price;
 
+    private Long levelId;
+
+    private String levelName;
+
+    private BigDecimal discountRate;
+
     private Integer quantity;
 
     private BigDecimal subtotal;

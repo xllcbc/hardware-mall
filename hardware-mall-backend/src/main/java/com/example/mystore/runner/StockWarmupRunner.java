@@ -10,6 +10,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.TimeUnit;
+
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -27,7 +29,11 @@ public class StockWarmupRunner implements CommandLineRunner {
         int count = 0;
         for (Sku sku : skus) {
             if (sku.getStock() != null && sku.getStock() > 0) {
-                redisUtil.set(RedisConstants.PREFIX_SKU_STOCK + sku.getId(), sku.getStock());
+                redisUtil.set(
+                        RedisConstants.PREFIX_SKU_STOCK + sku.getId(),
+                        sku.getStock(),
+                        RedisConstants.SKU_STOCK_TTL_SECONDS,
+                        TimeUnit.SECONDS);
                 count++;
             }
         }

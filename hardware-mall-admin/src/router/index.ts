@@ -54,6 +54,12 @@ const routes: RouteRecordRaw[] = [
         name: 'User',
         component: () => import('@/views/user/index.vue'),
         meta: { title: '用户管理' }
+      },
+      {
+        path: 'user-level',
+        name: 'UserLevel',
+        component: () => import('@/views/user-level/index.vue'),
+        meta: { title: '用户群体管理' }
       }
     ]
   }

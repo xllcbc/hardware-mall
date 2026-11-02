@@ -8,7 +8,7 @@ import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.entity.db.User;
-import com.example.mystore.event.StockSyncEvent;
+import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.mapper.PaymentRecordMapper;
@@ -482,7 +482,7 @@ public class PayServiceImpl implements PayService {
                     skuService.restoreStock(item.getSkuId(), item.getQuantity());
                     skuIds.add(item.getSkuId());
                 }
-                applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
+                applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
                 log.info("退款成功并恢复库存, orderId={}, outRefundNo={}", record.getOrderId(), outRefundNo);
             } else {
                 log.info("退款确认 6→7 未命中, 跳过库存恢复, orderId={}, outRefundNo={}", record.getOrderId(), outRefundNo);

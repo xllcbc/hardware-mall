@@ -55,6 +55,15 @@ public class JwtUtil {
         return null;
     }
 
+    public Long getLevelIdFromToken(String token) {
+        Claims claims = parseToken(token);
+        Object levelId = claims.get("levelId");
+        if (levelId instanceof Number) {
+            return ((Number) levelId).longValue();
+        }
+        return null;
+    }
+
     public Long getExpirationFromToken(String token) {
         Claims claims = parseToken(token);
         return claims.getExpiration().getTime();

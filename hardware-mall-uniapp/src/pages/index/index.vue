@@ -58,6 +58,7 @@
           :price="product.price"
           :original-price="product.originalPrice"
           :min-price="product.minPrice"
+          :max-price="product.maxPrice"
           @click="() => goProductDetail(product.id)"
         />
       </view>

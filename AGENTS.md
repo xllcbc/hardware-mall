@@ -53,3 +53,17 @@ job/               — 定时任务
 8. **遵循已有模式** — 修改已存在的类时，先观察该类已有的代码风格并保持一致
 9. **修改后验证** — 改动完成后运行 `mvn compile` 确认无编译错误
 10. **常量组织** — 第三方协议常量（微信/支付等）按域拆分为嵌套静态类分组（参照 `WechatConstants` 的 `Api`/`Event`/`OrderState`/`Fields`/`Common`/`Alert`），禁止硬编码字符串与魔数；跨域同名不同义的常量（如微信 `order_state` 与本地订单状态）必须物理隔离在不同类中
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues for `xllcbc/hardware-mall`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default five triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context repo documentation: root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.

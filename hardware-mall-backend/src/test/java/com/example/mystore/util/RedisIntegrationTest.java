@@ -8,6 +8,10 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -127,5 +131,55 @@ class RedisIntegrationTest {
 
         redisUtil.hDelete("test:hash", "field1");
         assertThat(redisUtil.hGet("test:hash", "field1")).isNull();
+    }
+
+    @Test
+    void evictWithLock_waitsForConcurrentOldValueRebuildThenDeletesIt() throws Exception {
+        String key = "test:concurrent-rebuild";
+        CountDownLatch loaderStarted = new CountDownLatch(1);
+        CountDownLatch releaseLoader = new CountDownLatch(1);
+        CountDownLatch evictionStarted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<String> reader = executor.submit(() -> redisUtil.queryWithCache(
+                key,
+                String.class,
+                60,
+                () -> {
+                    loaderStarted.countDown();
+                    await(releaseLoader);
+                    return "old-rate";
+                }));
+
+        try {
+            assertThat(loaderStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<?> eviction = executor.submit(() -> {
+                evictionStarted.countDown();
+                redisUtil.evictWithLock(key);
+            });
+            assertThat(evictionStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(100);
+            assertThat(eviction.isDone()).isFalse();
+
+            releaseLoader.countDown();
+            assertThat(reader.get(5, TimeUnit.SECONDS)).isEqualTo("old-rate");
+            eviction.get(5, TimeUnit.SECONDS);
+
+            assertThat(redisUtil.get(key)).isNull();
+            assertThat(redisUtil.queryWithCache(key, String.class, 60, () -> "new-rate"))
+                    .isEqualTo("new-rate");
+        } finally {
+            releaseLoader.countDown();
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("等待并发测试信号时被中断", e);
+        }
     }
 }

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -67,6 +68,10 @@ public class RedisUtil {
         return redisTemplate.opsForValue().get(key);
     }
 
+    public List<Object> multiGet(Collection<String> keys) {
+        return redisTemplate.opsForValue().multiGet(keys);
+    }
+
     @SuppressWarnings("unchecked")
     public <T> T get(String key, Class<T> clazz) {
         return (T) get(key);
@@ -74,6 +79,20 @@ public class RedisUtil {
 
     public void delete(String key) {
         redisTemplate.delete(key);
+    }
+
+    /**
+     * 与缓存重建使用同一把锁删除缓存，避免并发读在重建过程中把旧值重新写回。
+     */
+    public void evictWithLock(String key) {
+        while (!redisLockUtil.tryLock(key)) {
+            sleepQuietly(nextSleep());
+        }
+        try {
+            delete(key);
+        } finally {
+            redisLockUtil.unlock(key);
+        }
     }
 
     public void delete(Collection<String> keys) {

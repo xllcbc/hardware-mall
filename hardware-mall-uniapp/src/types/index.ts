@@ -160,4 +160,5 @@ export interface UserInfo {
   avatarUrl?: string
   phone?: string
   role: number
+  levelId?: number
 }

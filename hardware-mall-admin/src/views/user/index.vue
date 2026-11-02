@@ -54,6 +54,13 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="用户等级" width="130">
+          <template #default="{ row }">
+            <el-tag :type="row.levelId === 1 ? 'info' : 'success'" size="small" effect="light">
+              {{ row.levelName || '未设置' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="地区" width="140">
           <template #default="{ row }">
             <span class="region">{{ row.city || '-' }}</span>
@@ -80,7 +87,7 @@
             <span class="time">{{ row.createTime }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="260" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="handleViewOrders(row)">
               <el-icon><List /></el-icon>
@@ -97,6 +104,9 @@
             >
               <el-icon><Switch /></el-icon>
               {{ row.status === 1 ? '禁用' : '启用' }}
+            </el-button>
+            <el-button link type="warning" @click="handleChangeLevel(row)">
+              所属群体
             </el-button>
           </template>
         </el-table-column>
@@ -131,15 +141,36 @@
         <el-button type="primary" @click="handleRegionSubmit" :loading="regionLoading">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="levelDialogVisible" title="调整用户等级" width="420px">
+      <el-form label-width="80px">
+        <el-form-item label="用户等级">
+          <el-select v-model="levelForm.levelId" placeholder="请选择用户等级" style="width: 100%">
+            <el-option
+              v-for="level in enabledLevels"
+              :key="level.id"
+              :label="level.name"
+              :value="level.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div class="dialog-tip">等级变更后该用户需要重新登录才能生效。</div>
+      <template #footer>
+        <el-button @click="levelDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="levelLoading" @click="handleLevelSubmit">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { provinceCityOptions } from '@/utils/regions'
-import { getUserList, updateUserStatus, updateUserRegion } from '@/api/admin/user'
+import { getUserList, updateUserStatus, updateUserRegion, updateUserLevel } from '@/api/admin/user'
+import { getUserLevelList, type UserLevel } from '@/api/admin/userLevel'
 import { USER_ROLE, USER_ROLE_TEXT, USER_STATUS, USER_STATUS_TEXT } from '@/constants/status'
 
 const router = useRouter()
@@ -152,6 +183,13 @@ const regionDialogVisible = ref(false)
 const regionForm = ref<string[]>([])
 const regionLoading = ref(false)
 const editingUserId = ref<number | null>(null)
+const levelDialogVisible = ref(false)
+const levelLoading = ref(false)
+const levelOptions = ref<UserLevel[]>([])
+const editingLevelUserId = ref<number | null>(null)
+const levelForm = reactive({ levelId: null as number | null })
+
+const enabledLevels = computed(() => levelOptions.value.filter(level => level.status === 1))
 
 watch(regionFilter, () => {
   pagination.page = 1
@@ -187,6 +225,30 @@ const handleEditRegion = (row: any) => {
   editingUserId.value = row.id
   regionForm.value = row.province && row.city ? [row.province, row.city] : []
   regionDialogVisible.value = true
+}
+
+const handleChangeLevel = (row: any) => {
+  editingLevelUserId.value = row.id
+  levelForm.levelId = row.levelId
+  levelDialogVisible.value = true
+}
+
+const handleLevelSubmit = async () => {
+  if (!levelForm.levelId) {
+    ElMessage.warning('请选择用户等级')
+    return
+  }
+  levelLoading.value = true
+  try {
+    await updateUserLevel(editingLevelUserId.value!, levelForm.levelId)
+    ElMessage.success('已更新用户等级，该用户需重新登录')
+    levelDialogVisible.value = false
+    loadData()
+  } catch {
+    // error handled by interceptor
+  } finally {
+    levelLoading.value = false
+  }
 }
 
 const handleRegionSubmit = async () => {
@@ -226,7 +288,16 @@ const loadData = async () => {
   }
 }
 
+const loadLevels = async () => {
+  try {
+    levelOptions.value = await getUserLevelList() || []
+  } catch {
+    levelOptions.value = []
+  }
+}
+
 onMounted(() => {
+  loadLevels()
   loadData()
 })
 </script>

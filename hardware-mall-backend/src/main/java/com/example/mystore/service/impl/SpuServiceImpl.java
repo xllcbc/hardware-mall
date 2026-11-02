@@ -2,7 +2,7 @@ package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Spu;
@@ -11,15 +11,24 @@ import com.example.mystore.entity.db.SpecItem;
 import com.example.mystore.entity.db.SpecTemplate;
 import com.example.mystore.entity.vo.ProductListVO;
 import com.example.mystore.entity.vo.ProductDetailVO;
+import com.example.mystore.entity.vo.ProductDetailCache;
+import com.example.mystore.entity.vo.ProductListCacheItem;
 import com.example.mystore.entity.vo.ProductListResult;
+import com.example.mystore.entity.vo.ProductSkuVO;
+import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
+import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
+import com.example.mystore.service.PriceService;
+import com.example.mystore.service.PricingRuleService;
+import com.example.mystore.service.ProductCacheService;
 import com.example.mystore.service.SpuService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.SpecTemplateService;
 import com.example.mystore.service.SpecItemService;
-import com.example.mystore.util.RedisUtil;
+import com.example.mystore.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -43,7 +52,10 @@ public class SpuServiceImpl implements SpuService {
     private final SkuService skuService;
     private final SpecTemplateService specTemplateService;
     private final SpecItemService specItemService;
-    private final RedisUtil redisUtil;
+    private final PriceService priceService;
+    private final PricingRuleService pricingRuleService;
+    private final ProductCacheService productCacheService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public Page<Spu> getSpuPage(Long categoryId, String keyword, Integer page, Integer limit, Integer status) {
@@ -97,6 +109,9 @@ public class SpuServiceImpl implements SpuService {
         spu.setUpdateTime(LocalDateTime.now());
         spu.setSalesCount(0);
         spu.setDeleteTime(0L);
+        if (spu.getExcludeDiscount() == null) {
+            spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        }
         if (spu.getStatus() == null) {
             spu.setStatus(StatusConstants.PRODUCT_STATUS_ON_SHELF);
         }
@@ -104,10 +119,7 @@ public class SpuServiceImpl implements SpuService {
             spu.setIsRecommend(0);
         }
         spuMapper.insert(spu);
-        if (spu.getIsRecommend() == 1) {
-            redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
-        }
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        publishSpuChanged(spu.getId(), spu.getIsRecommend() == 1);
         return spu;
     }
 
@@ -118,6 +130,7 @@ public class SpuServiceImpl implements SpuService {
             throw new BusinessException("商品不存在");
         }
 
+        Integer oldRecommend = exist.getIsRecommend();
         if (StringUtils.hasText(spu.getName())) {
             exist.setName(spu.getName());
         }
@@ -145,14 +158,14 @@ public class SpuServiceImpl implements SpuService {
         if (spu.getWeight() != null) {
             exist.setWeight(spu.getWeight());
         }
+        if (spu.getExcludeDiscount() != null) {
+            exist.setExcludeDiscount(spu.getExcludeDiscount());
+        }
         exist.setUpdateTime(LocalDateTime.now());
 
         spuMapper.updateById(exist);
-        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + spu.getId());
-        if (exist.getIsRecommend() == 1) {
-            redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
-        }
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        publishSpuChanged(spu.getId(),
+                Integer.valueOf(1).equals(oldRecommend) || Integer.valueOf(1).equals(exist.getIsRecommend()));
         return exist;
     }
 
@@ -164,11 +177,7 @@ public class SpuServiceImpl implements SpuService {
         }
         spu.setDeleteTime(System.currentTimeMillis());
         spuMapper.updateById(spu);
-        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + id);
-        if (spu.getIsRecommend() != null && spu.getIsRecommend() == 1) {
-            redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
-        }
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        publishSpuChanged(id, Integer.valueOf(1).equals(spu.getIsRecommend()));
     }
 
     @Override
@@ -180,11 +189,7 @@ public class SpuServiceImpl implements SpuService {
         spu.setStatus(status);
         spu.setUpdateTime(LocalDateTime.now());
         spuMapper.updateById(spu);
-        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + id);
-        if (spu.getIsRecommend() != null && spu.getIsRecommend() == 1) {
-            redisUtil.delete(RedisConstants.PREFIX_PRODUCT_RECOMMEND);
-        }
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        publishSpuChanged(id, Integer.valueOf(1).equals(spu.getIsRecommend()));
     }
 
     @Override
@@ -208,67 +213,72 @@ public class SpuServiceImpl implements SpuService {
     @Override
     public Page<ProductListVO> getProductListVO(Long categoryId, String keyword, Integer page, Integer limit, Integer status) {
         if (!StringUtils.hasText(keyword)) {
-            String key = RedisConstants.PREFIX_PRODUCT_LIST + (categoryId == null ? "all" : categoryId)
-                    + ":" + page + ":" + limit + ":" + status;
-            ProductListResult result = redisUtil.queryWithCache(key, ProductListResult.class, RedisConstants.CACHE_TTL_HOUR,
+            ProductListResult result = productCacheService.getProductList(
+                    categoryId, page, limit, status,
                     () -> buildProductListResult(categoryId, null, page, limit, status));
             if (result == null || result.getRecords() == null) {
                 return new Page<>(page, limit, 0);
             }
             Page<ProductListVO> voPage = new Page<>(page, limit, result.getTotal());
-            voPage.setRecords(result.getRecords());
+            voPage.setRecords(toUserPricingViews(result.getRecords()));
             return voPage;
         }
-        return buildProductListPage(categoryId, keyword, page, limit, status);
+        ProductListResult result = productCacheService.searchProducts(
+                keyword, categoryId, page, limit, status,
+                () -> buildProductListResult(categoryId, keyword, page, limit, status));
+        if (result == null || result.getRecords() == null) {
+            return new Page<>(page, limit, 0);
+        }
+        Page<ProductListVO> voPage = new Page<>(page, limit, result.getTotal());
+        voPage.setRecords(toUserPricingViews(result.getRecords()));
+        return voPage;
     }
 
-    private Page<ProductListVO> buildProductListPage(Long categoryId, String keyword, Integer page, Integer limit, Integer status) {
+    private Page<ProductListCacheItem> buildProductListCachePage(Long categoryId, String keyword, Integer page, Integer limit, Integer status) {
         Page<Spu> spuPage = getSpuPage(categoryId, keyword, page, limit, status);
-        Page<ProductListVO> voPage = new Page<>(spuPage.getCurrent(), spuPage.getSize(), spuPage.getTotal());
+        Page<ProductListCacheItem> cachePage = new Page<>(spuPage.getCurrent(), spuPage.getSize(), spuPage.getTotal());
 
         List<Long> spuIds = spuPage.getRecords().stream().map(Spu::getId).collect(Collectors.toList());
         Map<Long, List<Sku>> skusBySpu = skuService.getSkusBySpuIds(spuIds);
 
-        List<ProductListVO> voList = spuPage.getRecords().stream().map(spu -> {
-            ProductListVO vo = convertToProductListVO(spu);
+        List<ProductListCacheItem> cacheItems = spuPage.getRecords().stream().map(spu -> {
+            ProductListCacheItem item = convertToProductListCacheItem(spu);
             List<Sku> skus = skusBySpu.getOrDefault(spu.getId(), Collections.emptyList());
             if (!skus.isEmpty()) {
                 BigDecimal minPrice = skus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(spu.getOriginalPrice());
                 BigDecimal maxPrice = skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice());
-                vo.setMinPrice(minPrice);
-                vo.setMaxPrice(maxPrice);
+                item.setRetailMinPrice(minPrice);
+                item.setRetailMaxPrice(maxPrice);
             } else {
-                vo.setMinPrice(spu.getOriginalPrice());
-                vo.setMaxPrice(spu.getOriginalPrice());
+                item.setRetailMinPrice(spu.getOriginalPrice());
+                item.setRetailMaxPrice(spu.getOriginalPrice());
             }
-            return vo;
+            return item;
         }).collect(Collectors.toList());
 
-        voPage.setRecords(voList);
-        return voPage;
+        cachePage.setRecords(cacheItems);
+        return cachePage;
     }
 
     private ProductListResult buildProductListResult(Long categoryId, String keyword, Integer page, Integer limit, Integer status) {
-        Page<ProductListVO> voPage = buildProductListPage(categoryId, keyword, page, limit, status);
-        return new ProductListResult(voPage.getRecords(), voPage.getTotal());
+        Page<ProductListCacheItem> cachePage = buildProductListCachePage(categoryId, keyword, page, limit, status);
+        return new ProductListResult(cachePage.getRecords(), cachePage.getTotal());
     }
 
     @Override
     public List<ProductListVO> getRecommendProductListVO(Integer limit) {
-        @SuppressWarnings("unchecked")
-        List<ProductListVO> voList = (List<ProductListVO>) redisUtil.queryWithCache(
-                RedisConstants.PREFIX_PRODUCT_RECOMMEND, List.class, RedisConstants.CACHE_TTL_HOUR,
-                () -> buildRecommendVO(limit));
-        if (voList == null) {
+        ProductListResult result = productCacheService.getRecommend(() -> buildRecommendResult(limit));
+        if (result == null || result.getRecords() == null) {
             return Collections.emptyList();
         }
-        if (limit != null && voList.size() > limit) {
-            return voList.subList(0, limit);
+        List<ProductListVO> userPricingViews = toUserPricingViews(result.getRecords());
+        if (limit != null && userPricingViews.size() > limit) {
+            return userPricingViews.subList(0, limit);
         }
-        return voList;
+        return userPricingViews;
     }
 
-    private List<ProductListVO> buildRecommendVO(Integer limit) {
+    private ProductListResult buildRecommendResult(Integer limit) {
         List<Spu> spus = getRecommendSpus();
         if (spus.isEmpty()) {
             return null;
@@ -278,43 +288,36 @@ public class SpuServiceImpl implements SpuService {
         }
         List<Long> spuIds = spus.stream().map(Spu::getId).collect(Collectors.toList());
         Map<Long, List<Sku>> skusBySpu = skuService.getSkusBySpuIds(spuIds);
-        return spus.stream().map(spu -> {
-            ProductListVO vo = convertToProductListVO(spu);
+        List<ProductListCacheItem> cacheItems = spus.stream().map(spu -> {
+            ProductListCacheItem item = convertToProductListCacheItem(spu);
             List<Sku> skus = skusBySpu.getOrDefault(spu.getId(), Collections.emptyList());
             if (!skus.isEmpty()) {
-                vo.setMinPrice(skus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
-                vo.setMaxPrice(skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
+                item.setRetailMinPrice(skus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
+                item.setRetailMaxPrice(skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
             } else {
-                vo.setMinPrice(spu.getOriginalPrice());
-                vo.setMaxPrice(spu.getOriginalPrice());
+                item.setRetailMinPrice(spu.getOriginalPrice());
+                item.setRetailMaxPrice(spu.getOriginalPrice());
             }
-            return vo;
+            return item;
         }).collect(Collectors.toList());
+        return new ProductListResult(cacheItems, cacheItems.size());
     }
 
     @Override
     public ProductDetailVO getProductDetailVO(Long id) {
-        ProductDetailVO vo = redisUtil.queryWithCache(
-                RedisConstants.PREFIX_PRODUCT_DETAIL + id, ProductDetailVO.class, RedisConstants.CACHE_TTL_HOUR,
-                () -> {
-                    ProductDetailVO built = buildProductDetailVO(id);
-                    if (built != null && built.getSkus() != null) {
-                        built.getSkus().forEach(s -> s.setStock(null));
-                    }
-                    return built;
-                });
-        if (vo == null) {
+        ProductDetailCache cache = productCacheService.getProductDetail(id, () -> buildProductDetailCache(id));
+        if (cache == null) {
             throw new BusinessException("商品不存在或已下架");
         }
-        if (vo.getSkus() != null) {
-            for (Sku sku : vo.getSkus()) {
-                sku.setStock(skuService.getStockById(sku.getId()));
-            }
-        }
-        return vo;
+        return toProductDetailView(cache);
     }
 
-    private ProductDetailVO buildProductDetailVO(Long id) {
+    @Override
+    public List<ProductSkuVO> getProductSkuVOs(Long spuId) {
+        return getProductDetailVO(spuId).getSkus();
+    }
+
+    private ProductDetailCache buildProductDetailCache(Long id) {
         Spu spu;
         try {
             spu = getSpuById(id);
@@ -353,25 +356,138 @@ public class SpuServiceImpl implements SpuService {
             specItemsMap = Collections.emptyMap();
         }
 
-        BigDecimal minPrice = null;
-        BigDecimal maxPrice = null;
-        if (skus != null && !skus.isEmpty()) {
-            minPrice = skus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(spu.getOriginalPrice());
-            maxPrice = skus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(spu.getOriginalPrice());
+        if (skus != null) {
+            skus.forEach(sku -> sku.setStock(null));
         }
 
-        return new ProductDetailVO(spu, skus, specTemplates, specItemsMap, minPrice, maxPrice);
+        ProductDetailCache cache = new ProductDetailCache();
+        cache.setSpu(spu);
+        cache.setSkus(skus);
+        cache.setSpecTemplates(specTemplates);
+        cache.setSpecItemsMap(specItemsMap);
+        return cache;
     }
 
-    private ProductListVO convertToProductListVO(Spu spu) {
-        ProductListVO vo = new ProductListVO();
-        vo.setId(spu.getId());
-        vo.setCategoryId(spu.getCategoryId());
-        vo.setName(spu.getName());
-        vo.setSubtitle(spu.getSubtitle());
-        vo.setImages(spu.getImages());
-        vo.setOriginalPrice(spu.getOriginalPrice());
-        vo.setStatus(spu.getStatus());
-        return vo;
+    private ProductDetailVO toProductDetailView(ProductDetailCache cache) {
+        BigDecimal rate = pricingRuleService.rateFor(
+                UserContext.getLevelId(),
+                cache.getSpu().getCategoryId(),
+                DiscountConstants.isExcluded(cache.getSpu().getExcludeDiscount()));
+        List<ProductSkuVO> skus = toProductSkuVOs(cache.getSkus(), rate);
+        BigDecimal minPrice = null;
+        BigDecimal maxPrice = null;
+        if (!skus.isEmpty()) {
+            minPrice = skus.stream().map(ProductSkuVO::getPrice).min(BigDecimal::compareTo)
+                    .orElse(cache.getSpu().getOriginalPrice());
+            maxPrice = skus.stream().map(ProductSkuVO::getPrice).max(BigDecimal::compareTo)
+                    .orElse(cache.getSpu().getOriginalPrice());
+        } else if (cache.getSpu().getOriginalPrice() != null) {
+            minPrice = priceService.resolveUnitPrice(cache.getSpu().getOriginalPrice(), rate);
+            maxPrice = minPrice;
+        }
+        return new ProductDetailVO(cache.getSpu(), skus, cache.getSpecTemplates(),
+                cache.getSpecItemsMap(), minPrice, maxPrice);
+    }
+
+    private List<ProductSkuVO> toProductSkuVOs(List<Sku> skus, BigDecimal rate) {
+        if (skus == null || skus.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return skus.stream().map(sku -> {
+            ProductSkuVO vo = new ProductSkuVO();
+            vo.setId(sku.getId());
+            vo.setSpuId(sku.getSpuId());
+            vo.setSpecs(sku.getSpecs());
+            vo.setPrice(sku.getPrice() == null ? null : priceService.resolveUnitPrice(sku.getPrice(), rate));
+            vo.setStock(skuService.getStockById(sku.getId()));
+            vo.setImage(sku.getImage());
+            vo.setStatus(sku.getStatus());
+            return vo;
+        }).collect(Collectors.toList());
+    }
+
+    private ProductListCacheItem convertToProductListCacheItem(Spu spu) {
+        ProductListCacheItem item = new ProductListCacheItem();
+        item.setId(spu.getId());
+        item.setCategoryId(spu.getCategoryId());
+        item.setName(spu.getName());
+        item.setSubtitle(spu.getSubtitle());
+        item.setImages(spu.getImages());
+        item.setOriginalPrice(spu.getOriginalPrice());
+        item.setExcludeDiscount(spu.getExcludeDiscount());
+        item.setStatus(spu.getStatus());
+        return item;
+    }
+
+    private List<ProductListVO> toUserPricingViews(List<ProductListCacheItem> records) {
+        if (records == null || records.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Long levelId = UserContext.getLevelId();
+        return records.stream().map(source -> {
+            ProductListVO target = new ProductListVO();
+            target.setId(source.getId());
+            target.setCategoryId(source.getCategoryId());
+            target.setName(source.getName());
+            target.setSubtitle(source.getSubtitle());
+            target.setImages(source.getImages());
+            target.setOriginalPrice(source.getOriginalPrice());
+            target.setStatus(source.getStatus());
+            BigDecimal rate = pricingRuleService.rateFor(
+                    levelId,
+                    source.getCategoryId(),
+                    DiscountConstants.isExcluded(source.getExcludeDiscount()));
+            if (source.getRetailMinPrice() != null) {
+                target.setMinPrice(priceService.resolveUnitPrice(source.getRetailMinPrice(), rate));
+            }
+            if (source.getRetailMaxPrice() != null) {
+                target.setMaxPrice(priceService.resolveUnitPrice(source.getRetailMaxPrice(), rate));
+            }
+            return target;
+        }).collect(Collectors.toList());
+    }
+
+    @Override
+    public Page<UserLevelProductPreviewVO> getUserLevelProductPreview(
+            Long levelId, Long categoryId, Integer page, Integer limit) {
+        ProductListResult result = productCacheService.getProductList(
+                categoryId, page, limit, StatusConstants.PRODUCT_STATUS_ON_SHELF,
+                () -> buildProductListResult(categoryId, null, page, limit, StatusConstants.PRODUCT_STATUS_ON_SHELF));
+        Page<UserLevelProductPreviewVO> voPage = new Page<>(page, limit,
+                result == null ? 0 : result.getTotal());
+        if (result == null || result.getRecords() == null) {
+            return voPage;
+        }
+        List<UserLevelProductPreviewVO> records = result.getRecords().stream().map(item -> {
+            UserLevelProductPreviewVO vo = new UserLevelProductPreviewVO();
+            vo.setId(item.getId());
+            vo.setCategoryId(item.getCategoryId());
+            vo.setName(item.getName());
+            vo.setImages(item.getImages());
+            vo.setOriginalPrice(item.getOriginalPrice());
+            vo.setRetailMinPrice(item.getRetailMinPrice());
+            vo.setRetailMaxPrice(item.getRetailMaxPrice());
+            vo.setExcludeDiscount(item.getExcludeDiscount());
+            BigDecimal rate = pricingRuleService.rateFor(
+                    levelId, item.getCategoryId(), DiscountConstants.isExcluded(item.getExcludeDiscount()));
+            vo.setDiscountRate(rate);
+            if (item.getRetailMinPrice() != null) {
+                vo.setMinPrice(priceService.resolveUnitPrice(item.getRetailMinPrice(), rate));
+            }
+            if (item.getRetailMaxPrice() != null) {
+                vo.setMaxPrice(priceService.resolveUnitPrice(item.getRetailMaxPrice(), rate));
+            }
+            return vo;
+        }).collect(Collectors.toList());
+        voPage.setRecords(records);
+        return voPage;
+    }
+
+    private void publishSpuChanged(Long spuId, boolean recommendAffected) {
+        eventPublisher.publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.SPU_CHANGED,
+                spuId,
+                null,
+                recommendAffected));
     }
 }

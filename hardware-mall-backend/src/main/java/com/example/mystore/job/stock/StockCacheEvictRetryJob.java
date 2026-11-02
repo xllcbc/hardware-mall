@@ -1,5 +1,6 @@
 package com.example.mystore.job.stock;
 
+import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
@@ -10,49 +11,42 @@ import org.springframework.stereotype.Component;
 import java.util.Set;
 
 /**
- * 库存同步补偿定时任务
- * 处理因 Redis 临时不可用导致的库存缓存同步失败
+ * 库存缓存清除补偿任务。
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
-public class StockSyncRetryJob {
+public class StockCacheEvictRetryJob {
 
     private final RedisUtil redisUtil;
     private final SkuService skuService;
 
-    private static final String FAILED_KEY = "stock:sync:failed";
-
-    /**
-     * 每分钟执行一次，重试失败的库存同步
-     */
     @Scheduled(fixedDelay = 60_000)
-    public void retryFailedSync() {
-        Set<Object> failedIds = redisUtil.sMembers(FAILED_KEY, Object.class);
+    public void retryFailedEvict() {
+        Set<Object> failedIds = redisUtil.sMembers(RedisConstants.PREFIX_STOCK_EVICT_FAILED, Object.class);
         if (failedIds == null || failedIds.isEmpty()) {
             return;
         }
 
-        log.info("发现 {} 条库存同步失败记录，开始补偿", failedIds.size());
+        log.info("发现 {} 条库存缓存清除失败记录，开始补偿", failedIds.size());
 
         int successCount = 0;
         for (Object idObj : failedIds) {
             Long skuId = Long.valueOf(idObj.toString());
             try {
-                if (skuService.syncStockToCache(skuId)) {
-                    redisUtil.sRemove(FAILED_KEY, idObj);
-                    successCount++;
-                }
+                skuService.evictStockCache(skuId);
+                redisUtil.sRemove(RedisConstants.PREFIX_STOCK_EVICT_FAILED, idObj);
+                successCount++;
             } catch (Exception e) {
-                log.error("库存同步补偿异常, skuId={}", skuId, e);
+                log.error("库存缓存清除补偿异常, skuId={}", skuId, e);
             }
         }
 
         int remaining = failedIds.size() - successCount;
         if (remaining > 0) {
-            log.warn("库存同步补偿完成, 成功={}, 剩余={}", successCount, remaining);
+            log.warn("库存缓存清除补偿完成, 成功={}, 剩余={}", successCount, remaining);
         } else {
-            log.info("库存同步补偿完成, 全部成功");
+            log.info("库存缓存清除补偿完成, 全部成功");
         }
     }
 }

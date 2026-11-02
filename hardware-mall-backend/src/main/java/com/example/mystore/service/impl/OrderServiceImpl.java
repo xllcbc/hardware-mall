@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.WechatConstants;
@@ -18,18 +19,23 @@ import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.entity.vo.OrderVO;
+import com.example.mystore.entity.vo.OrderItemVO;
 import com.example.mystore.entity.vo.DashboardStatsVO;
 import com.example.mystore.entity.vo.RecentOrderVO;
 import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.SpecVO;
-import com.example.mystore.event.StockSyncEvent;
+import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
+import com.example.mystore.service.PriceService;
+import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.SkuService;
+import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
 import com.example.mystore.util.RedisUtil;
+import com.example.mystore.util.UserContext;
 import com.wechat.pay.java.service.payments.model.Transaction;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -71,6 +77,9 @@ public class OrderServiceImpl implements OrderService {
     private final PlatformTransactionManager transactionManager;
     private final WechatOrderShippingService wechatOrderShippingService;
     private final PaymentRecordMapper paymentRecordMapper;
+    private final PriceService priceService;
+    private final PricingRuleService pricingRuleService;
+    private final UserLevelService userLevelService;
 
     @Value("${wechat.pay.mch-id:}")
     private String mchId;
@@ -123,9 +132,14 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // ① 逐项校验 SKU 并收集（校验顺序与异常语义保持不变）
+        List<Long> requestedSkuIds = request.getItems().stream()
+                .map(CreateOrderRequest.CartItem::getSkuId)
+                .distinct()
+                .toList();
+        Map<Long, Sku> skuMap = skuService.getSkuMapByIds(requestedSkuIds);
         List<Sku> skus = new ArrayList<>();
         for (CreateOrderRequest.CartItem cartItem : request.getItems()) {
-            Sku sku = skuService.getSkuById(cartItem.getSkuId());
+            Sku sku = skuMap.get(cartItem.getSkuId());
             log.info("SKU查询结果, skuId={}, sku={}", cartItem.getSkuId(), sku);
             if (sku == null || sku.getStatus() != 1) {
                 throw new BusinessException("商品不存在或已下架: " + cartItem.getSkuId());
@@ -146,6 +160,8 @@ public class OrderServiceImpl implements OrderService {
         // ③ 组装订单明细快照（spu 改从 map 取）
         List<OrderItem> orderItems = new ArrayList<>();
         BigDecimal totalAmount = BigDecimal.ZERO;
+        Long levelId = UserContext.getLevelId() != null
+                ? UserContext.getLevelId() : pricingRuleService.resolveRetailLevelId();
         for (int i = 0; i < request.getItems().size(); i++) {
             CreateOrderRequest.CartItem cartItem = request.getItems().get(i);
             Sku sku = skus.get(i);
@@ -153,7 +169,12 @@ public class OrderServiceImpl implements OrderService {
             if (spu == null) {
                 throw new BusinessException("商品不存在或已下架: " + cartItem.getSkuId());
             }
-            BigDecimal subtotal = sku.getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
+            BigDecimal rate = pricingRuleService.rateFor(
+                    levelId,
+                    spu.getCategoryId(),
+                    DiscountConstants.isExcluded(spu.getExcludeDiscount()));
+            BigDecimal unitPrice = priceService.resolveUnitPrice(sku.getPrice(), rate);
+            BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             totalAmount = totalAmount.add(subtotal);
 
             OrderItem item = new OrderItem();
@@ -175,7 +196,10 @@ public class OrderServiceImpl implements OrderService {
             item.setProductSpec(specStr.length() > 0 ? specStr.toString().trim() : "");
 
             item.setProductImage(sku.getImage() != null ? sku.getImage() : getFirstImage(spu.getImages()));
-            item.setPrice(sku.getPrice());
+            item.setPrice(unitPrice);
+            item.setLevelId(levelId);
+            item.setLevelName(userLevelService.getName(levelId));
+            item.setDiscountRate(rate);
             item.setQuantity(cartItem.getQuantity());
             item.setSubtotal(subtotal);
             item.setCreateTime(LocalDateTime.now());
@@ -233,7 +257,7 @@ public class OrderServiceImpl implements OrderService {
         List<Long> skuIds = validated.orderItems().stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
+        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
 
         return order.getId();
     }
@@ -292,7 +316,7 @@ public class OrderServiceImpl implements OrderService {
         Page<OrderVO> voPage = new Page<>(orderPage.getCurrent(), orderPage.getSize(), orderPage.getTotal());
         List<OrderVO> voList = new ArrayList<>();
         for (Order order : orderPage.getRecords()) {
-            voList.add(getOrderVO(order.getId(), userId));
+            voList.add(getOrderVO(order.getId(), null));
         }
         voPage.setRecords(voList);
         return voPage;
@@ -384,7 +408,7 @@ public class OrderServiceImpl implements OrderService {
         List<Long> skuIds = items.stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
+        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
     }
 
     @Override
@@ -752,7 +776,7 @@ public class OrderServiceImpl implements OrderService {
         List<Long> skuIds = items.stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockSyncEvent(skuIds));
+        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
 
         return true;
     }
@@ -817,7 +841,7 @@ public class OrderServiceImpl implements OrderService {
         vo.setShipTime(order.getShipTime());
         vo.setReceiveTime(order.getReceiveTime());
         vo.setCreateTime(order.getCreateTime());
-        vo.setItems(items);
+        vo.setItems(items.stream().map(item -> toOrderItemVO(item, userId == null)).toList());
 
         // 微信确认收货组件所需参数(商户单号=订单号; 交易单号支付成功后回填)
         PaymentRecord payRecord = paymentRecordMapper.selectOne(new LambdaQueryWrapper<PaymentRecord>()
@@ -828,6 +852,27 @@ public class OrderServiceImpl implements OrderService {
         vo.setMerchantTradeNo(payRecord != null ? payRecord.getOutTradeNo() : null);
         vo.setTransactionId(payRecord != null ? payRecord.getTransactionId() : null);
 
+        return vo;
+    }
+
+    private OrderItemVO toOrderItemVO(OrderItem item, boolean includePricingSnapshot) {
+        OrderItemVO vo = new OrderItemVO();
+        vo.setId(item.getId());
+        vo.setOrderId(item.getOrderId());
+        vo.setSkuId(item.getSkuId());
+        vo.setSpuId(item.getSpuId());
+        vo.setProductName(item.getProductName());
+        vo.setProductSpec(item.getProductSpec());
+        vo.setProductImage(item.getProductImage());
+        vo.setPrice(item.getPrice());
+        vo.setQuantity(item.getQuantity());
+        vo.setSubtotal(item.getSubtotal());
+        vo.setCreateTime(item.getCreateTime());
+        if (includePricingSnapshot) {
+            vo.setLevelId(item.getLevelId());
+            vo.setLevelName(item.getLevelName());
+            vo.setDiscountRate(item.getDiscountRate());
+        }
         return vo;
     }
 

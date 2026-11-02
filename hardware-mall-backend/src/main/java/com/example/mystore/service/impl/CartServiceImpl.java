@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Sku;
@@ -8,10 +9,12 @@ import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.entity.vo.CartItemVO;
 import com.example.mystore.mapper.CartMapper;
-import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.CartService;
+import com.example.mystore.service.PriceService;
+import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.SkuService;
+import com.example.mystore.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,7 +22,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -28,8 +34,9 @@ public class CartServiceImpl implements CartService {
 
     private final CartMapper cartMapper;
     private final SkuService skuService;
-    private final SkuMapper skuMapper;
     private final SpuMapper spuMapper;
+    private final PriceService priceService;
+    private final PricingRuleService pricingRuleService;
 
 @Override
     public List<CartItemVO> getCartList(Long userId) {
@@ -37,11 +44,25 @@ public class CartServiceImpl implements CartService {
         wrapper.eq(Cart::getUserId, userId)
                .eq(Cart::getDeleteTime, 0);
         List<Cart> carts = cartMapper.selectList(wrapper);
+        List<Long> skuIds = carts.stream().map(Cart::getSkuId).distinct().toList();
+        Map<Long, Sku> skuMap = skuService.getSkuMapByIds(skuIds);
+        List<Long> spuIds = skuMap.values().stream()
+                .map(Sku::getSpuId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, Spu> spuMap = spuIds.isEmpty() ? Map.of()
+                : spuMapper.selectBatchIds(spuIds).stream()
+                        .collect(Collectors.toMap(Spu::getId, spu -> spu));
+        Map<Long, List<Sku>> skusBySpu = new LinkedHashMap<>();
 
         List<CartItemVO> result = new ArrayList<>();
         for (Cart cart : carts) {
-            Sku sku = skuService.getSkuById(cart.getSkuId());
-            Spu spu = spuMapper.selectById(sku.getSpuId());
+            Sku sku = skuMap.get(cart.getSkuId());
+            if (sku == null) {
+                continue;
+            }
+            Spu spu = spuMap.get(sku.getSpuId());
             if (spu != null && spu.getStatus() == 1 && spu.getDeleteTime() == 0) {
                 CartItemVO vo = new CartItemVO();
                 vo.setCartId(cart.getId());
@@ -56,12 +77,28 @@ public class CartServiceImpl implements CartService {
                     .map(SpecVO::getValue)
                     .collect(Collectors.joining(" ")));
 
-                List<Sku> allSkus = skuService.getSkusBySpu(spu.getId(), 1);
-                vo.setPrice(sku.getPrice());
-                vo.setMinPrice(allSkus.stream().map(Sku::getPrice).min(BigDecimal::compareTo).orElse(sku.getPrice()));
-                vo.setMaxPrice(allSkus.stream().map(Sku::getPrice).max(BigDecimal::compareTo).orElse(sku.getPrice()));
+                List<Sku> allSkus = skusBySpu.computeIfAbsent(
+                        spu.getId(), id -> skuService.getSkusBySpu(id, 1));
+                BigDecimal rate = pricingRuleService.rateFor(
+                        UserContext.getLevelId(),
+                        spu.getCategoryId(),
+                        DiscountConstants.isExcluded(spu.getExcludeDiscount()));
+                BigDecimal unitPrice = priceService.resolveUnitPrice(sku.getPrice(), rate);
+                vo.setPrice(unitPrice);
+                BigDecimal retailMin = allSkus.stream()
+                        .map(Sku::getPrice)
+                        .filter(Objects::nonNull)
+                        .min(BigDecimal::compareTo)
+                        .orElse(sku.getPrice());
+                BigDecimal retailMax = allSkus.stream()
+                        .map(Sku::getPrice)
+                        .filter(Objects::nonNull)
+                        .max(BigDecimal::compareTo)
+                        .orElse(sku.getPrice());
+                vo.setMinPrice(priceService.resolveUnitPrice(retailMin, rate));
+                vo.setMaxPrice(priceService.resolveUnitPrice(retailMax, rate));
                 vo.setQuantity(cart.getQuantity());
-                vo.setSubtotal(sku.getPrice().multiply(BigDecimal.valueOf(cart.getQuantity())));
+                vo.setSubtotal(unitPrice.multiply(BigDecimal.valueOf(cart.getQuantity())));
                 vo.setStock(sku.getStock());
                 result.add(vo);
             }

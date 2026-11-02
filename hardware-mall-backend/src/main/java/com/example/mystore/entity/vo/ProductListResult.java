@@ -7,13 +7,13 @@ import java.util.List;
 
 @Data
 public class ProductListResult implements Serializable {
-    private List<ProductListVO> records;
+    private List<ProductListCacheItem> records;
     private long total;
 
     public ProductListResult() {
     }
 
-    public ProductListResult(List<ProductListVO> records, long total) {
+    public ProductListResult(List<ProductListCacheItem> records, long total) {
         this.records = records;
         this.total = total;
     }

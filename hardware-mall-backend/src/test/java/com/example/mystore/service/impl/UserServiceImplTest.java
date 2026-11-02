@@ -5,7 +5,11 @@ import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.config.OssProperties;
 import com.example.mystore.entity.db.User;
+import com.example.mystore.entity.db.UserLevel;
+import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.mapper.UserMapper;
+import com.example.mystore.service.PricingRuleService;
+import com.example.mystore.service.UserLevelService;
 import com.example.mystore.util.JwtUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.WechatUtil;
@@ -16,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.RedisConnectionFailureException;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -46,6 +51,12 @@ class UserServiceImplTest {
     @Mock
     private OssProperties ossProperties;
 
+    @Mock
+    private PricingRuleService pricingRuleService;
+
+    @Mock
+    private UserLevelService userLevelService;
+
     @InjectMocks
     private UserServiceImpl userService;
 
@@ -60,6 +71,7 @@ class UserServiceImplTest {
         user.setPhone("13800001001");
         user.setRole(StatusConstants.USER_ROLE_REGULAR);
         user.setStatus(StatusConstants.USER_STATUS_NORMAL);
+        user.setLevelId(1L);
     }
 
     @Test
@@ -200,7 +212,7 @@ class UserServiceImplTest {
         Set<String> tokens = new HashSet<>();
         tokens.add("expired_token");
         tokens.add("live_token");
-        when(redisUtil.sMembers("user:tokens:2", String.class)).thenReturn(tokens);
+        when(redisUtil.sMembers(RedisConstants.PREFIX_USER_TOKENS + 2L, String.class)).thenReturn(tokens);
 
         when(jwtUtil.getExpirationFromToken("expired_token"))
                 .thenThrow(new ExpiredJwtException(null, null, "JWT expired"));
@@ -211,10 +223,96 @@ class UserServiceImplTest {
 
         verify(userMapper).updateById(argThat((User u) -> u.getStatus() == StatusConstants.USER_STATUS_DISABLED));
         verify(redisUtil).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
-                eq("1"), anyLong(), eq(TimeUnit.SECONDS));
+                eq(RedisConstants.TOKEN_BLACKLIST_VALUE), anyLong(), eq(TimeUnit.SECONDS));
         verify(redisUtil, never()).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "expired_token"),
                 any(), anyLong(), any(TimeUnit.class));
-        verify(redisUtil).delete("user:tokens:2");
+        verify(redisUtil).delete(RedisConstants.PREFIX_USER_TOKENS + 2L);
+    }
+
+    @Test
+    void updateUserLevel_persistsTargetLevel() {
+        User u = new User();
+        u.setId(5L);
+        u.setLevelId(1L);
+        when(userMapper.selectById(5L)).thenReturn(u);
+        UserLevel level = new UserLevel();
+        level.setId(2L);
+        level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
+        when(userLevelService.getById(2L)).thenReturn(level);
+        userService.updateUserLevel(5L, 2L);
+        assertThat(u.getLevelId()).isEqualTo(2L);
+        verify(userMapper).updateById(u);
+    }
+
+    @Test
+    void updateUserLevel_rejectsDisabledLevel() {
+        User u = new User();
+        u.setId(5L);
+        u.setLevelId(1L);
+        when(userMapper.selectById(5L)).thenReturn(u);
+        UserLevel level = new UserLevel();
+        level.setId(2L);
+        level.setStatus(UserLevelStatusConstants.STATUS_DISABLED);
+        when(userLevelService.getById(2L)).thenReturn(level);
+
+        assertThatThrownBy(() -> userService.updateUserLevel(5L, 2L))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void updateUserLevel_invalidatesExistingTokens() {
+        User u = new User();
+        u.setId(5L);
+        u.setLevelId(1L);
+        when(userMapper.selectById(5L)).thenReturn(u);
+        UserLevel level = new UserLevel();
+        level.setId(2L);
+        level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
+        when(userLevelService.getById(2L)).thenReturn(level);
+
+        Set<String> tokens = new HashSet<>();
+        tokens.add("live_token");
+        when(redisUtil.sMembers(RedisConstants.PREFIX_USER_TOKENS + 5L, String.class)).thenReturn(tokens);
+        when(jwtUtil.getExpirationFromToken("live_token"))
+                .thenReturn(System.currentTimeMillis() + 3600_000L);
+
+        userService.updateUserLevel(5L, 2L);
+
+        verify(redisUtil).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
+                eq(RedisConstants.TOKEN_BLACKLIST_VALUE), anyLong(), eq(TimeUnit.SECONDS));
+        verify(redisUtil).delete(RedisConstants.PREFIX_USER_TOKENS + 5L);
+    }
+
+    @Test
+    void updateUserLevel_sameLevel_retryInvalidatesTokensAfterFirstFailure() {
+        User u = new User();
+        u.setId(5L);
+        u.setLevelId(2L);
+        when(userMapper.selectById(5L)).thenReturn(u);
+        UserLevel level = new UserLevel();
+        level.setId(2L);
+        level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
+        when(userLevelService.getById(2L)).thenReturn(level);
+
+        Set<String> tokens = new HashSet<>();
+        tokens.add("live_token");
+        when(redisUtil.sMembers(RedisConstants.PREFIX_USER_TOKENS + 5L, String.class)).thenReturn(tokens);
+        when(jwtUtil.getExpirationFromToken("live_token"))
+                .thenReturn(System.currentTimeMillis() + 3600_000L);
+        doThrow(new RedisConnectionFailureException("redis unavailable"))
+                .doNothing()
+                .when(redisUtil).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
+                        eq(RedisConstants.TOKEN_BLACKLIST_VALUE), anyLong(), eq(TimeUnit.SECONDS));
+
+        assertThatThrownBy(() -> userService.updateUserLevel(5L, 2L))
+                .isInstanceOf(RedisConnectionFailureException.class);
+        userService.updateUserLevel(5L, 2L);
+
+        verify(userMapper, never()).updateById(any(User.class));
+        verify(redisUtil, times(2)).sMembers(RedisConstants.PREFIX_USER_TOKENS + 5L, String.class);
+        verify(redisUtil, times(2)).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
+                eq(RedisConstants.TOKEN_BLACKLIST_VALUE), anyLong(), eq(TimeUnit.SECONDS));
+        verify(redisUtil).delete(RedisConstants.PREFIX_USER_TOKENS + 5L);
     }
 
     @Test
@@ -223,6 +321,7 @@ class UserServiceImplTest {
         user.setId(2L);
         user.setStatus(1);
         user.setRole(1);
+        user.setLevelId(1L);
         when(userMapper.selectById(2L)).thenReturn(user);
         when(jwtUtil.generateToken(anyMap())).thenReturn("new_token");
         when(jwtUtil.getExpirationFromToken("old_token")).thenReturn(System.currentTimeMillis() + 3600000);
@@ -233,9 +332,10 @@ class UserServiceImplTest {
         verify(jwtUtil).generateToken(argThat(claims ->
                 claims.containsKey("userId") && claims.get("userId").equals(2L)
                         && claims.containsKey("role")
+                        && claims.get("levelId").equals(1L)
         ));
-        verify(redisUtil).sAdd("user:tokens:" + 2L, "new_token");
-        verify(redisUtil).sRemove("user:tokens:" + 2L, "old_token");
+        verify(redisUtil).sAdd(RedisConstants.PREFIX_USER_TOKENS + 2L, "new_token");
+        verify(redisUtil).sRemove(RedisConstants.PREFIX_USER_TOKENS + 2L, "old_token");
     }
 
     @Test

@@ -20,6 +20,7 @@ import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,7 +44,7 @@ class RedisUtilTest {
 
     @BeforeEach
     void setUp() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
         redisUtil = new RedisUtil(redisTemplate, redisLockUtil, stringRedisTemplate);
     }
 
@@ -163,5 +164,17 @@ class RedisUtilTest {
             executor.shutdownNow();
             executor.awaitTermination(1, TimeUnit.SECONDS);
         }
+    }
+
+    @Test
+    void evictWithLock_waitsForInFlightRebuildThenDeletes() {
+        redisUtil.setLockSleepMs(1);
+        when(redisLockUtil.tryLock("k")).thenReturn(false, true);
+
+        redisUtil.evictWithLock("k");
+
+        verify(redisTemplate).delete("k");
+        verify(redisLockUtil, org.mockito.Mockito.times(2)).tryLock("k");
+        verify(redisLockUtil).unlock("k");
     }
 }

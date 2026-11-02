@@ -33,6 +33,7 @@ public class UserController {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", user.getId());
         claims.put("role", user.getRole());
+        claims.put("levelId", user.getLevelId());
         String token = jwtUtil.generateToken(claims);
 
         redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + user.getId(), token);

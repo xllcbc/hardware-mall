@@ -28,6 +28,8 @@ public class User {
     
     private Integer role;
     
+    private Long levelId;
+
     private Integer status;
     
     private LocalDateTime lastLoginTime;

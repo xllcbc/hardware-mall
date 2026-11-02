@@ -1,11 +1,12 @@
 package com.example.mystore.controller.user;
 
+import com.example.mystore.annotation.OptionalAuth;
 import com.example.mystore.common.result.Result;
 import com.example.mystore.entity.db.SpecTemplate;
 import com.example.mystore.entity.vo.ProductDetailVO;
 import com.example.mystore.entity.vo.ProductListVO;
+import com.example.mystore.entity.vo.ProductSkuVO;
 import com.example.mystore.entity.db.Spu;
-import com.example.mystore.entity.db.Sku;
 import com.example.mystore.service.SpecTemplateService;
 import com.example.mystore.service.SpuService;
 import com.example.mystore.service.SkuService;
@@ -19,6 +20,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/user/product")
 @RequiredArgsConstructor
+@OptionalAuth
 public class UserProductController {
 
     private final SpuService spuService;
@@ -48,8 +50,8 @@ public class UserProductController {
     }
 
     @GetMapping("/{id}/skus")
-    public Result<List<Sku>> getProductSkus(@PathVariable Long id) {
-        return Result.success(skuService.getSkusBySpu(id));
+    public Result<List<ProductSkuVO>> getProductSkus(@PathVariable Long id) {
+        return Result.success(spuService.getProductSkuVOs(id));
     }
 
     @GetMapping("/{id}/specs")
