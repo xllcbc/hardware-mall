@@ -1,0 +1,122 @@
+# 多级用户定价发布 Runbook
+
+本文用于 MySQL 8 维护窗口。迁移只接受 production 原始 schema；发现旧批发价
+字段、目标定价结构或关键表缺失时，脚本会在第一条 DDL 前中止。
+
+## 0. 固定路径
+
+```text
+hardware-mall-backend/src/main/resources/db/migration_2026-11-02_multi_level_pricing_release.sql
+hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql
+scripts/pricing-release.sh
+```
+
+脚本依赖本机 `mysql`、`mysqldump`、`sha256sum`。数据库连接参数通过环境变量
+提供，不要把密码写入命令历史或版本库：
+
+```bash
+export DB_HOST=127.0.0.1
+export DB_PORT=3306
+export DB_NAME=hardware_mall
+export DB_USERNAME=release_operator
+export MYSQL_PWD='<从密钥管理系统读取>'
+```
+
+`DB_USERNAME` 需要备份、建临时库、DDL 和恢复权限。发布前确认备份盘剩余空间
+至少为当前数据库大小的两倍。
+
+## 1. 停止写入并备份
+
+先停止管理端、小程序下单入口和后端写入流量，只保留运维连接。禁止在写入
+未停止时迁移。
+
+```bash
+./scripts/pricing-release.sh backup /secure-backups/pricing-2026-11-02.sql
+```
+
+命令必须输出备份 SHA-256。将备份和校验文件复制到与生产主机不同的存储位置，
+并确认文件可读取：
+
+```bash
+sha256sum -c /secure-backups/pricing-2026-11-02.sql.sha256
+```
+
+## 2. 在隔离临时库执行预检和迁移
+
+不要在生产库首次执行。使用最近一次 production schema 和脱敏数据恢复隔离
+MySQL 8，然后依次执行：
+
+```bash
+./scripts/pricing-release.sh preflight /secure-backups/pricing-2026-11-02.sql
+./scripts/pricing-release.sh verify
+```
+
+`preflight` 会创建 `hardware_mall_pricing_preflight`，恢复备份，再执行完整迁移。
+成功条件：
+
+- 脚本退出码为 0；
+- 迁移没有输出 `legacy wholesale pricing fields detected`；
+- `verify` 的最终输出为 `PASS: pricing release schema`；
+- 迁移前后用户、分类、SPU、SKU 和订单行数一致；
+- `level_category_discount` 行数为 0。
+
+如果预检失败，停止发布。不得通过删除旧列、跳过预检或修改脚本来继续。
+
+## 3. Production 迁移
+
+确认维护窗口、备份校验、隔离预检和回滚镜像均已就绪后执行：
+
+```bash
+./scripts/pricing-release.sh migrate \
+  /secure-backups/pricing-2026-11-02.sql
+./scripts/pricing-release.sh verify
+```
+
+迁移脚本会再次执行同一个 preflight。任何非零退出码都立即停止发布，不重试
+DDL，不执行第二次迁移。
+
+## 4. 发布后冒烟
+
+只有数据库验证通过后才启动新版本后端、管理端和用户端。至少验证：
+
+1. 健康检查通过；
+2. 访客和零售用户看到商品列表、详情价格；
+3. 非零售用户的价格与分类倍率一致；
+4. 倍率缺口按零售价兜底，管理端显示未配置；
+5. 购物车小计和订单创建金额与商品页一致；
+6. 新订单写入等级 ID、等级名称和倍率快照；
+7. 修改倍率后新请求生效，旧订单金额不变；
+8. 日志没有迁移、外键和价格异常。
+
+## 5. 回滚
+
+出现结构、价格、订单或缓存严重回归时，停止新版本和写入流量，然后恢复备份：
+
+```bash
+./scripts/pricing-release.sh restore \
+  /secure-backups/pricing-2026-11-02.sql
+```
+
+恢复后部署上一版镜像，清理 Redis 中所有新旧商品与定价缓存，再执行旧版本
+健康检查、登录、商品价格和订单创建冒烟。`sku:stock:*` 不清理，库存以数据库
+恢复结果为准。
+
+回滚完成后记录：
+
+- 备份路径与 SHA-256；
+- 恢复开始/结束时间；
+- 恢复后的表行数与关键数据校验；
+- 上一版镜像 SHA；
+- 冒烟结果和遗留风险。
+
+## 6. 人工验证 SQL
+
+验证脚本只读，不修改数据库：
+
+```bash
+mysql --protocol=TCP --default-character-set=utf8mb4 \
+  -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USERNAME" "$DB_NAME" \
+  < hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql
+```
+
+必须看到 `PASS: pricing release schema`。任何 `SIGNAL` 错误都表示发布未通过。

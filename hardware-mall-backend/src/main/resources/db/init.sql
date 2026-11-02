@@ -44,8 +44,10 @@ CREATE TABLE IF NOT EXISTS `user` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_openid` (`openid`),
     UNIQUE KEY `uk_phone` (`phone`),
+    KEY `idx_level_id` (`level_id`),
     KEY `idx_status` (`status`),
-    KEY `idx_create_time` (`create_time`)
+    KEY `idx_create_time` (`create_time`),
+    CONSTRAINT `fk_user_level` FOREIGN KEY (`level_id`) REFERENCES `user_level` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户表';
 
 -- 收货地址表
