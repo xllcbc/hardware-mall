@@ -6,12 +6,14 @@ import com.example.mystore.entity.vo.UserAdminVO;
 
 public interface UserService {
     User login(String code);
+    String issueLoginToken(Long userId);
     User getUserInfo(Long userId);
     User getUserByOpenid(String openid);
     User updateUserInfo(User user);
     User updatePhone(Long userId, String phoneCode);
     String refreshToken(Long userId, String oldToken);
-    Page<UserAdminVO> getUserPage(Integer page, Integer limit, String province, String city, Integer status);
+    Page<UserAdminVO> getUserPage(Integer page, Integer limit, String province, String city,
+                                  Integer status, Long levelId);
     void updateUserStatus(Long id, Integer status);
     void updateUserLevel(Long id, Long levelId);
     void updateUserRegion(Long id, String province, String city);

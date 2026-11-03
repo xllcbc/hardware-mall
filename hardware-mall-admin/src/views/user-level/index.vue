@@ -21,7 +21,19 @@
           </template>
         </el-table-column>
         <el-table-column prop="sortOrder" label="排序" width="100" />
-        <el-table-column prop="userCount" label="用户数" width="100" />
+        <el-table-column prop="userCount" label="用户数" width="100">
+          <template #default="{ row }">
+            <el-button
+              link
+              type="primary"
+              class="user-count-link"
+              :aria-label="`查看${row.name}归属用户`"
+              @click="openUsers(row)"
+            >
+              {{ row.userCount }}
+            </el-button>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small" effect="light">
@@ -177,6 +189,7 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   copyUserLevelDiscounts,
@@ -196,6 +209,7 @@ import {
 import { getCategoryList, type Category } from '@/api/admin/category'
 import { getExcludeDiscountText } from '@/constants/discount'
 
+const router = useRouter()
 const loading = ref(false)
 const submitLoading = ref(false)
 const matrixLoading = ref(false)
@@ -218,6 +232,10 @@ const previewPagination = reactive({ page: 1, limit: 20, total: 0 })
 const copySourceLevels = computed(() =>
   levelList.value.filter(level => level.id !== currentLevel.value?.id && level.isRetail !== 1)
 )
+
+const openUsers = (level: UserLevel) => {
+  router.push({ path: '/user', query: { levelId: String(level.id) } })
+}
 
 interface PricingImpactOptions {
   level: UserLevel

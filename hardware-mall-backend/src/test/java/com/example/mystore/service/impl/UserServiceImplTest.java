@@ -4,6 +4,9 @@ import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.config.OssProperties;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.example.mystore.entity.db.User;
 import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
@@ -11,15 +14,19 @@ import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.UserLevelService;
 import com.example.mystore.util.JwtUtil;
+import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.WechatUtil;
 import io.jsonwebtoken.ExpiredJwtException;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.springframework.data.redis.RedisConnectionFailureException;
 
 import java.util.HashMap;
@@ -36,6 +43,13 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class UserServiceImplTest {
 
+    @BeforeAll
+    static void initMybatisMetadata() {
+        TableInfoHelper.initTableInfo(
+                new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                User.class);
+    }
+
     @Mock
     private UserMapper userMapper;
 
@@ -47,6 +61,9 @@ class UserServiceImplTest {
 
     @Mock
     private RedisUtil redisUtil;
+
+    @Mock
+    private RedisLockUtil redisLockUtil;
 
     @Mock
     private OssProperties ossProperties;
@@ -72,6 +89,7 @@ class UserServiceImplTest {
         user.setRole(StatusConstants.USER_ROLE_REGULAR);
         user.setStatus(StatusConstants.USER_STATUS_NORMAL);
         user.setLevelId(1L);
+        lenient().when(redisLockUtil.tryLock(anyString())).thenReturn(true);
     }
 
     @Test
@@ -95,6 +113,25 @@ class UserServiceImplTest {
     }
 
     @Test
+    void existingUserLoginOnlyUpdatesLastLoginTime() {
+        when(wechatUtil.getSessionKey("login_code"))
+                .thenReturn(Map.of("openid", "test_openid_001", "session_key", "session_key"));
+        when(userMapper.selectOne(any())).thenReturn(user);
+
+        User result = userService.login("login_code");
+
+        assertThat(result.getId()).isEqualTo(2L);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<User>> updateCaptor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(userMapper).update(isNull(), updateCaptor.capture());
+        assertThat(updateCaptor.getValue().getSqlSet())
+                .contains("last_login_time")
+                .doesNotContain("level_id");
+        verify(userMapper, never()).updateById(any(User.class));
+    }
+
+    @Test
     void testUpdateUserInfo() {
         when(userMapper.selectById(2L)).thenReturn(user);
 
@@ -107,7 +144,11 @@ class UserServiceImplTest {
 
         assertThat(result.getNickname()).isEqualTo("张三丰");
         assertThat(result.getPhone()).isEqualTo("13800001111");
-        verify(userMapper).updateById(any(User.class));
+        LambdaUpdateWrapper<User> updateWrapper = captureUserUpdate();
+        assertThat(updateWrapper.getSqlSet())
+                .contains("nickname", "phone", "update_time")
+                .doesNotContain("level_id");
+        verify(userMapper, never()).updateById(any(User.class));
     }
 
     @Test
@@ -135,7 +176,7 @@ class UserServiceImplTest {
         User result = userService.updateUserInfo(update);
 
         assertThat(result.getAvatarUrl()).isEqualTo("https://java0251014.oss-cn-beijing.aliyuncs.com/avatars/test.jpg");
-        verify(userMapper).updateById(any(User.class));
+        assertThat(captureUserUpdate().getSqlSet()).contains("avatar_url");
     }
 
     @Test
@@ -150,7 +191,7 @@ class UserServiceImplTest {
         User result = userService.updateUserInfo(update);
 
         assertThat(result.getAvatarUrl()).isNull();
-        verify(userMapper).updateById(any(User.class));
+        assertThat(captureUserUpdate().getSqlSet()).doesNotContain("avatar_url");
     }
 
     @Test
@@ -164,7 +205,30 @@ class UserServiceImplTest {
         User result = userService.updateUserInfo(update);
 
         assertThat(result.getAvatarUrl()).isNull();
-        verify(userMapper).updateById(any(User.class));
+        assertThat(captureUserUpdate().getSqlSet()).doesNotContain("avatar_url");
+    }
+
+    @Test
+    void updatePhoneOnlyWritesPhoneFields() {
+        when(wechatUtil.getPhoneNumber("phone_code")).thenReturn("13900001111");
+        when(userMapper.selectById(2L)).thenReturn(user);
+
+        userService.updatePhone(2L, "phone_code");
+
+        assertThat(captureUserUpdate().getSqlSet())
+                .contains("phone", "update_time")
+                .doesNotContain("level_id");
+    }
+
+    @Test
+    void updateRegionOnlyWritesRegionFields() {
+        when(userMapper.selectById(2L)).thenReturn(user);
+
+        userService.updateUserRegion(2L, "浙江省", "杭州市");
+
+        assertThat(captureUserUpdate().getSqlSet())
+                .contains("province", "city", "update_time")
+                .doesNotContain("level_id");
     }
 
     @Test
@@ -173,7 +237,10 @@ class UserServiceImplTest {
 
         userService.updateUserStatus(2L, StatusConstants.USER_STATUS_DISABLED);
 
-        verify(userMapper).updateById(org.mockito.Mockito.<User>argThat(u -> u.getStatus() == StatusConstants.USER_STATUS_DISABLED));
+        LambdaUpdateWrapper<User> updateWrapper = captureUserUpdate();
+        assertThat(updateWrapper.getSqlSet()).contains("status", "update_time");
+        assertThat(updateWrapper.getParamNameValuePairs().values())
+                .contains(StatusConstants.USER_STATUS_DISABLED);
     }
 
     @Test
@@ -198,6 +265,7 @@ class UserServiceImplTest {
                 .hasMessageContaining("管理员账号不允许封禁");
 
         verify(userMapper, never()).updateById(any(User.class));
+        verify(userMapper, never()).update(isNull(), any());
         verifyNoInteractions(redisUtil);
     }
 
@@ -221,7 +289,10 @@ class UserServiceImplTest {
 
         userService.updateUserStatus(2L, StatusConstants.USER_STATUS_DISABLED);
 
-        verify(userMapper).updateById(argThat((User u) -> u.getStatus() == StatusConstants.USER_STATUS_DISABLED));
+        LambdaUpdateWrapper<User> updateWrapper = captureUserUpdate();
+        assertThat(updateWrapper.getSqlSet()).contains("status");
+        assertThat(updateWrapper.getParamNameValuePairs().values())
+                .contains(StatusConstants.USER_STATUS_DISABLED);
         verify(redisUtil).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
                 eq(RedisConstants.TOKEN_BLACKLIST_VALUE), anyLong(), eq(TimeUnit.SECONDS));
         verify(redisUtil, never()).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "expired_token"),
@@ -241,7 +312,16 @@ class UserServiceImplTest {
         when(userLevelService.getById(2L)).thenReturn(level);
         userService.updateUserLevel(5L, 2L);
         assertThat(u.getLevelId()).isEqualTo(2L);
-        verify(userMapper).updateById(u);
+        LambdaUpdateWrapper<User> updateWrapper = captureUserUpdate();
+        assertThat(updateWrapper.getSqlSet())
+                .contains("level_id", "update_time")
+                .doesNotContain("nickname", "phone", "status");
+        verify(userMapper, never()).updateById(any(User.class));
+        var lockKey = RedisConstants.PREFIX_USER_LEVEL_LOCK + 5L;
+        var ordered = inOrder(redisLockUtil, userMapper);
+        ordered.verify(redisLockUtil).tryLock(lockKey);
+        ordered.verify(userMapper).selectById(5L);
+        verify(redisLockUtil).unlock(lockKey);
     }
 
     @Test
@@ -309,6 +389,7 @@ class UserServiceImplTest {
         userService.updateUserLevel(5L, 2L);
 
         verify(userMapper, never()).updateById(any(User.class));
+        verify(userMapper, never()).update(isNull(), any());
         verify(redisUtil, times(2)).sMembers(RedisConstants.PREFIX_USER_TOKENS + 5L, String.class);
         verify(redisUtil, times(2)).set(eq(RedisConstants.PREFIX_TOKEN_BLACKLIST + "live_token"),
                 eq(RedisConstants.TOKEN_BLACKLIST_VALUE), anyLong(), eq(TimeUnit.SECONDS));
@@ -336,6 +417,29 @@ class UserServiceImplTest {
         ));
         verify(redisUtil).sAdd(RedisConstants.PREFIX_USER_TOKENS + 2L, "new_token");
         verify(redisUtil).sRemove(RedisConstants.PREFIX_USER_TOKENS + 2L, "old_token");
+        verify(redisLockUtil).tryLock(RedisConstants.PREFIX_USER_LEVEL_LOCK + 2L);
+        verify(redisLockUtil).unlock(RedisConstants.PREFIX_USER_LEVEL_LOCK + 2L);
+    }
+
+    @Test
+    void issueLoginToken_readsCurrentLevelWhileHoldingUserIdentityLock() {
+        User current = new User();
+        current.setId(5L);
+        current.setRole(StatusConstants.USER_ROLE_REGULAR);
+        current.setStatus(StatusConstants.USER_STATUS_NORMAL);
+        current.setLevelId(2L);
+        when(userMapper.selectById(5L)).thenReturn(current);
+        when(jwtUtil.generateToken(anyMap())).thenReturn("level_two_token");
+
+        String token = userService.issueLoginToken(5L);
+
+        assertThat(token).isEqualTo("level_two_token");
+        verify(jwtUtil).generateToken(argThat(claims ->
+                claims.get("levelId").equals(2L)
+                        && claims.get("role").equals(StatusConstants.USER_ROLE_REGULAR)));
+        verify(redisLockUtil).tryLock(RedisConstants.PREFIX_USER_LEVEL_LOCK + 5L);
+        verify(redisUtil).sAdd(RedisConstants.PREFIX_USER_TOKENS + 5L, "level_two_token");
+        verify(redisLockUtil).unlock(RedisConstants.PREFIX_USER_LEVEL_LOCK + 5L);
     }
 
     @Test
@@ -354,5 +458,13 @@ class UserServiceImplTest {
         String sessionKey = userService.getSessionKey(2L);
 
         assertThat(sessionKey).isNull();
+    }
+
+    private LambdaUpdateWrapper<User> captureUserUpdate() {
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<User>> updateCaptor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(userMapper).update(isNull(), updateCaptor.capture());
+        return updateCaptor.getValue();
     }
 }

@@ -24,6 +24,7 @@ export interface UserQuery {
   province?: string
   city?: string
   status?: number
+  levelId?: number
 }
 
 export const getUserList = (params?: UserQuery) => {

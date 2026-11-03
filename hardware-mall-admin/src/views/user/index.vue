@@ -17,6 +17,20 @@
           filterable
           class="region-cascader"
         />
+        <el-select
+          v-model="levelFilter"
+          placeholder="按用户等级筛选"
+          clearable
+          filterable
+          class="level-select"
+        >
+          <el-option
+            v-for="level in levelOptions"
+            :key="level.id"
+            :label="level.name"
+            :value="level.id"
+          />
+        </el-select>
       </div>
       <el-table 
         :data="tableData" 
@@ -166,7 +180,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, watch, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { provinceCityOptions } from '@/utils/regions'
 import { getUserList, updateUserStatus, updateUserRegion, updateUserLevel } from '@/api/admin/user'
@@ -174,10 +188,12 @@ import { getUserLevelList, type UserLevel } from '@/api/admin/userLevel'
 import { USER_ROLE, USER_ROLE_TEXT, USER_STATUS, USER_STATUS_TEXT } from '@/constants/status'
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const tableData = ref<any[]>([])
 
 const regionFilter = ref<string[]>([])
+const levelFilter = ref<number | null>(parseLevelIdQuery(route.query.levelId))
 
 const regionDialogVisible = ref(false)
 const regionForm = ref<string[]>([])
@@ -196,7 +212,27 @@ watch(regionFilter, () => {
   loadData()
 })
 
+watch(levelFilter, (value) => {
+  router.replace({
+    path: route.path,
+    query: {
+      ...route.query,
+      levelId: value == null ? undefined : String(value)
+    }
+  })
+  pagination.page = 1
+  loadData()
+})
 
+watch(
+  () => route.query.levelId,
+  (value) => {
+    const nextLevelId = parseLevelIdQuery(value)
+    if (nextLevelId !== levelFilter.value) {
+      levelFilter.value = nextLevelId
+    }
+  }
+)
 
 const pagination = reactive({
   page: 1,
@@ -277,7 +313,8 @@ const loadData = async () => {
       page: pagination.page,
       limit: pagination.limit,
       province,
-      city
+      city,
+      levelId: levelFilter.value ?? undefined
     })
     tableData.value = res.records || []
     pagination.total = res.total || 0
@@ -300,6 +337,15 @@ onMounted(() => {
   loadLevels()
   loadData()
 })
+
+function parseLevelIdQuery(value: unknown): number | null {
+  const raw = Array.isArray(value) ? value[0] : value
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return null
+  }
+  const parsed = Number(raw)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
+}
 </script>
 
 <style scoped>
@@ -365,11 +411,18 @@ onMounted(() => {
 }
 
 .filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
   margin-bottom: var(--space-lg);
 }
 
 .region-cascader {
   width: 200px;
+}
+
+.level-select {
+  width: 180px;
 }
 
 .user-table {

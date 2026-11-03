@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
@@ -14,6 +15,7 @@ import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.UserService;
 import com.example.mystore.service.UserLevelService;
 import com.example.mystore.util.JwtUtil;
+import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.WechatUtil;
 import io.jsonwebtoken.JwtException;
@@ -26,16 +28,20 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
 
+    private static final long USER_IDENTITY_LOCK_RETRY_MILLIS = 20L;
+
     private final UserMapper userMapper;
     private final WechatUtil wechatUtil;
     private final JwtUtil jwtUtil;
     private final RedisUtil redisUtil;
+    private final RedisLockUtil redisLockUtil;
     private final OssProperties ossProperties;
     private final PricingRuleService pricingRuleService;
     private final UserLevelService userLevelService;
@@ -62,8 +68,11 @@ public class UserServiceImpl implements UserService {
             if (user.getStatus() == StatusConstants.USER_STATUS_DISABLED) {
                 throw new BusinessException("账号已被禁用");
             }
-            user.setLastLoginTime(LocalDateTime.now());
-            userMapper.updateById(user);
+            LocalDateTime lastLoginTime = LocalDateTime.now();
+            user.setLastLoginTime(lastLoginTime);
+            userMapper.update(null, new LambdaUpdateWrapper<User>()
+                    .eq(User::getId, user.getId())
+                    .set(User::getLastLoginTime, lastLoginTime));
         }
 
         // 预留：当前业务未使用 session_key（手机号走新版 getuserphonenumber 接口，仅用 access_token）。
@@ -82,6 +91,17 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public String issueLoginToken(Long userId) {
+        return withUserIdentityLock(userId, () -> {
+            User user = requireLoginUser(userId);
+            Map<String, Object> claims = tokenClaims(user);
+            String token = jwtUtil.generateToken(claims);
+            redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + userId, token);
+            return token;
+        });
+    }
+
+    @Override
     public User getUserInfo(Long userId) {
         User user = userMapper.selectById(userId);
         if (user != null) {
@@ -97,8 +117,12 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("用户不存在");
         }
 
+        LambdaUpdateWrapper<User> update = new LambdaUpdateWrapper<User>()
+                .eq(User::getId, user.getId())
+                .set(User::getUpdateTime, LocalDateTime.now());
         if (user.getNickname() != null) {
             existUser.setNickname(user.getNickname());
+            update.set(User::getNickname, existUser.getNickname());
         }
         if (StringUtils.hasText(user.getAvatarUrl())) {
             String expectedPrefix = ossProperties.getDomain() + "/";
@@ -106,13 +130,14 @@ public class UserServiceImpl implements UserService {
                 log.warn("拒绝非法头像地址, userId={}, url={}", user.getId(), user.getAvatarUrl());
             } else {
                 existUser.setAvatarUrl(user.getAvatarUrl());
+                update.set(User::getAvatarUrl, existUser.getAvatarUrl());
             }
         }
         if (user.getPhone() != null) {
             existUser.setPhone(user.getPhone());
+            update.set(User::getPhone, existUser.getPhone());
         }
-
-        userMapper.updateById(existUser);
+        userMapper.update(null, update);
         return existUser;
     }
 
@@ -124,8 +149,12 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("用户不存在");
         }
         user.setPhone(phone);
-        user.setUpdateTime(LocalDateTime.now());
-        userMapper.updateById(user);
+        LocalDateTime updateTime = LocalDateTime.now();
+        user.setUpdateTime(updateTime);
+        userMapper.update(null, new LambdaUpdateWrapper<User>()
+                .eq(User::getId, userId)
+                .set(User::getPhone, phone)
+                .set(User::getUpdateTime, updateTime));
 
         if (user.getOpenid() != null) {
             user.setOpenid(null);
@@ -141,40 +170,37 @@ public class UserServiceImpl implements UserService {
         }
         user.setProvince(province);
         user.setCity(city);
-        user.setUpdateTime(LocalDateTime.now());
-        userMapper.updateById(user);
+        LocalDateTime updateTime = LocalDateTime.now();
+        user.setUpdateTime(updateTime);
+        userMapper.update(null, new LambdaUpdateWrapper<User>()
+                .eq(User::getId, id)
+                .set(User::getProvince, province)
+                .set(User::getCity, city)
+                .set(User::getUpdateTime, updateTime));
     }
 
     @Override
     public String refreshToken(Long userId, String oldToken) {
-        User user = userMapper.selectById(userId);
-        if (user == null) {
-            throw new BusinessException("用户不存在");
-        }
-        if (user.getStatus() == StatusConstants.USER_STATUS_DISABLED) {
-            throw new BusinessException("账号已被禁用");
-        }
+        return withUserIdentityLock(userId, () -> {
+            User user = requireLoginUser(userId);
+            String newToken = jwtUtil.generateToken(tokenClaims(user));
 
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("userId", userId);
-        claims.put("role", user.getRole());
-        claims.put("levelId", user.getLevelId());
-        String newToken = jwtUtil.generateToken(claims);
+            redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + userId, newToken);
+            redisUtil.sRemove(RedisConstants.PREFIX_USER_TOKENS + userId, oldToken);
 
-        redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + userId, newToken);
-        redisUtil.sRemove(RedisConstants.PREFIX_USER_TOKENS + userId, oldToken);
+            long ttl = (jwtUtil.getExpirationFromToken(oldToken) - System.currentTimeMillis()) / 1000;
+            if (ttl > 0) {
+                redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + oldToken,
+                        RedisConstants.TOKEN_BLACKLIST_VALUE, ttl, TimeUnit.SECONDS);
+            }
 
-        long ttl = (jwtUtil.getExpirationFromToken(oldToken) - System.currentTimeMillis()) / 1000;
-        if (ttl > 0) {
-            redisUtil.set(RedisConstants.PREFIX_TOKEN_BLACKLIST + oldToken,
-                    RedisConstants.TOKEN_BLACKLIST_VALUE, ttl, TimeUnit.SECONDS);
-        }
-
-        return newToken;
+            return newToken;
+        });
     }
 
     @Override
-    public Page<UserAdminVO> getUserPage(Integer page, Integer limit, String province, String city, Integer status) {
+    public Page<UserAdminVO> getUserPage(Integer page, Integer limit, String province, String city,
+                                         Integer status, Long levelId) {
         Page<User> pageParam = new Page<>(page, limit);
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(province)) {
@@ -185,6 +211,9 @@ public class UserServiceImpl implements UserService {
         }
         if (status != null) {
             wrapper.eq(User::getStatus, status);
+        }
+        if (levelId != null) {
+            wrapper.eq(User::getLevelId, levelId);
         }
         wrapper.orderByDesc(User::getCreateTime);
         Page<User> source = userMapper.selectPage(pageParam, wrapper);
@@ -203,7 +232,12 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("管理员账号不允许封禁");
         }
         user.setStatus(status);
-        userMapper.updateById(user);
+        LocalDateTime updateTime = LocalDateTime.now();
+        user.setUpdateTime(updateTime);
+        userMapper.update(null, new LambdaUpdateWrapper<User>()
+                .eq(User::getId, id)
+                .set(User::getStatus, status)
+                .set(User::getUpdateTime, updateTime));
         if (status == StatusConstants.USER_STATUS_DISABLED) {
             invalidateUserTokens(id);
         }
@@ -214,23 +248,30 @@ public class UserServiceImpl implements UserService {
         if (levelId == null) {
             throw new BusinessException("用户等级不能为空");
         }
-        User user = userMapper.selectById(id);
-        if (user == null) {
-            throw new BusinessException("用户不存在");
-        }
-        var level = userLevelService.getById(levelId);
-        if (level.getStatus() == null
-                || level.getStatus() != UserLevelStatusConstants.STATUS_ENABLED) {
-            throw new BusinessException("目标等级未启用");
-        }
-        Long oldLevelId = user.getLevelId();
-        if (!levelId.equals(oldLevelId)) {
-            user.setLevelId(levelId);
-            user.setUpdateTime(LocalDateTime.now());
-            userMapper.updateById(user);
-            log.info("用户等级变更, userId={}, levelId: {} -> {}", id, oldLevelId, levelId);
-        }
-        invalidateUserTokens(id);
+        withUserIdentityLock(id, () -> {
+            User user = userMapper.selectById(id);
+            if (user == null) {
+                throw new BusinessException("用户不存在");
+            }
+            var level = userLevelService.getById(levelId);
+            if (level.getStatus() == null
+                    || level.getStatus() != UserLevelStatusConstants.STATUS_ENABLED) {
+                throw new BusinessException("目标等级未启用");
+            }
+            Long oldLevelId = user.getLevelId();
+            if (!levelId.equals(oldLevelId)) {
+                user.setLevelId(levelId);
+                LocalDateTime updateTime = LocalDateTime.now();
+                user.setUpdateTime(updateTime);
+                userMapper.update(null, new LambdaUpdateWrapper<User>()
+                        .eq(User::getId, id)
+                        .set(User::getLevelId, levelId)
+                        .set(User::getUpdateTime, updateTime));
+                log.info("用户等级变更, userId={}, levelId: {} -> {}", id, oldLevelId, levelId);
+            }
+            invalidateUserTokens(id);
+            return null;
+        });
     }
 
     private UserAdminVO toAdminVO(User user) {
@@ -249,6 +290,46 @@ public class UserServiceImpl implements UserService {
         vo.setLastLoginIp(user.getLastLoginIp());
         vo.setCreateTime(user.getCreateTime());
         return vo;
+    }
+
+    private User requireLoginUser(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        if (user.getStatus() == StatusConstants.USER_STATUS_DISABLED) {
+            throw new BusinessException("账号已被禁用");
+        }
+        return user;
+    }
+
+    private Map<String, Object> tokenClaims(User user) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", user.getId());
+        claims.put("role", user.getRole());
+        claims.put("levelId", user.getLevelId());
+        return claims;
+    }
+
+    private <T> T withUserIdentityLock(Long userId, Supplier<T> action) {
+        String lockKey = RedisConstants.PREFIX_USER_LEVEL_LOCK + userId;
+        while (!redisLockUtil.tryLock(lockKey)) {
+            sleepWhileWaitingForIdentityLock();
+        }
+        try {
+            return action.get();
+        } finally {
+            redisLockUtil.unlock(lockKey);
+        }
+    }
+
+    private void sleepWhileWaitingForIdentityLock() {
+        try {
+            Thread.sleep(USER_IDENTITY_LOCK_RETRY_MILLIS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("等待用户身份锁时被中断", e);
+        }
     }
 
     private void invalidateUserTokens(Long userId) {

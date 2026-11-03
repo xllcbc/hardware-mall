@@ -24,8 +24,9 @@ public class AdminUserController {
             @RequestParam(defaultValue = "20") Integer limit,
             @RequestParam(required = false) String province,
             @RequestParam(required = false) String city,
-            @RequestParam(required = false) Integer status) {
-        return Result.success(userService.getUserPage(page, limit, province, city, status));
+            @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) Long levelId) {
+        return Result.success(userService.getUserPage(page, limit, province, city, status, levelId));
     }
 
     @PutMapping("/{id}/status")
