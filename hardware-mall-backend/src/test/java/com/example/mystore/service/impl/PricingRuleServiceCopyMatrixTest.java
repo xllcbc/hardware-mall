@@ -22,6 +22,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -89,6 +90,59 @@ class PricingRuleServiceCopyMatrixTest {
                 });
     }
 
+    @Test
+    void copyDiscounts_rejectsIncompleteSourceForEnabledTargetWithoutChangingTarget() {
+        Long targetLevelId = createLevel("启用复制目标等级");
+        Long sourceLevelId = createLevel("不完整复制来源等级");
+        Long configuredCategoryId = createCategory("已配置分类");
+        Long gapCategoryId = createCategory("缺口分类");
+
+        setLevelStatus(targetLevelId, UserLevelStatusConstants.STATUS_ENABLED);
+        insertDiscount(targetLevelId, configuredCategoryId, "0.9000");
+        insertDiscount(targetLevelId, gapCategoryId, "0.8500");
+        insertDiscount(sourceLevelId, configuredCategoryId, "0.6000");
+
+        assertThatThrownBy(() -> pricingRuleService.copyDiscounts(targetLevelId, sourceLevelId))
+                .hasMessage("来源等级倍率矩阵未填满，不能复制到已启用等级");
+
+        List<LevelCategoryDiscount> targetRows = levelCategoryDiscountMapper.selectList(
+                new LambdaQueryWrapper<LevelCategoryDiscount>()
+                        .eq(LevelCategoryDiscount::getLevelId, targetLevelId)
+                        .orderByAsc(LevelCategoryDiscount::getCategoryId));
+        assertThat(targetRows)
+                .extracting(LevelCategoryDiscount::getRate)
+                .containsExactly(new BigDecimal("0.9000"), new BigDecimal("0.8500"));
+    }
+
+    @Test
+    void explicitOneRateStaysConfiguredWhenNewCategoryCreatesGap() {
+        Long levelId = createLevel("显式一比一等级");
+        Long originalCategoryId = createCategory("原分类");
+        insertDiscount(levelId, originalCategoryId, "1.0000");
+
+        assertThat(pricingRuleService.getDiscounts(levelId))
+                .singleElement()
+                .satisfies(item -> {
+                    assertThat(item.isMissing()).isFalse();
+                    assertThat(item.getRate()).isEqualByComparingTo("1.0000");
+                });
+
+        Long newCategoryId = createCategory("新增分类");
+        List<LevelDiscountVO> matrix = pricingRuleService.getDiscounts(levelId);
+
+        assertThat(matrix)
+                .filteredOn(item -> item.getCategoryId().equals(originalCategoryId))
+                .singleElement()
+                .satisfies(item -> assertThat(item.isMissing()).isFalse());
+        assertThat(matrix)
+                .filteredOn(item -> item.getCategoryId().equals(newCategoryId))
+                .singleElement()
+                .satisfies(item -> {
+                    assertThat(item.isMissing()).isTrue();
+                    assertThat(item.getRate()).isNull();
+                });
+    }
+
     private Long createLevel(String name) {
         UserLevel level = new UserLevel();
         level.setName(name);
@@ -108,6 +162,12 @@ class PricingRuleServiceCopyMatrixTest {
         category.setDeleteTime(0L);
         categoryMapper.insert(category);
         return category.getId();
+    }
+
+    private void setLevelStatus(Long levelId, int status) {
+        UserLevel level = userLevelMapper.selectById(levelId);
+        level.setStatus(status);
+        userLevelMapper.updateById(level);
     }
 
     private void insertDiscount(Long levelId, Long categoryId, String rate) {

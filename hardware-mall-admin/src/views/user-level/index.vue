@@ -97,7 +97,7 @@
           <el-icon><MagicStick /></el-icon>
           一键填充
         </el-button>
-        <el-button @click="copyVisible = true">
+        <el-button @click="openCopyDialog">
           <el-icon><CopyDocument /></el-icon>
           复制等级
         </el-button>
@@ -105,7 +105,7 @@
       </div>
       <el-table :data="discountList" max-height="430" v-loading="matrixLoading">
         <el-table-column prop="categoryName" label="商品分类" min-width="200" />
-        <el-table-column label="倍率" width="220">
+        <el-table-column label="倍率" width="360">
           <template #default="{ row }">
             <el-input-number
               v-model="row.rate"
@@ -115,8 +115,15 @@
               :step="0.01"
               :controls="false"
               placeholder="未配置"
+              @change="syncMissingFlag(row)"
             />
-            <el-tag v-if="row.missing" size="small" type="danger" effect="light">缺口</el-tag>
+            <el-tag
+              size="small"
+              :type="getMatrixCellStatus(row.rate).configured ? 'success' : 'danger'"
+              effect="light"
+            >
+              {{ getMatrixCellStatus(row.rate).label }}
+            </el-tag>
           </template>
         </el-table-column>
       </el-table>
@@ -129,7 +136,13 @@
     <el-dialog v-model="copyVisible" title="复制倍率矩阵" width="420px">
       <el-form label-width="100px">
         <el-form-item label="来源等级">
-          <el-select v-model="copySourceLevelId" placeholder="请选择来源等级" style="width: 100%">
+          <el-select
+            v-model="copySourceLevelId"
+            placeholder="请选择来源等级"
+            style="width: 100%"
+            :loading="copySourceLoading"
+            @change="loadCopySourceMatrix"
+          >
             <el-option
               v-for="level in copySourceLevels"
               :key="level.id"
@@ -208,6 +221,12 @@ import {
 } from '@/api/admin/userLevel'
 import { getCategoryList, type Category } from '@/api/admin/category'
 import { getExcludeDiscountText } from '@/constants/discount'
+import {
+  canApplyCopiedMatrix,
+  getMatrixCellStatus,
+  getMatrixStats,
+  runAfterImpactConfirmation
+} from '@/utils/pricingImpact'
 
 const router = useRouter()
 const loading = ref(false)
@@ -222,8 +241,11 @@ const editingLevel = ref<UserLevel | null>(null)
 const levelDialogVisible = ref(false)
 const matrixDialogVisible = ref(false)
 const copyVisible = ref(false)
+const copySourceLoading = ref(false)
+const copySourceLoaded = ref(false)
 const previewVisible = ref(false)
 const copySourceLevelId = ref<number | null>(null)
+const copySourceMatrix = ref<LevelDiscount[]>([])
 const previewCategoryId = ref<number | null>(null)
 const previewList = ref<UserLevelProductPreview[]>([])
 const levelForm = reactive({ name: '', sortOrder: 0 })
@@ -240,6 +262,7 @@ const openUsers = (level: UserLevel) => {
 interface PricingImpactOptions {
   level: UserLevel
   categoryCount: number
+  configuredCategoryCount?: number
   title: string
   description: string
   confirmButtonText: string
@@ -268,6 +291,7 @@ const renderImpactRow = (label: string, value: string) =>
 const confirmPricingImpact = async ({
   level,
   categoryCount,
+  configuredCategoryCount,
   title,
   description,
   confirmButtonText,
@@ -276,10 +300,19 @@ const confirmPricingImpact = async ({
   const rows = [
     renderImpactRow('等级名称', level.name),
     renderImpactRow('用户数', `${Number(level.userCount || 0).toLocaleString('zh-CN')} 人`),
-    renderImpactRow('分类数量', `${categoryCount} 个`)
+    renderImpactRow('分类数量', `${categoryCount} 个`),
+    renderImpactRow(
+      '已配置 / 缺口',
+      `${configuredCategoryCount ?? categoryCount} / ${categoryCount - (configuredCategoryCount ?? categoryCount)}`
+    )
   ]
   if (sourceLevel) {
-    rows.push(renderImpactRow('来源等级', sourceLevel.name))
+    const sourceStats = getMatrixStats(copySourceMatrix.value)
+    rows.push(
+      renderImpactRow('来源等级', sourceLevel.name),
+      renderImpactRow('来源用户数', `${Number(sourceLevel.userCount || 0).toLocaleString('zh-CN')} 人`),
+      renderImpactRow('来源已配置 / 缺口', `${sourceStats.configured} / ${sourceStats.missing}`)
+    )
   }
 
   try {
@@ -402,8 +435,13 @@ const openMatrix = async (level: UserLevel) => {
   }
 }
 
+const syncMissingFlag = (item: LevelDiscount) => {
+  item.missing = item.rate == null
+}
+
 const saveMatrix = async () => {
   if (!currentLevel.value) return
+  discountList.value.forEach(syncMissingFlag)
   const items = discountList.value
     .filter(item => item.rate != null)
     .map(item => ({ categoryId: item.categoryId, rate: Number(item.rate) }))
@@ -411,47 +449,78 @@ const saveMatrix = async () => {
     ElMessage.warning('请至少配置一个分类倍率')
     return
   }
-  const confirmed = await confirmPricingImpact({
-    level: currentLevel.value,
-    categoryCount: discountList.value.length,
-    title: '确认保存倍率矩阵',
-    description: '保存后将立即影响该等级用户的商品取价。',
-    confirmButtonText: '确认保存'
-  })
-  if (!confirmed) return
-  matrixLoading.value = true
-  try {
-    await saveUserLevelDiscounts(currentLevel.value.id, items)
-    ElMessage.success('倍率矩阵已保存')
-    discountList.value = await getUserLevelDiscounts(currentLevel.value.id) || []
-    loadLevels()
-  } finally {
-    matrixLoading.value = false
-  }
+  await runAfterImpactConfirmation(
+    () => confirmPricingImpact({
+      level: currentLevel.value!,
+      categoryCount: discountList.value.length,
+      configuredCategoryCount: items.length,
+      title: '确认保存倍率矩阵',
+      description: '未配置分类将按零售倍率 1.0000 兜底。保存后将立即影响该等级用户的商品取价。',
+      confirmButtonText: '确认保存'
+    }),
+    async () => {
+      matrixLoading.value = true
+      try {
+        await saveUserLevelDiscounts(currentLevel.value!.id, items)
+        ElMessage.success('倍率矩阵已保存')
+        discountList.value = await getUserLevelDiscounts(currentLevel.value!.id) || []
+        loadLevels()
+      } finally {
+        matrixLoading.value = false
+      }
+    }
+  )
 }
 
 const fillAll = async () => {
   if (!currentLevel.value) return
-  const { value } = await ElMessageBox.prompt('请输入要填充到全部分类的倍率，范围 (0, 1]', '一键填充', {
-    inputPattern: /^(0(\.\d{1,4})?|1(\.0{1,4})?)$/,
-    inputErrorMessage: '请输入 0 到 1 之间的倍率，最多四位小数'
-  })
+  let value: string
+  try {
+    ({ value } = await ElMessageBox.prompt('请输入要填充到全部分类的倍率，范围 (0, 1]', '一键填充', {
+      inputPattern: /^(0(\.\d{1,4})?|1(\.0{1,4})?)$/,
+      inputErrorMessage: '请输入 0 到 1 之间的倍率，最多四位小数'
+    }))
+  } catch {
+    return
+  }
   const rate = Number(value)
   if (rate <= 0 || rate > 1) {
     ElMessage.warning('倍率必须在 (0, 1] 之间')
     return
   }
-  const confirmed = await confirmPricingImpact({
-    level: currentLevel.value,
-    categoryCount: discountList.value.length,
-    title: '确认一键填充',
-    description: `将把全部分类倍率覆盖为 ${rate.toFixed(4)}，保存后将立即影响该等级用户的商品取价。`,
-    confirmButtonText: '确认填充'
-  })
-  if (!confirmed) return
-  await fillUserLevelDiscounts(currentLevel.value.id, rate)
-  ElMessage.success('已填充全部分类')
-  discountList.value = await getUserLevelDiscounts(currentLevel.value.id) || []
+  await runAfterImpactConfirmation(
+    () => confirmPricingImpact({
+      level: currentLevel.value!,
+      categoryCount: discountList.value.length,
+      configuredCategoryCount: discountList.value.length,
+      title: '确认一键填充',
+      description: `将把全部分类倍率覆盖为 ${rate.toFixed(4)}，保存后将立即影响该等级用户的商品取价。`,
+      confirmButtonText: '确认填充'
+    }),
+    async () => {
+      await fillUserLevelDiscounts(currentLevel.value!.id, rate)
+      ElMessage.success('已填充全部分类')
+      discountList.value = await getUserLevelDiscounts(currentLevel.value!.id) || []
+    }
+  )
+}
+
+const openCopyDialog = () => {
+  copySourceLevelId.value = null
+  copySourceMatrix.value = []
+  copySourceLoaded.value = false
+  copyVisible.value = true
+}
+
+const loadCopySourceMatrix = async (sourceLevelId: number) => {
+  copySourceLoading.value = true
+  copySourceLoaded.value = false
+  try {
+    copySourceMatrix.value = await getUserLevelDiscounts(sourceLevelId) || []
+    copySourceLoaded.value = true
+  } finally {
+    copySourceLoading.value = false
+  }
 }
 
 const copyMatrix = async () => {
@@ -464,24 +533,37 @@ const copyMatrix = async () => {
     ElMessage.warning('来源等级不存在，请重新选择')
     return
   }
-  const confirmed = await confirmPricingImpact({
-    level: currentLevel.value,
-    categoryCount: discountList.value.length,
-    title: '确认复制倍率矩阵',
-    description: '目标等级现有倍率将被来源等级的已配置矩阵替换，来源缺失的分类仍会保持缺口。',
-    confirmButtonText: '确认复制',
-    sourceLevel
-  })
-  if (!confirmed) return
-  matrixLoading.value = true
-  try {
-    await copyUserLevelDiscounts(currentLevel.value.id, copySourceLevelId.value)
-    ElMessage.success('复制完成，缺口仍需手动补齐')
-    copyVisible.value = false
-    discountList.value = await getUserLevelDiscounts(currentLevel.value.id) || []
-  } finally {
-    matrixLoading.value = false
+  if (copySourceLoading.value || !copySourceLoaded.value) {
+    ElMessage.warning('来源等级矩阵仍在加载，请稍后重试')
+    return
   }
+  const sourceStats = getMatrixStats(copySourceMatrix.value)
+  if (!canApplyCopiedMatrix(currentLevel.value.status, sourceStats)) {
+    ElMessage.warning('来源等级存在缺口，不能复制到已启用等级')
+    return
+  }
+  await runAfterImpactConfirmation(
+    () => confirmPricingImpact({
+      level: currentLevel.value!,
+      categoryCount: sourceStats.total,
+      configuredCategoryCount: sourceStats.configured,
+      title: '确认复制倍率矩阵',
+      description: '目标等级现有倍率将被来源等级的已配置矩阵替换，来源缺失的分类仍会保持缺口。',
+      confirmButtonText: '确认复制',
+      sourceLevel
+    }),
+    async () => {
+      matrixLoading.value = true
+      try {
+        await copyUserLevelDiscounts(currentLevel.value!.id, copySourceLevelId.value!)
+        ElMessage.success(sourceStats.missing ? '复制完成，缺口仍需手动补齐' : '复制完成')
+        copyVisible.value = false
+        discountList.value = await getUserLevelDiscounts(currentLevel.value!.id) || []
+      } finally {
+        matrixLoading.value = false
+      }
+    }
+  )
 }
 
 const openPreview = async (level: UserLevel) => {

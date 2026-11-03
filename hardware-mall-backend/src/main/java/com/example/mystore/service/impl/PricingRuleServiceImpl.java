@@ -149,6 +149,10 @@ public class PricingRuleServiceImpl implements PricingRuleService {
         if (Integer.valueOf(UserLevelStatusConstants.IS_RETAIL).equals(source.getIsRetail())) {
             throw new BusinessException("零售等级没有可复制的倍率矩阵");
         }
+        if (Integer.valueOf(UserLevelStatusConstants.STATUS_ENABLED).equals(target.getStatus())
+                && !isComplete(sourceLevelId)) {
+            throw new BusinessException("来源等级倍率矩阵未填满，不能复制到已启用等级");
+        }
         Map<Long, BigDecimal> sourceRates = loadRates(sourceLevelId);
         levelCategoryDiscountMapper.delete(new LambdaQueryWrapper<LevelCategoryDiscount>()
                 .eq(LevelCategoryDiscount::getLevelId, levelId));

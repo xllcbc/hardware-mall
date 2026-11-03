@@ -1,6 +1,8 @@
 package com.example.mystore.service.impl;
 
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.constant.UserLevelStatusConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Category;
 import com.example.mystore.entity.db.LevelCategoryDiscount;
 import com.example.mystore.entity.db.UserLevel;
@@ -25,6 +27,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -181,6 +184,34 @@ class PricingRuleServiceImplTest {
         verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
                 PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, 2L));
         verify(redisUtil, never()).delete(anyString());
+    }
+
+    @Test
+    void copyDiscounts_rejectsIncompleteSourceForEnabledTarget() {
+        UserLevel target = customLevel(2L);
+        target.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
+        when(userLevelMapper.selectById(2L)).thenReturn(target);
+        when(userLevelMapper.selectById(3L)).thenReturn(customLevel(3L));
+
+        Category configuredCategory = new Category();
+        configuredCategory.setId(9L);
+        Category gapCategory = new Category();
+        gapCategory.setId(10L);
+        when(categoryMapper.selectList(any())).thenReturn(List.of(configuredCategory, gapCategory));
+
+        LevelCategoryDiscount source = new LevelCategoryDiscount();
+        source.setLevelId(3L);
+        source.setCategoryId(9L);
+        source.setRate(new BigDecimal("0.6000"));
+        when(levelCategoryDiscountMapper.selectList(any())).thenReturn(List.of(source));
+
+        assertThatThrownBy(() -> pricingRuleService.copyDiscounts(2L, 3L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("来源等级倍率矩阵未填满，不能复制到已启用等级");
+
+        verify(levelCategoryDiscountMapper, never()).delete(any());
+        verify(levelCategoryDiscountMapper, never()).insert(any(LevelCategoryDiscount.class));
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     private UserLevel customLevel(Long id) {
