@@ -9,8 +9,11 @@ import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.exception.BusinessException;
+import com.example.mystore.common.exception.PriceChangedException;
 import com.example.mystore.entity.db.*;
+import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;
+import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
@@ -276,6 +279,123 @@ class OrderServiceImplTest {
                 .hasMessageContaining("库存不足");
 
         verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "stock-key");
+    }
+
+    @Test
+    void previewOrder_customLevel_returnsServerSettlementWithoutWriting() {
+        UserContext.setLevelId(2L);
+        try {
+            when(pricingRuleService.rateFor(2L, 1L, false))
+                    .thenReturn(new BigDecimal("0.8000"));
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+            CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+            line.setSkuId(5L);
+            line.setQuantity(2);
+            CheckoutPreviewRequest request = new CheckoutPreviewRequest();
+            request.setItems(List.of(line));
+
+            CheckoutPreviewVO preview = orderService.previewOrder(request);
+
+            assertThat(preview.getItems()).hasSize(1);
+            assertThat(preview.getItems().get(0).getPrice()).isEqualByComparingTo("175.20");
+            assertThat(preview.getItems().get(0).getSubtotal()).isEqualByComparingTo("350.40");
+            assertThat(preview.getGoodsAmount()).isEqualByComparingTo("350.40");
+            assertThat(preview.getFreightAmount()).isEqualByComparingTo("0.00");
+            assertThat(preview.getPayAmount()).isEqualByComparingTo("350.40");
+            verify(orderMapper, never()).insert(any(Order.class));
+            verify(cartMapper, never()).update(any(), any());
+            verify(skuService, never()).deductStock(anyLong(), anyInt());
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void createOrder_priceChanged_returnsLatestPreviewAndReleasesIdempotencyKey() {
+        UserContext.setLevelId(2L);
+        try {
+            when(pricingRuleService.rateFor(2L, 1L, false))
+                    .thenReturn(new BigDecimal("0.8000"));
+            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+            CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+            line.setSkuId(5L);
+            line.setQuantity(2);
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setItems(List.of(line));
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+            request.setExpectedPayAmount(new BigDecimal("300.00"));
+
+            assertThatThrownBy(() -> orderService.createOrder(2L, request, "changed-key"))
+                    .isInstanceOfSatisfying(PriceChangedException.class, error -> {
+                        assertThat(error.getPriceChange().getExpectedPayAmount())
+                                .isEqualByComparingTo("300.00");
+                        assertThat(error.getPriceChange().getPreview().getItems().get(0).getPrice())
+                                .isEqualByComparingTo("175.20");
+                        assertThat(error.getPriceChange().getPreview().getPayAmount())
+                                .isEqualByComparingTo("350.40");
+                    });
+
+            verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "changed-key");
+            verify(skuService, never()).deductStock(anyLong(), anyInt());
+            verify(orderMapper, never()).insert(any(Order.class));
+            verify(cartMapper, never()).update(any(), any());
+            verify(applicationEventPublisher, never()).publishEvent(any());
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void createOrder_stockDeductionFailure_abortsBeforeOrderAndReleasesIdempotencyKey() {
+        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+
+        Sku secondSku = new Sku();
+        secondSku.setId(6L);
+        secondSku.setSpuId(2L);
+        secondSku.setPrice(new BigDecimal("99.00"));
+        secondSku.setStock(10);
+        secondSku.setStatus(1);
+
+        Spu secondSpu = new Spu();
+        secondSpu.setId(2L);
+        secondSpu.setCategoryId(1L);
+        secondSpu.setName("不锈钢合页");
+        secondSpu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku, 6L, secondSku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu, secondSpu));
+        when(skuService.deductStock(5L, 2)).thenReturn(true);
+        when(skuService.deductStock(6L, 3)).thenReturn(false);
+
+        CreateOrderRequest.CartItem first = new CreateOrderRequest.CartItem();
+        first.setSkuId(5L);
+        first.setQuantity(2);
+        CreateOrderRequest.CartItem second = new CreateOrderRequest.CartItem();
+        second.setSkuId(6L);
+        second.setQuantity(3);
+        CreateOrderRequest request = new CreateOrderRequest();
+        request.setItems(List.of(first, second));
+        request.setAddressId(1L);
+        request.setLogisticsId(1L);
+        request.setExpectedPayAmount(new BigDecimal("735.00"));
+
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "rollback-key"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("库存扣减失败");
+
+        verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "rollback-key");
+        verify(orderMapper, never()).insert(any(Order.class));
+        verify(cartMapper, never()).update(any(), any());
     }
 
     @Test
@@ -585,6 +705,7 @@ class OrderServiceImplTest {
         request.setAddressId(1L);
         request.setLogisticsId(1L);
         request.setItems(java.util.List.of(i1, i2));
+        request.setExpectedPayAmount(new BigDecimal("735.00"));
 
         OrderVO vo = orderService.createOrder(2L, request, "k");
 
@@ -664,6 +785,7 @@ class OrderServiceImplTest {
             request.setAddressId(1L);
             request.setLogisticsId(1L);
             request.setItems(java.util.List.of(i1));
+            request.setExpectedPayAmount(new BigDecimal("40.00"));
 
             orderService.createOrder(2L, request, "k");
 
@@ -732,6 +854,7 @@ class OrderServiceImplTest {
             request.setAddressId(1L);
             request.setLogisticsId(1L);
             request.setItems(java.util.List.of(i1));
+            request.setExpectedPayAmount(new BigDecimal("50.00"));
 
             orderService.createOrder(2L, request, "k");
 
@@ -828,6 +951,7 @@ class OrderServiceImplTest {
             request.setAddressId(1L);
             request.setLogisticsId(1L);
             request.setItems(java.util.List.of(first, second));
+            request.setExpectedPayAmount(new BigDecimal("657.00"));
 
             orderService.createOrder(2L, request, "batch-key");
 

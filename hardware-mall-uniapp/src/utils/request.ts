@@ -16,6 +16,20 @@ interface ResponseData<T = any> {
   data: T
 }
 
+export const API_CODE_PRICE_CHANGED = 40901
+
+export class ApiError extends Error {
+  code: number
+  data: any
+
+  constructor(code: number, message: string, data?: any) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+    this.data = data
+  }
+}
+
 function getMockData<T>(url: string, params?: any): T {
   if (url.includes('/user/category/list')) {
     return MOCK_CATEGORIES as T
@@ -40,6 +54,25 @@ function getMockData<T>(url: string, params?: any): T {
   }
   if (url.includes('/user/order/list')) {
     return { records: MOCK_ORDERS, total: MOCK_ORDERS.length, current: 1, size: 10 } as T
+  }
+  if (url.includes('/user/order/preview')) {
+    const items = MOCK_CART.map(item => ({
+      skuId: item.skuId,
+      productId: item.productId,
+      productName: item.productName,
+      productImage: item.productImage,
+      spec: item.spec,
+      price: item.price,
+      quantity: item.quantity,
+      subtotal: item.subtotal
+    }))
+    const goodsAmount = items.reduce((sum, item) => sum + item.subtotal, 0)
+    return {
+      items,
+      goodsAmount,
+      freightAmount: 0,
+      payAmount: goodsAmount
+    } as T
   }
   if (url.includes('/user/order/')) {
     const id = parseInt(url.split('/user/order/')[1])
@@ -99,11 +132,13 @@ async function request<T = any>(options: RequestOptions): Promise<T> {
 
           // 审核合规: 不强制跳转登录页, 弹可取消提示, 用户确认后才去登录
           requireLogin(response.message || '登录已过期，请重新登录')
-          reject(new Error(response.message))
+          reject(new ApiError(response.code, response.message, response.data))
+        } else if (response.code === API_CODE_PRICE_CHANGED) {
+          reject(new ApiError(response.code, response.message, response.data))
         } else {
           uni.showToast({ title: response.message || '请求失败', icon: 'none' })
           console.error('请求失败:', { url, code: response.code, message: response.message })
-          reject(new Error(response.message))
+          reject(new ApiError(response.code, response.message, response.data))
         }
       },
       fail: (err) => {

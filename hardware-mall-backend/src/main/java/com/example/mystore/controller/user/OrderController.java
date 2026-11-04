@@ -2,7 +2,9 @@ package com.example.mystore.controller.user;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.result.Result;
+import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;
+import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.util.PageUtil;
@@ -19,6 +21,12 @@ import java.util.Map;
 public class OrderController {
 
     private final OrderService orderService;
+
+    @PostMapping("/preview")
+    public Result<CheckoutPreviewVO> previewOrder(
+            @Valid @RequestBody CheckoutPreviewRequest request) {
+        return Result.success(orderService.previewOrder(request));
+    }
 
     @PostMapping("/create")
     public Result<OrderVO> createOrder(

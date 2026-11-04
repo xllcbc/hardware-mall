@@ -10,6 +10,7 @@ import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
+import com.example.mystore.common.exception.PriceChangedException;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.Sku;
@@ -20,8 +21,11 @@ import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.entity.vo.OrderItemVO;
+import com.example.mystore.entity.vo.CheckoutItemVO;
+import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.DashboardStatsVO;
 import com.example.mystore.entity.vo.RecentOrderVO;
+import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.event.StockCacheEvent;
@@ -86,6 +90,12 @@ public class OrderServiceImpl implements OrderService {
     private final DingTalkAlertService dingTalkAlertService;
 
     @Override
+    public CheckoutPreviewVO previewOrder(CheckoutPreviewRequest request) {
+        SettlementSnapshot snapshot = buildSettlementSnapshot(request.getItems());
+        return toCheckoutPreview(snapshot);
+    }
+
+    @Override
     public OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey) {
         log.info("创建订单开始, userId={}, idemKey={}, request={}", userId, idempotencyKey, request);
 
@@ -102,11 +112,16 @@ public class OrderServiceImpl implements OrderService {
 
         try {
             // ① 事务外：只读校验 + 构建订单明细快照（不占用 DB 连接事务）
-            ValidatedOrder validated = validateAndBuildSnapshot(userId, request);
+            Address address = requireAddress(userId, request.getAddressId());
+            Logistics logistics = requireLogistics(request.getLogisticsId());
+            SettlementSnapshot settlement = buildSettlementSnapshot(request.getItems());
+            requireConfirmedAmount(request.getExpectedPayAmount(), settlement);
 
             // ② 事务内：扣减库存 + 建单 + 明细 + 删购物车 + 发布事件
             Long orderId = new TransactionTemplate(transactionManager)
-                    .execute(status -> persistOrder(userId, request, validated));
+                    .execute(status -> persistOrder(
+                            userId, address.getId(), logistics.getId(),
+                            request.getBuyerRemark(), settlement));
 
             // ③ 事务外：组装返回 VO
             return getOrderVO(orderId, userId);
@@ -118,27 +133,36 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
-    private ValidatedOrder validateAndBuildSnapshot(Long userId, CreateOrderRequest request) {
-        Address address = addressMapper.selectById(request.getAddressId());
+    private Address requireAddress(Long userId, Long addressId) {
+        Address address = addressMapper.selectById(addressId);
         if (address == null || !address.getUserId().equals(userId)) {
             throw new BusinessException("收货地址不存在");
         }
         log.info("地址验证通过, addressId={}", address.getId());
+        return address;
+    }
 
-        Logistics logistics = logisticsMapper.selectById(request.getLogisticsId());
+    private Logistics requireLogistics(Long logisticsId) {
+        Logistics logistics = logisticsMapper.selectById(logisticsId);
         log.info("物流查询结果, logistics={}", logistics);
         if (logistics == null || logistics.getStatus() != StatusConstants.LOGISTICS_STATUS_ENABLED) {
             throw new BusinessException("物流方式不存在或不可用");
         }
+        return logistics;
+    }
 
+    private SettlementSnapshot buildSettlementSnapshot(List<CreateOrderRequest.CartItem> requestedItems) {
+        if (requestedItems == null || requestedItems.isEmpty()) {
+            throw new BusinessException("结算商品不能为空");
+        }
         // ① 逐项校验 SKU 并收集（校验顺序与异常语义保持不变）
-        List<Long> requestedSkuIds = request.getItems().stream()
+        List<Long> requestedSkuIds = requestedItems.stream()
                 .map(CreateOrderRequest.CartItem::getSkuId)
                 .distinct()
                 .toList();
         Map<Long, Sku> skuMap = skuService.getSkuMapByIds(requestedSkuIds);
         List<Sku> skus = new ArrayList<>();
-        for (CreateOrderRequest.CartItem cartItem : request.getItems()) {
+        for (CreateOrderRequest.CartItem cartItem : requestedItems) {
             Sku sku = skuMap.get(cartItem.getSkuId());
             log.info("SKU查询结果, skuId={}, sku={}", cartItem.getSkuId(), sku);
             if (sku == null || sku.getStatus() != 1) {
@@ -159,11 +183,11 @@ public class OrderServiceImpl implements OrderService {
 
         // ③ 组装订单明细快照（spu 改从 map 取）
         List<OrderItem> orderItems = new ArrayList<>();
-        BigDecimal totalAmount = BigDecimal.ZERO;
+        BigDecimal goodsAmount = BigDecimal.ZERO;
         Long levelId = UserContext.getLevelId() != null
                 ? UserContext.getLevelId() : pricingRuleService.resolveRetailLevelId();
-        for (int i = 0; i < request.getItems().size(); i++) {
-            CreateOrderRequest.CartItem cartItem = request.getItems().get(i);
+        for (int i = 0; i < requestedItems.size(); i++) {
+            CreateOrderRequest.CartItem cartItem = requestedItems.get(i);
             Sku sku = skus.get(i);
             Spu spu = spuMap.get(sku.getSpuId());
             if (spu == null) {
@@ -175,7 +199,7 @@ public class OrderServiceImpl implements OrderService {
                     DiscountConstants.isExcluded(spu.getExcludeDiscount()));
             BigDecimal unitPrice = priceService.resolveUnitPrice(sku.getPrice(), rate);
             BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
-            totalAmount = totalAmount.add(subtotal);
+            goodsAmount = goodsAmount.add(subtotal);
 
             OrderItem item = new OrderItem();
             item.setSkuId(sku.getId());
@@ -206,12 +230,47 @@ public class OrderServiceImpl implements OrderService {
             orderItems.add(item);
         }
 
-        return new ValidatedOrder(address, logistics, orderItems, totalAmount);
+        BigDecimal freightAmount = BigDecimal.ZERO.setScale(2);
+        return new SettlementSnapshot(
+                orderItems, goodsAmount.setScale(2), freightAmount, goodsAmount.add(freightAmount).setScale(2));
     }
 
-    private Long persistOrder(Long userId, CreateOrderRequest request, ValidatedOrder validated) {
+    private void requireConfirmedAmount(BigDecimal expectedPayAmount, SettlementSnapshot settlement) {
+        if (expectedPayAmount == null) {
+            throw new BusinessException("请先确认应付金额");
+        }
+        if (expectedPayAmount.compareTo(settlement.payAmount()) != 0) {
+            throw new PriceChangedException(expectedPayAmount, toCheckoutPreview(settlement));
+        }
+    }
+
+    private CheckoutPreviewVO toCheckoutPreview(SettlementSnapshot settlement) {
+        CheckoutPreviewVO preview = new CheckoutPreviewVO();
+        preview.setItems(settlement.items().stream().map(this::toCheckoutItem).toList());
+        preview.setGoodsAmount(settlement.goodsAmount());
+        preview.setFreightAmount(settlement.freightAmount());
+        preview.setPayAmount(settlement.payAmount());
+        return preview;
+    }
+
+    private CheckoutItemVO toCheckoutItem(OrderItem item) {
+        CheckoutItemVO vo = new CheckoutItemVO();
+        vo.setSkuId(item.getSkuId());
+        vo.setProductId(item.getSpuId());
+        vo.setProductName(item.getProductName());
+        vo.setProductImage(item.getProductImage());
+        vo.setSpec(item.getProductSpec());
+        vo.setPrice(item.getPrice());
+        vo.setQuantity(item.getQuantity());
+        vo.setSubtotal(item.getSubtotal());
+        return vo;
+    }
+
+    private Long persistOrder(
+            Long userId, Long addressId, Long logisticsId,
+            String buyerRemark, SettlementSnapshot settlement) {
         // 【事务内】只扣 DB 库存 + 销量自增
-        for (OrderItem item : validated.orderItems()) {
+        for (OrderItem item : settlement.items()) {
             boolean deducted = skuService.deductStock(item.getSkuId(), item.getQuantity());
             if (!deducted) {
                 throw new BusinessException("库存扣减失败: " + item.getSkuId());
@@ -225,26 +284,26 @@ public class OrderServiceImpl implements OrderService {
         Order order = new Order();
         order.setOrderNo(orderNo);
         order.setUserId(userId);
-        order.setAddressId(validated.address().getId());
-        order.setLogisticsId(validated.logistics().getId());
+        order.setAddressId(addressId);
+        order.setLogisticsId(logisticsId);
         order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-        order.setTotalAmount(validated.totalAmount());
-        order.setFreightAmount(BigDecimal.ZERO);
-        order.setPayAmount(validated.totalAmount());
-        order.setBuyerRemark(request.getBuyerRemark());
+        order.setTotalAmount(settlement.goodsAmount());
+        order.setFreightAmount(settlement.freightAmount());
+        order.setPayAmount(settlement.payAmount());
+        order.setBuyerRemark(buyerRemark);
         order.setCreateTime(LocalDateTime.now());
         order.setUpdateTime(LocalDateTime.now());
         orderMapper.insert(order);
         log.info("订单插入成功, orderId={}", order.getId());
 
-        for (OrderItem item : validated.orderItems()) {
+        for (OrderItem item : settlement.items()) {
             item.setOrderId(order.getId());
         }
-        orderItemMapper.insertBatch(validated.orderItems());
+        orderItemMapper.insertBatch(settlement.items());
         log.info("订单明细插入成功");
 
-        List<Long> cartSkuIds = request.getItems().stream()
-                .map(CreateOrderRequest.CartItem::getSkuId)
+        List<Long> cartSkuIds = settlement.items().stream()
+                .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
         LambdaUpdateWrapper<Cart> cartWrapper = new LambdaUpdateWrapper<>();
         cartWrapper.eq(Cart::getUserId, userId)
@@ -254,7 +313,7 @@ public class OrderServiceImpl implements OrderService {
         log.info("删除购物车商品, userId={}, skuIds={}", userId, cartSkuIds);
 
         // 发布库存同步事件，事务提交后由监听器异步执行
-        List<Long> skuIds = validated.orderItems().stream()
+        List<Long> skuIds = settlement.items().stream()
                 .map(OrderItem::getSkuId)
                 .collect(java.util.stream.Collectors.toList());
         applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
@@ -262,7 +321,12 @@ public class OrderServiceImpl implements OrderService {
         return order.getId();
     }
 
-    private record ValidatedOrder(Address address, Logistics logistics, List<OrderItem> orderItems, BigDecimal totalAmount) {}
+    private record SettlementSnapshot(
+            List<OrderItem> items,
+            BigDecimal goodsAmount,
+            BigDecimal freightAmount,
+            BigDecimal payAmount) {
+    }
 
     @Override
     public Page<OrderVO> getOrderPage(Long userId, Integer status, Integer page, Integer limit) {
