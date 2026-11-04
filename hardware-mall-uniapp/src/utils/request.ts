@@ -1,4 +1,3 @@
-import { MOCK_ENABLED, MOCK_CATEGORIES, getMockProductImages, MOCK_ADDRESSES, MOCK_CART, MOCK_ORDERS, MOCK_USER_INFO } from './mock'
 import { requireLogin } from './auth'
 
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api'
@@ -30,68 +29,8 @@ export class ApiError extends Error {
   }
 }
 
-function getMockData<T>(url: string, params?: any): T {
-  if (url.includes('/user/category/list')) {
-    return MOCK_CATEGORIES as T
-  }
-  if (url.includes('/user/product/list')) {
-    const records = getMockProductImages()
-    return { records, total: records.length, current: 1, size: 10 } as T
-  }
-  if (url.includes('/user/product/recommend')) {
-    return getMockProductImages() as T
-  }
-  if (url.includes('/user/product/')) {
-    const id = parseInt(url.split('/user/product/')[1])
-    const product = getMockProductImages().find(p => p.id === id)
-    return product as T
-  }
-  if (url.includes('/user/cart/list')) {
-    return MOCK_CART as T
-  }
-  if (url.includes('/user/address/list')) {
-    return MOCK_ADDRESSES as T
-  }
-  if (url.includes('/user/order/list')) {
-    return { records: MOCK_ORDERS, total: MOCK_ORDERS.length, current: 1, size: 10 } as T
-  }
-  if (url.includes('/user/order/preview')) {
-    const items = MOCK_CART.map(item => ({
-      skuId: item.skuId,
-      productId: item.productId,
-      productName: item.productName,
-      productImage: item.productImage,
-      spec: item.spec,
-      price: item.price,
-      quantity: item.quantity,
-      subtotal: item.subtotal
-    }))
-    const goodsAmount = items.reduce((sum, item) => sum + item.subtotal, 0)
-    return {
-      items,
-      goodsAmount,
-      freightAmount: 0,
-      payAmount: goodsAmount
-    } as T
-  }
-  if (url.includes('/user/order/')) {
-    const id = parseInt(url.split('/user/order/')[1])
-    const order = MOCK_ORDERS.find(o => o.id === id)
-    return order as T
-  }
-  if (url.includes('/user/info')) {
-    return MOCK_USER_INFO as T
-  }
-  return {} as T
-}
-
 async function request<T = any>(options: RequestOptions): Promise<T> {
   const { url, method = 'GET', data, header = {} } = options
-
-  if (MOCK_ENABLED) {
-    await new Promise(resolve => setTimeout(resolve, 300))
-    return getMockData<T>(url, data)
-  }
 
   const token = uni.getStorageSync('token')
   if (token) {

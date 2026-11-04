@@ -9,6 +9,8 @@ import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.SpecItem;
 import com.example.mystore.entity.db.SpecTemplate;
+import com.example.mystore.entity.vo.AdminProductPricingVO;
+import com.example.mystore.entity.vo.LevelDiscountVO;
 import com.example.mystore.entity.vo.ProductListVO;
 import com.example.mystore.entity.vo.ProductDetailVO;
 import com.example.mystore.entity.vo.ProductDetailCache;
@@ -450,6 +452,77 @@ public class SpuServiceImpl implements SpuService {
             }
             return target;
         }).collect(Collectors.toList());
+    }
+
+    @Override
+    public Page<AdminProductPricingVO> getAdminProductPricingPage(
+            Long levelId, Long categoryId, String keyword, Integer status, Integer page, Integer limit) {
+        Page<Spu> source = getSpuPage(categoryId, keyword, page, limit, status);
+        Page<AdminProductPricingVO> result = new Page<>(
+                source.getCurrent(), source.getSize(), source.getTotal());
+
+        List<Long> spuIds = source.getRecords().stream()
+                .map(Spu::getId)
+                .collect(Collectors.toList());
+        Map<Long, List<Sku>> skusBySpu = skuService.getSkusBySpuIds(spuIds);
+
+        Long retailLevelId = pricingRuleService.resolveRetailLevelId();
+        boolean retailView = levelId == null || levelId.equals(retailLevelId);
+        Map<Long, LevelDiscountVO> discountsByCategory = retailView
+                ? Collections.emptyMap()
+                : pricingRuleService.getDiscounts(levelId).stream()
+                        .collect(Collectors.toMap(LevelDiscountVO::getCategoryId, item -> item));
+
+        List<AdminProductPricingVO> records = source.getRecords().stream().map(spu -> {
+            List<Sku> skus = skusBySpu.getOrDefault(spu.getId(), Collections.emptyList());
+            BigDecimal retailMinPrice = null;
+            BigDecimal retailMaxPrice = null;
+            if (!skus.isEmpty()) {
+                retailMinPrice = skus.stream()
+                        .map(Sku::getPrice)
+                        .min(BigDecimal::compareTo)
+                        .orElse(null);
+                retailMaxPrice = skus.stream()
+                        .map(Sku::getPrice)
+                        .max(BigDecimal::compareTo)
+                        .orElse(null);
+            }
+
+            LevelDiscountVO discount = discountsByCategory.get(spu.getCategoryId());
+            boolean rateMissing = !retailView && (discount == null || discount.isMissing());
+            BigDecimal discountRate = rateMissing || discount == null || discount.getRate() == null
+                    ? BigDecimal.ONE
+                    : discount.getRate();
+            BigDecimal effectiveRate = DiscountConstants.isExcluded(spu.getExcludeDiscount())
+                    ? BigDecimal.ONE
+                    : discountRate;
+
+            AdminProductPricingVO vo = new AdminProductPricingVO();
+            vo.setId(spu.getId());
+            vo.setCategoryId(spu.getCategoryId());
+            vo.setName(spu.getName());
+            vo.setSubtitle(spu.getSubtitle());
+            vo.setDescription(spu.getDescription());
+            vo.setImages(spu.getImages());
+            vo.setOriginalPrice(spu.getOriginalPrice());
+            vo.setWeight(spu.getWeight());
+            vo.setRetailMinPrice(retailMinPrice);
+            vo.setRetailMaxPrice(retailMaxPrice);
+            vo.setDiscountRate(discountRate);
+            vo.setEffectiveRate(effectiveRate);
+            vo.setSettlementMinPrice(retailMinPrice == null
+                    ? null : priceService.resolveUnitPrice(retailMinPrice, effectiveRate));
+            vo.setSettlementMaxPrice(retailMaxPrice == null
+                    ? null : priceService.resolveUnitPrice(retailMaxPrice, effectiveRate));
+            vo.setRateMissing(rateMissing);
+            vo.setExcludeDiscount(spu.getExcludeDiscount());
+            vo.setStatus(spu.getStatus());
+            vo.setIsRecommend(spu.getIsRecommend());
+            vo.setSalesCount(spu.getSalesCount());
+            return vo;
+        }).collect(Collectors.toList());
+        result.setRecords(records);
+        return result;
     }
 
     @Override

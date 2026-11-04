@@ -26,12 +26,6 @@ public class WechatUtil {
     @Value("${wechat.secret}")
     private String secret;
 
-    /**
-     * test_ 开头的模拟 code 后门开关：仅供本地开发使用，默认关闭，生产环境必须保持 false
-     */
-    @Value("${wechat.mock-code-enabled:false}")
-    private boolean mockCodeEnabled;
-
     public String getOpenid(String code) {
         return getSessionKey(code).get(WechatConstants.Fields.OPENID);
     }
@@ -40,13 +34,6 @@ public class WechatUtil {
         Map<String, String> result = new HashMap<>();
         if (!StringUtils.hasText(code)) {
             throw new BusinessException("微信授权码不能为空");
-        }
-
-        if (mockCodeEnabled && code.startsWith("test_")) {
-            log.info("测试模式：模拟微信登录，code={}", code);
-            result.put(WechatConstants.Fields.OPENID, code);
-            result.put(WechatConstants.Fields.SESSION_KEY, "test_session_key_" + System.currentTimeMillis());
-            return result;
         }
 
         String url = WechatConstants.Api.JSCODE2SESSION;
@@ -108,11 +95,6 @@ public class WechatUtil {
     public String getPhoneNumber(String phoneCode) {
         if (!StringUtils.hasText(phoneCode)) {
             throw new BusinessException("手机号授权码不能为空");
-        }
-
-        if (mockCodeEnabled && phoneCode.startsWith("test_")) {
-            log.info("测试模式：模拟获取手机号，phoneCode={}", phoneCode);
-            return "13800138000";
         }
 
         String accessToken = getAccessToken();

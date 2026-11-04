@@ -32,6 +32,7 @@ import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.util.JwtUtil;
 import com.example.mystore.util.RedisUtil;
+import com.example.mystore.util.WechatUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,7 +47,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.TestPropertySource;
 
 import java.math.BigDecimal;
 import java.util.Collections;
@@ -57,10 +57,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
-@TestPropertySource(properties = "wechat.mock-code-enabled=true")
 class PricingIdentityHttpTest {
 
     private static final long CUSTOM_LEVEL_ID = 2002L;
@@ -102,6 +102,8 @@ class PricingIdentityHttpTest {
     private UserMapper userMapper;
     @SpyBean
     private SkuService skuService;
+    @SpyBean
+    private WechatUtil wechatUtil;
 
     private String adminToken;
 
@@ -109,6 +111,8 @@ class PricingIdentityHttpTest {
     void setUp() {
         cleanupDatabase();
         clearCachesAndTokens();
+        doReturn(Map.of("openid", LOGIN_CODE, "session_key", "test-session-key"))
+                .when(wechatUtil).getSessionKey(LOGIN_CODE);
         adminToken = jwtUtil.generateToken(Map.of(
                 "userId", 1L,
                 "role", StatusConstants.USER_ROLE_ADMIN));

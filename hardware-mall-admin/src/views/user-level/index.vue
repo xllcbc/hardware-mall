@@ -47,9 +47,14 @@
               <el-icon><SetUp /></el-icon>
               倍率矩阵
             </el-button>
-            <el-button link type="success" @click="openPreview(row)">
-              <el-icon><View /></el-icon>
-              价格预览
+            <el-button
+              link
+              type="success"
+              :disabled="row.status !== 1"
+              @click="openProducts(row)"
+            >
+              <el-icon><Goods /></el-icon>
+              查看商品
             </el-button>
             <el-button v-if="row.isRetail !== 1" link type="warning" @click="openEdit(row)">
               <el-icon><Edit /></el-icon>
@@ -158,45 +163,6 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="previewVisible" :title="`价格预览 - ${currentLevel?.name || ''}`" width="900px">
-      <div class="preview-toolbar">
-        <el-select v-model="previewCategoryId" placeholder="全部分类" clearable style="width: 220px">
-          <el-option
-            v-for="category in categories"
-            :key="category.id"
-            :label="category.name"
-            :value="category.id"
-          />
-        </el-select>
-        <el-button type="primary" @click="loadPreview">查询</el-button>
-      </div>
-      <el-table :data="previewList" stripe v-loading="previewLoading">
-        <el-table-column prop="name" label="商品" min-width="180" />
-        <el-table-column label="零售区间" width="170">
-          <template #default="{ row }">{{ formatRange(row.retailMinPrice, row.retailMaxPrice) }}</template>
-        </el-table-column>
-        <el-table-column label="倍率" width="100">
-          <template #default="{ row }">{{ formatRate(row.discountRate) }}</template>
-        </el-table-column>
-        <el-table-column label="等级价位" width="170">
-          <template #default="{ row }">{{ formatRange(row.minPrice, row.maxPrice) }}</template>
-        </el-table-column>
-        <el-table-column label="折扣规则" width="120">
-          <template #default="{ row }">
-            {{ getExcludeDiscountText(row.excludeDiscount) }}
-          </template>
-        </el-table-column>
-      </el-table>
-      <div class="pagination-wrapper">
-        <el-pagination
-          v-model:current-page="previewPagination.page"
-          v-model:page-size="previewPagination.limit"
-          :total="previewPagination.total"
-          layout="total, prev, pager, next"
-          @current-change="loadPreview"
-        />
-      </div>
-    </el-dialog>
   </div>
 </template>
 
@@ -211,16 +177,13 @@ import {
   fillUserLevelDiscounts,
   getUserLevelDiscounts,
   getUserLevelList,
-  previewUserLevelProducts,
   saveUserLevelDiscounts,
   updateUserLevelInfo,
   updateUserLevelStatus,
   type LevelDiscount,
-  type UserLevel,
-  type UserLevelProductPreview
+  type UserLevel
 } from '@/api/admin/userLevel'
 import { getCategoryList, type Category } from '@/api/admin/category'
-import { getExcludeDiscountText } from '@/constants/discount'
 import {
   canApplyCopiedMatrix,
   getMatrixCellStatus,
@@ -232,7 +195,6 @@ const router = useRouter()
 const loading = ref(false)
 const submitLoading = ref(false)
 const matrixLoading = ref(false)
-const previewLoading = ref(false)
 const levelList = ref<UserLevel[]>([])
 const categories = ref<Category[]>([])
 const discountList = ref<LevelDiscount[]>([])
@@ -243,13 +205,9 @@ const matrixDialogVisible = ref(false)
 const copyVisible = ref(false)
 const copySourceLoading = ref(false)
 const copySourceLoaded = ref(false)
-const previewVisible = ref(false)
 const copySourceLevelId = ref<number | null>(null)
 const copySourceMatrix = ref<LevelDiscount[]>([])
-const previewCategoryId = ref<number | null>(null)
-const previewList = ref<UserLevelProductPreview[]>([])
 const levelForm = reactive({ name: '', sortOrder: 0 })
-const previewPagination = reactive({ page: 1, limit: 20, total: 0 })
 
 const copySourceLevels = computed(() =>
   levelList.value.filter(level => level.id !== currentLevel.value?.id && level.isRetail !== 1)
@@ -257,6 +215,10 @@ const copySourceLevels = computed(() =>
 
 const openUsers = (level: UserLevel) => {
   router.push({ path: '/user', query: { levelId: String(level.id) } })
+}
+
+const openProducts = (level: UserLevel) => {
+  router.push({ path: '/spu', query: { levelId: String(level.id) } })
 }
 
 interface PricingImpactOptions {
@@ -566,42 +528,6 @@ const copyMatrix = async () => {
   )
 }
 
-const openPreview = async (level: UserLevel) => {
-  currentLevel.value = level
-  previewCategoryId.value = null
-  previewPagination.page = 1
-  previewVisible.value = true
-  await loadPreview()
-}
-
-const loadPreview = async () => {
-  if (!currentLevel.value) return
-  previewLoading.value = true
-  try {
-    const result = await previewUserLevelProducts(currentLevel.value.id, {
-      categoryId: previewCategoryId.value || undefined,
-      page: previewPagination.page,
-      limit: previewPagination.limit
-    })
-    previewList.value = result.records || []
-    previewPagination.total = result.total || 0
-  } finally {
-    previewLoading.value = false
-  }
-}
-
-const formatPrice = (value?: number) =>
-  value == null ? '-' : `¥${Number(value).toFixed(2)}`
-
-const formatRange = (min?: number, max?: number) => {
-  if (min == null) return '-'
-  if (max == null || Number(max) === Number(min)) return formatPrice(min)
-  return `${formatPrice(min)} - ${formatPrice(max)}`
-}
-
-const formatRate = (rate?: number) =>
-  rate == null ? '-' : Number(rate).toFixed(4)
-
 onMounted(() => {
   loadLevels()
   loadCategories()
@@ -644,8 +570,7 @@ onMounted(() => {
   font-weight: 500;
 }
 
-.matrix-toolbar,
-.preview-toolbar {
+.matrix-toolbar {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -657,9 +582,4 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.pagination-wrapper {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
-}
 </style>

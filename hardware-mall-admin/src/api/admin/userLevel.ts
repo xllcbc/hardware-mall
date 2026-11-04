@@ -16,20 +16,6 @@ export interface LevelDiscount {
   missing: boolean
 }
 
-export interface UserLevelProductPreview {
-  id: number
-  categoryId: number
-  name: string
-  images?: string[]
-  originalPrice?: number
-  retailMinPrice?: number
-  retailMaxPrice?: number
-  discountRate: number
-  minPrice?: number
-  maxPrice?: number
-  excludeDiscount: number
-}
-
 export const getUserLevelList = () => {
   return request.get<UserLevel[]>('/admin/user-level/list')
 }
@@ -67,14 +53,4 @@ export const fillUserLevelDiscounts = (id: number, rate: number) => {
 
 export const copyUserLevelDiscounts = (id: number, sourceLevelId: number) => {
   return request.post(`/admin/user-level/${id}/discounts/copy`, { sourceLevelId })
-}
-
-export const previewUserLevelProducts = (
-  id: number,
-  params?: { categoryId?: number; page?: number; limit?: number }
-) => {
-  return request.get<{ records: UserLevelProductPreview[]; total: number }>(
-    `/admin/user-level/${id}/product-preview`,
-    { params }
-  )
 }

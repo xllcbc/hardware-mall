@@ -19,6 +19,21 @@
 
     <div class="card search-card animate-fade-in-up stagger-1">
       <el-form :inline="true" :model="queryForm" class="search-form">
+        <el-form-item label="价格视角">
+          <el-select
+            v-model="priceView"
+            class="price-view-select"
+            @change="handlePriceViewChange"
+          >
+            <el-option label="零售基准" :value="RETAIL_PRICE_VIEW" />
+            <el-option
+              v-for="level in enabledLevels"
+              :key="level.id"
+              :label="level.name"
+              :value="level.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="商品分类">
           <el-select
             v-model="queryForm.categoryId"
@@ -42,6 +57,17 @@
             class="search-input"
           />
         </el-form-item>
+        <el-form-item label="商品状态">
+          <el-select
+            v-model="queryForm.status"
+            placeholder="全部"
+            clearable
+            class="status-select"
+          >
+            <el-option label="上架" :value="1" />
+            <el-option label="下架" :value="0" />
+          </el-select>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleSearch">
             <el-icon><Search /></el-icon>
@@ -56,14 +82,27 @@
     </div>
 
     <div class="card table-card animate-fade-in-up stagger-2">
+      <div class="table-toolbar">
+        <div class="price-view-summary">
+          <span class="price-view-label">当前视角</span>
+          <el-tag :type="priceView === RETAIL_PRICE_VIEW ? 'info' : 'primary'" effect="light">
+            {{ priceViewLabel }}
+          </el-tag>
+        </div>
+        <el-switch
+          v-model="fullFields"
+          active-text="完整字段"
+          aria-label="切换完整字段"
+        />
+      </div>
       <el-table
         :data="tableData"
         stripe
         v-loading="loading"
         class="spu-table"
       >
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column label="商品图片" width="100">
+        <el-table-column v-if="fullFields" prop="id" label="ID" width="72" />
+        <el-table-column label="图片" width="60">
           <template #default="{ row }">
             <div class="product-image-wrapper">
               <el-image
@@ -79,26 +118,26 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="商品名称" min-width="200">
+        <el-table-column prop="name" label="商品" min-width="150">
           <template #default="{ row }">
             <div class="product-name-cell">
               <span class="product-name">{{ row.name }}</span>
-              <span class="product-subtitle">{{ row.subtitle }}</span>
+              <span v-if="fullFields" class="product-subtitle">{{ row.subtitle }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="categoryName" label="分类" width="100">
+        <el-table-column prop="categoryName" label="分类" width="76">
           <template #default="{ row }">
             <el-tag size="small" effect="light">{{ row.categoryName }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="SKU数量" width="100">
+        <el-table-column v-if="fullFields" label="SKU" width="72">
           <template #default="{ row }">
             <span class="sku-count">{{ getSkuCount(row.id) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="salesCount" label="销量" width="100" />
-        <el-table-column label="推荐" width="80">
+        <el-table-column v-if="fullFields" prop="salesCount" label="销量" width="76" />
+        <el-table-column v-if="fullFields" label="推荐" width="72">
           <template #default="{ row }">
             <el-tag
               :type="row.isRecommend === 1 ? 'warning' : 'info'"
@@ -109,7 +148,36 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="折扣规则" width="120">
+        <el-table-column label="零售区间" width="116">
+          <template #default="{ row }">
+            <span class="price-range">{{ formatPriceRange(row.retailMinPrice, row.retailMaxPrice) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="settlementRangeLabel" width="124">
+          <template #default="{ row }">
+            <span class="price-range price-range-emphasis">
+              {{ formatPriceRange(row.settlementMinPrice, row.settlementMaxPrice) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="倍率" width="124">
+          <template #default="{ row }">
+            <div class="rate-cell">
+              <span :class="['rate-value', { 'is-missing': row.rateMissing }]">
+                {{ formatRate(row.discountRate, row.rateMissing) }}
+              </span>
+              <el-tag
+                v-if="isDiscountExcluded(row.excludeDiscount)"
+                size="small"
+                type="info"
+                effect="plain"
+              >
+                不参与折扣
+              </el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="折扣状态" width="84">
           <template #default="{ row }">
             <el-tag
               :type="getExcludeDiscountTagType(row.excludeDiscount)"
@@ -120,7 +188,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" label="状态" width="70">
           <template #default="{ row }">
             <el-tag
               :type="row.status === 1 ? 'success' : 'info'"
@@ -131,27 +199,54 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button link type="primary" @click="handleEdit(row)">
-              <el-icon><Edit /></el-icon>
-              编辑
-            </el-button>
-            <el-button link type="success" @click="handleConfigSku(row)">
-              <el-icon><Setting /></el-icon>
-              规格配置
-            </el-button>
-            <el-button
-              link
-              :type="row.status === 1 ? 'warning' : 'success'"
-              @click="handleToggleStatus(row)"
-            >
-              {{ row.status === 1 ? '下架' : '上架' }}
-            </el-button>
-            <el-button link type="danger" @click="handleDelete(row)">
-              <el-icon><Delete /></el-icon>
-              删除
-            </el-button>
+            <div class="icon-actions">
+              <el-tooltip content="编辑商品" placement="top">
+                <el-button
+                  link
+                  type="primary"
+                  class="icon-action"
+                  aria-label="编辑商品"
+                  @click="handleEdit(row)"
+                >
+                  <el-icon><Edit /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="规格配置" placement="top">
+                <el-button
+                  link
+                  type="success"
+                  class="icon-action"
+                  aria-label="规格配置"
+                  @click="handleConfigSku(row)"
+                >
+                  <el-icon><Setting /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip :content="row.status === 1 ? '下架商品' : '上架商品'" placement="top">
+                <el-button
+                  link
+                  :type="row.status === 1 ? 'warning' : 'success'"
+                  class="icon-action"
+                  :aria-label="row.status === 1 ? '下架商品' : '上架商品'"
+                  @click="handleToggleStatus(row)"
+                >
+                  <el-icon><Switch /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="删除商品" placement="top">
+                <el-button
+                  link
+                  type="danger"
+                  class="icon-action"
+                  aria-label="删除商品"
+                  @click="handleDelete(row)"
+                >
+                  <el-icon><Delete /></el-icon>
+                </el-button>
+              </el-tooltip>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -544,11 +639,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ElImageViewer } from 'element-plus'
 import { getCategoryList } from '@/api/admin/category'
-import { getSpuList, createSpu, updateSpu, deleteSpu, updateSpuStatus, Spu } from '@/api/admin/spu'
+import {
+  getAdminProductPricingList,
+  createSpu,
+  updateSpu,
+  deleteSpu,
+  updateSpuStatus,
+  type AdminProductPricing,
+  type Spu
+} from '@/api/admin/spu'
+import { getUserLevelList, type UserLevel } from '@/api/admin/userLevel'
 import {
   getSkuCounts,
   getSkuConfig,
@@ -567,8 +672,17 @@ import {
   DISCOUNT_PARTICIPATION,
   DISCOUNT_PARTICIPATION_TEXT,
   getExcludeDiscountTagType,
-  getExcludeDiscountText
+  getExcludeDiscountText,
+  isDiscountExcluded
 } from '@/constants/discount'
+import {
+  RETAIL_PRICE_VIEW,
+  formatPriceRange,
+  formatRate,
+  parsePriceView,
+  toPriceViewLevelId,
+  type PriceView
+} from '@/utils/pricingView'
 
 interface SkuConfigRow extends Sku {
   rowKey: string
@@ -588,7 +702,9 @@ interface SpecSelection {
 const loading = ref(false)
 const submitLoading = ref(false)
 const skuSubmitLoading = ref(false)
-const tableData = ref<any[]>([])
+const route = useRoute()
+const router = useRouter()
+const tableData = ref<Array<AdminProductPricing & { categoryName: string }>>([])
 const skuList = ref<SkuConfigRow[]>([])
 const specSelections = ref<SpecSelection[]>([])
 const onlyRetained = ref(false)
@@ -596,6 +712,9 @@ const batchDialogVisible = ref(false)
 const batchMode = ref<'price' | 'stock'>('price')
 const batchValue = ref(0)
 const categoryList = ref<any[]>([])
+const levelList = ref<UserLevel[]>([])
+const priceView = ref<PriceView>(parsePriceView(route.query.levelId))
+const fullFields = ref(false)
 const currentSpu = ref<Spu | null>(null)
 const skuCountMap = ref<Record<number, number>>({})
 const previewVisible = ref(false)
@@ -604,10 +723,12 @@ const dialogVisible = ref(false)
 const skuDialogVisible = ref(false)
 const isEdit = ref(false)
 const formRef = ref()
+let latestRequestId = 0
 
 const queryForm = reactive({
   categoryId: null as number | null,
-  keyword: ''
+  keyword: '',
+  status: null as number | null
 })
 
 const pagination = reactive({
@@ -635,28 +756,61 @@ const rules = {
   name: [{ required: true, message: '请输入商品名称', trigger: 'blur' }]
 }
 
+const enabledLevels = computed(() =>
+  levelList.value.filter(level => level.status === 1 && level.isRetail !== 1)
+)
+
+const priceViewLabel = computed(() => {
+  if (priceView.value === RETAIL_PRICE_VIEW) return '零售基准'
+  return levelList.value.find(level => level.id === priceView.value)?.name || '已选等级'
+})
+
+const settlementRangeLabel = computed(() =>
+  priceView.value === RETAIL_PRICE_VIEW ? '零售结算区间' : '等级结算区间'
+)
+
 const getSkuCount = (spuId: number) => {
   return skuCountMap.value[spuId] || 0
 }
 
 const loadCategoryList = async () => {
   try {
-    const res: any = await getCategoryList()
+    const res: any = await getCategoryList({ page: 1, limit: 200 })
     categoryList.value = res.records || []
   } catch {
     // error handled by interceptor
   }
 }
 
+const loadLevels = async () => {
+  try {
+    levelList.value = await getUserLevelList() || []
+    if (
+      priceView.value !== RETAIL_PRICE_VIEW
+      && !enabledLevels.value.some(level => level.id === priceView.value)
+    ) {
+      priceView.value = RETAIL_PRICE_VIEW
+      syncPriceViewQuery()
+    }
+  } catch {
+    levelList.value = []
+  }
+}
+
 const loadData = async () => {
+  const requestId = ++latestRequestId
   loading.value = true
   try {
-    const res: any = await getSpuList({
+    const res = await getAdminProductPricingList({
       page: pagination.page,
       limit: pagination.limit,
       categoryId: queryForm.categoryId || undefined,
-      keyword: queryForm.keyword || undefined
+      keyword: queryForm.keyword || undefined,
+      status: queryForm.status ?? undefined,
+      levelId: toPriceViewLevelId(priceView.value)
     })
+    if (requestId !== latestRequestId) return
+
     tableData.value = (res.records || []).map((item: any) => {
       const category = categoryList.value.find(c => c.id === item.categoryId)
       return {
@@ -670,6 +824,7 @@ const loadData = async () => {
     if (spuIds.length) {
       try {
         const counts = await getSkuCounts(spuIds)
+        if (requestId !== latestRequestId) return
         tableData.value.forEach((item: any) => {
           skuCountMap.value[item.id] = counts[item.id] || 0
         })
@@ -680,9 +835,39 @@ const loadData = async () => {
   } catch {
     // error handled by interceptor
   } finally {
-    loading.value = false
+    if (requestId === latestRequestId) {
+      loading.value = false
+    }
   }
 }
+
+const syncPriceViewQuery = () => {
+  const query = { ...route.query }
+  const levelId = toPriceViewLevelId(priceView.value)
+  if (levelId == null) {
+    delete query.levelId
+  } else {
+    query.levelId = String(levelId)
+  }
+  router.replace({ path: route.path, query })
+}
+
+const handlePriceViewChange = () => {
+  syncPriceViewQuery()
+  pagination.page = 1
+  loadData()
+}
+
+watch(
+  () => route.query.levelId,
+  value => {
+    const next = parsePriceView(value)
+    if (next === priceView.value) return
+    priceView.value = next
+    pagination.page = 1
+    loadData()
+  }
+)
 
 const handleSearch = () => {
   pagination.page = 1
@@ -692,6 +877,9 @@ const handleSearch = () => {
 const handleReset = () => {
   queryForm.categoryId = null
   queryForm.keyword = ''
+  queryForm.status = null
+  priceView.value = RETAIL_PRICE_VIEW
+  syncPriceViewQuery()
   pagination.page = 1
   loadData()
 }
@@ -1061,10 +1249,9 @@ const confirmSubmit = async () => {
   }
 }
 
-onMounted(() => {
-  loadCategoryList().then(() => {
-    loadData()
-  })
+onMounted(async () => {
+  await Promise.all([loadCategoryList(), loadLevels()])
+  await loadData()
 })
 </script>
 
@@ -1130,13 +1317,40 @@ onMounted(() => {
   width: 180px;
 }
 
+.price-view-select {
+  width: 160px;
+}
+
+.status-select {
+  width: 110px;
+}
+
 .table-card {
   padding: var(--space-lg);
 }
 
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.price-view-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.price-view-label {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
 .product-image-wrapper {
-  width: 60px;
-  height: 60px;
+  width: 48px;
+  height: 48px;
   border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--bg-page);
@@ -1177,6 +1391,59 @@ onMounted(() => {
 .sku-count {
   font-family: var(--font-mono);
   color: var(--primary-color);
+}
+
+.price-range {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.price-range-emphasis {
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+.rate-cell {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-height: 42px;
+}
+
+.rate-value {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.rate-value.is-missing {
+  color: var(--warning);
+  font-family: inherit;
+  font-weight: 600;
+}
+
+.icon-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
+.icon-action {
+  width: 24px;
+  height: 24px;
+  margin-left: 0 !important;
+  padding: 0;
+  border-radius: var(--radius-sm);
+}
+
+.icon-action:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 .form-select {
