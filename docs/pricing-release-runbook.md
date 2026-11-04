@@ -96,9 +96,7 @@ DDL，不执行第二次迁移。
 5. 购物车小计和订单创建金额与商品页一致；
 6. 新订单写入等级 ID、等级名称和倍率快照；
 7. 修改倍率后新请求生效，旧订单金额不变；
-8. 日志没有迁移、外键和价格异常；
-9. `pricing.cache.invalidation`、恢复指标与 `pricing.cache.invalidation.consecutive.failures`
-   可在 `/actuator/prometheus` 查询，告警规则已加载。
+8. 日志没有迁移、外键、缓存失效和价格异常。
 
 ## 5. 回滚
 

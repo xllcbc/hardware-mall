@@ -1,8 +1,6 @@
 package com.example.mystore.event;
 
 import com.example.mystore.common.constant.RedisConstants;
-import com.example.mystore.common.metrics.PricingCacheMetrics;
-import com.example.mystore.service.impl.DingTalkAlertService;
 import com.example.mystore.util.RedisUtil;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
@@ -69,10 +67,8 @@ class PricingCacheInvalidationListenerTransactionTest {
     private AnnotationConfigApplicationContext context(RedisUtil redisUtil,
                                                        TrackingTransactionManager transactionManager) {
         AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
-        PricingCacheMetrics metrics = mock(PricingCacheMetrics.class);
-        DingTalkAlertService alertService = mock(DingTalkAlertService.class);
         context.registerBean(PricingCacheInvalidationListener.class,
-                () -> new PricingCacheInvalidationListener(redisUtil, metrics, alertService));
+                () -> new PricingCacheInvalidationListener(redisUtil));
         context.registerBean(TransactionalEventListenerFactory.class, TransactionalEventListenerFactory::new);
         context.registerBean(TrackingTransactionManager.class, () -> transactionManager);
         context.refresh();

@@ -18,8 +18,6 @@ import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.UserLevelService;
 import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,9 +70,6 @@ class PricingCacheInvalidationIntegrationTest {
     private RedisLockUtil redisLockUtil;
 
     @Autowired
-    private MeterRegistry meterRegistry;
-
-    @Autowired
     private PlatformTransactionManager transactionManager;
 
     private TransactionTemplate transactionTemplate;
@@ -109,7 +104,6 @@ class PricingCacheInvalidationIntegrationTest {
         String productCacheKey = RedisConstants.PREFIX_PRODUCT_DETAIL + 77L;
         redisUtil.set(cacheKey, "old-rate", PricingCacheConstants.MAX_STALE_SECONDS, TimeUnit.SECONDS);
         redisUtil.set(productCacheKey, "neutral-product", 60, TimeUnit.SECONDS);
-        double successesBefore = counter("success");
 
         transactionTemplate.executeWithoutResult(status -> {
             pricingRuleService.saveDiscounts(fixture.levelId(),
@@ -119,7 +113,6 @@ class PricingCacheInvalidationIntegrationTest {
 
         assertThat(redisUtil.hasKey(cacheKey)).isFalse();
         assertThat(redisUtil.hasKey(productCacheKey)).isTrue();
-        assertThat(counter("success")).isEqualTo(successesBefore + 1.0);
     }
 
     @Test
@@ -127,8 +120,6 @@ class PricingCacheInvalidationIntegrationTest {
         PricingFixture fixture = createFixture("rollback");
         String cacheKey = RedisConstants.PREFIX_PRICING_LEVEL + fixture.levelId();
         redisUtil.set(cacheKey, "old-rate", PricingCacheConstants.MAX_STALE_SECONDS, TimeUnit.SECONDS);
-        double successesBefore = counter("success");
-        double lockTimeoutsBefore = counter("failure", "lock_timeout");
 
         transactionTemplate.executeWithoutResult(status -> {
             pricingRuleService.saveDiscounts(fixture.levelId(),
@@ -137,8 +128,6 @@ class PricingCacheInvalidationIntegrationTest {
         });
 
         assertThat(redisUtil.hasKey(cacheKey)).isTrue();
-        assertThat(counter("success")).isEqualTo(successesBefore);
-        assertThat(counter("failure", "lock_timeout")).isEqualTo(lockTimeoutsBefore);
     }
 
     @Test
@@ -218,11 +207,9 @@ class PricingCacheInvalidationIntegrationTest {
     }
 
     @Test
-    void lockTimeoutRecordsFailureAndNextSuccessfulEvictionRecordsRecovery() throws Exception {
+    void lockTimeoutLeavesCacheUntilLockReleasedThenInvalidates() throws Exception {
         String cacheKey = RedisConstants.PREFIX_PRICING_LEVEL + 902L;
         redisUtil.set(cacheKey, "old-rate", PricingCacheConstants.MAX_STALE_SECONDS, TimeUnit.SECONDS);
-        double recoveriesBefore = registryCounter("pricing.cache.invalidation.recoveries").count();
-        double lockTimeoutsBefore = counter("failure", "lock_timeout");
         CountDownLatch lockAcquired = new CountDownLatch(1);
         CountDownLatch releaseLock = new CountDownLatch(1);
         ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -240,10 +227,6 @@ class PricingCacheInvalidationIntegrationTest {
                     PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, 902L));
 
             assertThat(redisUtil.hasKey(cacheKey)).isTrue();
-            assertThat(counter("failure", "lock_timeout")).isEqualTo(lockTimeoutsBefore + 1.0);
-            assertThat(meterRegistry.get("pricing.cache.invalidation.consecutive.failures")
-                    .gauge()
-                    .value()).isEqualTo(1.0);
 
             releaseLock.countDown();
             holder.get(5, TimeUnit.SECONDS);
@@ -252,11 +235,6 @@ class PricingCacheInvalidationIntegrationTest {
                     PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, 902L));
 
             assertThat(redisUtil.hasKey(cacheKey)).isFalse();
-            assertThat(registryCounter("pricing.cache.invalidation.recoveries").count())
-                    .isEqualTo(recoveriesBefore + 1.0);
-            assertThat(meterRegistry.get("pricing.cache.invalidation.consecutive.failures")
-                    .gauge()
-                    .value()).isZero();
         } finally {
             releaseLock.countDown();
             executor.shutdownNow();
@@ -296,24 +274,6 @@ class PricingCacheInvalidationIntegrationTest {
         request.setCategoryId(categoryId);
         request.setRate(new BigDecimal(rate));
         return request;
-    }
-
-    private double counter(String result, String cause) {
-        Counter counter = meterRegistry.find("pricing.cache.invalidation")
-                .tags("result", result, "cause", cause)
-                .counter();
-        return counter == null ? 0.0 : counter.count();
-    }
-
-    private double counter(String result) {
-        Counter counter = meterRegistry.find("pricing.cache.invalidation")
-                .tag("result", result)
-                .counter();
-        return counter == null ? 0.0 : counter.count();
-    }
-
-    private Counter registryCounter(String name) {
-        return meterRegistry.counter(name);
     }
 
     private static void await(CountDownLatch latch) {
