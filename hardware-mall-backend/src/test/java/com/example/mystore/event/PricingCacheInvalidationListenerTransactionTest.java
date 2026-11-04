@@ -1,6 +1,9 @@
 package com.example.mystore.event;
 
-import com.example.mystore.service.PricingRuleService;
+import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.metrics.PricingCacheMetrics;
+import com.example.mystore.service.impl.DingTalkAlertService;
+import com.example.mystore.util.RedisUtil;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -11,6 +14,8 @@ import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -20,33 +25,33 @@ class PricingCacheInvalidationListenerTransactionTest {
 
     @Test
     void eventRunsSynchronouslyAfterCommitAndNeverDuringTransaction() {
-        PricingRuleService pricingRuleService = mock(PricingRuleService.class);
+        RedisUtil redisUtil = mock(RedisUtil.class);
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
         doAnswer(invocation -> {
             assertThat(transactionManager.commitCount).isEqualTo(1);
-            return null;
-        }).when(pricingRuleService).evictLevelCache(2L);
+            return true;
+        }).when(redisUtil).evictWithLock(eq(RedisConstants.PREFIX_PRICING_LEVEL + 2L), anyLong());
 
-        try (AnnotationConfigApplicationContext context = context(pricingRuleService, transactionManager)) {
+        try (AnnotationConfigApplicationContext context = context(redisUtil, transactionManager)) {
             TransactionTemplate transaction = new TransactionTemplate(transactionManager);
             ApplicationEventPublisher publisher = context;
 
             transaction.executeWithoutResult(status -> {
                 publisher.publishEvent(new PricingCacheInvalidationEvent(
                         PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, 2L));
-                verifyNoInteractions(pricingRuleService);
+                verifyNoInteractions(redisUtil);
             });
 
-            verify(pricingRuleService).evictLevelCache(2L);
+            verify(redisUtil).evictWithLock(eq(RedisConstants.PREFIX_PRICING_LEVEL + 2L), anyLong());
         }
     }
 
     @Test
     void eventDoesNotRunWhenTransactionRollsBack() {
-        PricingRuleService pricingRuleService = mock(PricingRuleService.class);
+        RedisUtil redisUtil = mock(RedisUtil.class);
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
 
-        try (AnnotationConfigApplicationContext context = context(pricingRuleService, transactionManager)) {
+        try (AnnotationConfigApplicationContext context = context(redisUtil, transactionManager)) {
             TransactionTemplate transaction = new TransactionTemplate(transactionManager);
             ApplicationEventPublisher publisher = context;
 
@@ -57,15 +62,17 @@ class PricingCacheInvalidationListenerTransactionTest {
             });
 
             assertThat(transactionManager.rollbackCount).isEqualTo(1);
-            verifyNoInteractions(pricingRuleService);
+            verifyNoInteractions(redisUtil);
         }
     }
 
-    private AnnotationConfigApplicationContext context(PricingRuleService pricingRuleService,
+    private AnnotationConfigApplicationContext context(RedisUtil redisUtil,
                                                        TrackingTransactionManager transactionManager) {
         AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
+        PricingCacheMetrics metrics = mock(PricingCacheMetrics.class);
+        DingTalkAlertService alertService = mock(DingTalkAlertService.class);
         context.registerBean(PricingCacheInvalidationListener.class,
-                () -> new PricingCacheInvalidationListener(pricingRuleService));
+                () -> new PricingCacheInvalidationListener(redisUtil, metrics, alertService));
         context.registerBean(TransactionalEventListenerFactory.class, TransactionalEventListenerFactory::new);
         context.registerBean(TrackingTransactionManager.class, () -> transactionManager);
         context.refresh();

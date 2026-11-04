@@ -43,7 +43,7 @@ public class RedisUtil {
                     + "return v", Long.class);
 
     /**
-     * 未抢到锁时的告警轮数，达到后只告警，循环继续等待缓存重建
+     * 未抢到锁时的告警轮数
      */
     @Value("${cache.query.lock-warn-loops:10}")
     private int lockWarnLoops = 10;
@@ -53,6 +53,8 @@ public class RedisUtil {
      */
     @Value("${cache.query.lock-sleep-ms:100}")
     private long lockSleepMs = 100L;
+
+    private static final long DEFAULT_EVICT_LOCK_WAIT_MILLIS = 1000L;
 
     private static final long ALERT_COOLDOWN_SECONDS = 30L;
 
@@ -84,14 +86,32 @@ public class RedisUtil {
     /**
      * 与缓存重建使用同一把锁删除缓存，避免并发读在重建过程中把旧值重新写回。
      */
-    public void evictWithLock(String key) {
-        while (!redisLockUtil.tryLock(key)) {
-            sleepQuietly(nextSleep());
-        }
-        try {
-            delete(key);
-        } finally {
-            redisLockUtil.unlock(key);
+    public boolean evictWithLock(String key) {
+        return evictWithLock(key, DEFAULT_EVICT_LOCK_WAIT_MILLIS);
+    }
+
+    /**
+     * 与缓存重建使用同一把锁删除缓存。等待时间有上限，避免提交后请求被长时间阻塞。
+     *
+     * @return true=已执行删除；false=等待锁超时
+     */
+    public boolean evictWithLock(String key, long maxWaitMillis) {
+        long deadline = deadline(maxWaitMillis);
+        while (true) {
+            if (redisLockUtil.tryLock(key)) {
+                try {
+                    delete(key);
+                    return true;
+                } finally {
+                    redisLockUtil.unlock(key);
+                }
+            }
+            long remainingMillis = remainingMillis(deadline);
+            if (remainingMillis <= 0) {
+                log.warn("等待缓存失效锁超时, key={}, maxWaitMs={}", key, maxWaitMillis);
+                return false;
+            }
+            sleepQuietly(Math.min(nextSleep(), remainingMillis));
         }
     }
 
@@ -213,7 +233,7 @@ public class RedisUtil {
     /**
      * 带防护的查询缓存：穿透（空值哨兵）+ 击穿（互斥锁 + 循环等待）+ 雪崩（TTL 抖动）
      * <p>缓存 miss 时通过分布式锁保证只有一个请求回源 DB；未抢到锁的请求休眠后重读缓存、
-     * 未命中再抢锁，循环等待重建完成；等待轮数达到告警阈值时记录告警，但不会绕过互斥锁直接查库。</p>
+     * 未命中再抢锁，等待重建完成。</p>
      *
      * @param key        缓存 key
      * @param type       缓存值类型（用于脏缓存检测）
@@ -233,6 +253,17 @@ public class RedisUtil {
      */
     public <T> T queryWithCache(String key, Class<T> type, long ttlSeconds,
                                 long nullTtlSeconds, long maxJitterSeconds, Supplier<T> dbQuery) {
+        return queryWithCache(key, type, ttlSeconds, nullTtlSeconds, maxJitterSeconds, -1L, dbQuery);
+    }
+
+    /**
+     * 带防护且可设置重建锁等待上限的查询缓存。
+     *
+     * @param maxLockWaitMillis 锁等待上限（毫秒），小于 0 表示沿用原有循环等待
+     */
+    public <T> T queryWithCache(String key, Class<T> type, long ttlSeconds,
+                                long nullTtlSeconds, long maxJitterSeconds,
+                                long maxLockWaitMillis, Supplier<T> dbQuery) {
         // 穿透：读缓存，命中哨兵直接拦截，命中脏缓存删除后重建
         Object cached = get(key);
         if (cached != null) {
@@ -250,10 +281,19 @@ public class RedisUtil {
             return rebuildWithLock(key, type, ttlSeconds, nullTtlSeconds, maxJitterSeconds, dbQuery);
         }
 
-        // 抢锁失败：休眠 -> 重读缓存 -> 再抢锁，持续循环等待重建完成
+        // 抢锁失败：休眠 -> 重读缓存 -> 再抢锁；定价缓存可设置有限等待
+        boolean boundedWait = maxLockWaitMillis >= 0;
+        long deadline = boundedWait ? deadline(maxLockWaitMillis) : 0L;
         int loops = 0;
         while (true) {
-            sleepQuietly(nextSleep());
+            long remainingMillis = boundedWait ? remainingMillis(deadline) : Long.MAX_VALUE;
+            if (boundedWait && remainingMillis <= 0) {
+                alertRebuildTimeout(key, loops);
+                log.warn("等待缓存重建锁超时, key={}, maxWaitMs={}, 直接回源且不写缓存",
+                        key, maxLockWaitMillis);
+                return dbQuery.get();
+            }
+            sleepQuietly(boundedWait ? Math.min(nextSleep(), remainingMillis) : nextSleep());
             Object again = get(key);
             if (again != null) {
                 if (isNull(again)) {
@@ -305,12 +345,29 @@ public class RedisUtil {
         return ThreadLocalRandom.current().nextLong(half, lockSleepMs + 1);
     }
 
+    private long deadline(long maxWaitMillis) {
+        return System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0L, maxWaitMillis));
+    }
+
+    private long remainingMillis(long deadline) {
+        long remainingNanos = deadline - System.nanoTime();
+        if (remainingNanos <= 0) {
+            return 0L;
+        }
+        return Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
+    }
+
     private void alertRebuildTimeout(String key, int loops) {
         // 每 key 冷却 30s，防止持续异常时刷爆日志（与钉钉告警防抖同款写法）
         String cooldownKey = "alert:cache:rebuild:" + key;
-        boolean first = Boolean.TRUE.equals(setIfAbsent(cooldownKey, "1", ALERT_COOLDOWN_SECONDS, TimeUnit.SECONDS));
-        if (first) {
-            log.warn("缓存重建等待过久, key={}, loops={}, 继续等待缓存重建", key, loops);
+        try {
+            boolean first = Boolean.TRUE.equals(
+                    setIfAbsent(cooldownKey, "1", ALERT_COOLDOWN_SECONDS, TimeUnit.SECONDS));
+            if (first) {
+                log.warn("缓存重建等待过久, key={}, loops={}", key, loops);
+            }
+        } catch (RuntimeException e) {
+            log.warn("记录缓存重建告警冷却失败, key={}, loops={}", key, loops, e);
         }
     }
 
@@ -339,4 +396,5 @@ public class RedisUtil {
     void setLockSleepMs(long lockSleepMs) {
         this.lockSleepMs = lockSleepMs;
     }
+
 }

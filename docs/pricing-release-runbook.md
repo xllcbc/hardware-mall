@@ -11,8 +11,8 @@ hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql
 scripts/pricing-release.sh
 ```
 
-脚本依赖本机 `mysql`、`mysqldump`、`sha256sum`。数据库连接参数通过环境变量
-提供，不要把密码写入命令历史或版本库：
+脚本依赖本机 `mysql`、`mysqldump`、`sha256sum` 和 `redis-cli`。数据库与 Redis
+连接参数通过环境变量提供，不要把密码写入命令历史或版本库：
 
 ```bash
 export DB_HOST=127.0.0.1
@@ -20,6 +20,9 @@ export DB_PORT=3306
 export DB_NAME=hardware_mall
 export DB_USERNAME=release_operator
 export MYSQL_PWD='<从密钥管理系统读取>'
+export REDIS_HOST=127.0.0.1
+export REDIS_PORT=6379
+export REDIS_PASSWORD='<从密钥管理系统读取；无密码时留空>'
 ```
 
 `DB_USERNAME` 需要备份、建临时库、DDL 和恢复权限。发布前确认备份盘剩余空间
@@ -77,7 +80,14 @@ DDL，不执行第二次迁移。
 
 ## 4. 发布后冒烟
 
-只有数据库验证通过后才启动新版本后端、管理端和用户端。至少验证：
+只有数据库验证通过后才启动新版本后端、管理端和用户端。后端启动后先主动
+删除旧定价缓存；`clean-cache` 失败时必须停止发布，不能等待 TTL：
+
+```bash
+./scripts/pricing-release.sh clean-cache
+```
+
+至少验证：
 
 1. 健康检查通过；
 2. 访客和零售用户看到商品列表、详情价格；
@@ -86,7 +96,9 @@ DDL，不执行第二次迁移。
 5. 购物车小计和订单创建金额与商品页一致；
 6. 新订单写入等级 ID、等级名称和倍率快照；
 7. 修改倍率后新请求生效，旧订单金额不变；
-8. 日志没有迁移、外键和价格异常。
+8. 日志没有迁移、外键和价格异常；
+9. `pricing.cache.invalidation`、恢复指标与 `pricing.cache.invalidation.consecutive.failures`
+   可在 `/actuator/prometheus` 查询，告警规则已加载。
 
 ## 5. 回滚
 

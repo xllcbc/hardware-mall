@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.constant.PricingCacheConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Category;
@@ -51,7 +52,9 @@ class PricingRuleServiceImplTest {
     @Test
     void retailLevelShortCircuitsToOne() {
         when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID),
-                eq(Long.class), eq(RedisConstants.CACHE_TTL_HOUR), any()))
+                eq(Long.class), eq(PricingCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
+                eq(500L), any()))
                 .thenReturn(1L);
 
         BigDecimal rate = pricingRuleService.rateFor(1L, 9L, false);
@@ -63,12 +66,16 @@ class PricingRuleServiceImplTest {
     @Test
     void customLevelUsesCachedCategoryRate() {
         when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID),
-                eq(Long.class), eq(RedisConstants.CACHE_TTL_HOUR), any()))
+                eq(Long.class), eq(PricingCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
+                eq(500L), any()))
                 .thenReturn(1L);
         PricingLevelCache cache = new PricingLevelCache();
         cache.setRates(Map.of(9L, new BigDecimal("0.7000")));
         when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_LEVEL + 2L),
-                eq(PricingLevelCache.class), eq(RedisConstants.CACHE_TTL_HOUR), any()))
+                eq(PricingLevelCache.class), eq(PricingCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
+                eq(500L), any()))
                 .thenReturn(cache);
 
         assertThat(pricingRuleService.rateFor(2L, 9L, false))
@@ -105,12 +112,16 @@ class PricingRuleServiceImplTest {
     @Test
     void customLevelCacheMissLoadsRatesFromDatabase() {
         when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID),
-                eq(Long.class), eq(RedisConstants.CACHE_TTL_HOUR), any()))
+                eq(Long.class), eq(PricingCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
+                eq(500L), any()))
                 .thenReturn(1L);
         when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_LEVEL + 2L),
-                eq(PricingLevelCache.class), eq(RedisConstants.CACHE_TTL_HOUR), any()))
+                eq(PricingLevelCache.class), eq(PricingCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
+                eq(500L), any()))
                 .thenAnswer(invocation -> {
-                    Supplier<PricingLevelCache> loader = invocation.getArgument(3);
+                    Supplier<PricingLevelCache> loader = invocation.getArgument(6);
                     return loader.get();
                 });
         LevelCategoryDiscount discount = new LevelCategoryDiscount();

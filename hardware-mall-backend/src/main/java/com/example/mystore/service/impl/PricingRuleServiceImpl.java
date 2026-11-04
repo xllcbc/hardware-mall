@@ -1,6 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.mystore.common.constant.PricingCacheConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.common.exception.BusinessException;
@@ -17,6 +18,7 @@ import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +42,9 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     private final RedisUtil redisUtil;
     private final ApplicationEventPublisher eventPublisher;
 
+    @Value("${pricing.cache.lock-wait-ms:500}")
+    private long cacheLockWaitMs = 500L;
+
     @Override
     public BigDecimal rateFor(Long levelId, Long categoryId, boolean excludeDiscount) {
         if (excludeDiscount || levelId == null || categoryId == null) {
@@ -61,7 +66,10 @@ public class PricingRuleServiceImpl implements PricingRuleService {
         return redisUtil.queryWithCache(
                 RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID,
                 Long.class,
-                RedisConstants.CACHE_TTL_HOUR,
+                PricingCacheConstants.TTL_SECONDS,
+                RedisConstants.CACHE_NULL_TTL,
+                PricingCacheConstants.JITTER_SECONDS,
+                cacheLockWaitMs,
                 () -> {
                     UserLevel retail = userLevelMapper.selectOne(new LambdaQueryWrapper<UserLevel>()
                             .eq(UserLevel::getIsRetail, UserLevelStatusConstants.IS_RETAIL)
@@ -178,23 +186,14 @@ public class PricingRuleServiceImpl implements PricingRuleService {
         return categories.stream().allMatch(category -> configured.contains(category.getId()));
     }
 
-    @Override
-    public void evictLevelCache(Long levelId) {
-        if (levelId != null) {
-            redisUtil.evictWithLock(RedisConstants.PREFIX_PRICING_LEVEL + levelId);
-        }
-    }
-
-    @Override
-    public void evictRetailLevelIdCache() {
-        redisUtil.evictWithLock(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID);
-    }
-
     private PricingLevelCache getLevelCache(Long levelId) {
         return redisUtil.queryWithCache(
                 RedisConstants.PREFIX_PRICING_LEVEL + levelId,
                 PricingLevelCache.class,
-                RedisConstants.CACHE_TTL_HOUR,
+                PricingCacheConstants.TTL_SECONDS,
+                RedisConstants.CACHE_NULL_TTL,
+                PricingCacheConstants.JITTER_SECONDS,
+                cacheLockWaitMs,
                 () -> {
                     PricingLevelCache cache = new PricingLevelCache();
                     cache.setRates(loadRates(levelId));

@@ -77,8 +77,6 @@ class UserLevelServiceImplTest {
 
         verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
                 PricingCacheInvalidationEvent.Type.LEVEL_AVAILABILITY_CHANGED, 2L));
-        verify(pricingRuleService, never()).evictLevelCache(any());
-        verify(pricingRuleService, never()).evictRetailLevelIdCache();
     }
 
     @Test
@@ -90,8 +88,6 @@ class UserLevelServiceImplTest {
 
         verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
                 PricingCacheInvalidationEvent.Type.LEVEL_AVAILABILITY_CHANGED, 2L));
-        verify(pricingRuleService, never()).evictLevelCache(any());
-        verify(pricingRuleService, never()).evictRetailLevelIdCache();
     }
 
     private UserLevel customLevel(Long id) {

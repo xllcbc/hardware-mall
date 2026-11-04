@@ -106,7 +106,6 @@ public class UserLevelServiceImpl implements UserLevelService {
         }
         exist.setUpdateTime(LocalDateTime.now());
         userLevelMapper.updateById(exist);
-        pricingRuleService.evictLevelCache(id);
         return exist;
     }
 

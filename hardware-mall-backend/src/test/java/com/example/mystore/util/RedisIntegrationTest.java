@@ -1,5 +1,8 @@
 package com.example.mystore.util;
 
+import com.example.mystore.common.constant.PricingCacheConstants;
+import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.entity.vo.PricingLevelCache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -7,11 +10,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import java.math.BigDecimal;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -27,6 +33,9 @@ class RedisIntegrationTest {
 
     @Autowired
     private RedisUtil redisUtil;
+
+    @Autowired
+    private RedisLockUtil redisLockUtil;
 
     @BeforeEach
     void setUp() {
@@ -172,6 +181,105 @@ class RedisIntegrationTest {
             executor.shutdownNow();
             executor.awaitTermination(5, TimeUnit.SECONDS);
         }
+    }
+
+    @Test
+    void queryWithCache_concurrentMissRebuildsOnceAndSharesResult() throws Exception {
+        String key = RedisConstants.PREFIX_PRICING_LEVEL + "concurrent-fill";
+        CountDownLatch loaderStarted = new CountDownLatch(1);
+        CountDownLatch releaseLoader = new CountDownLatch(1);
+        AtomicInteger loaderCalls = new AtomicInteger();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        PricingLevelCache cachedRates = pricingCache("0.8000");
+
+        try {
+            Future<PricingLevelCache> first = executor.submit(() -> redisUtil.queryWithCache(
+                    key,
+                    PricingLevelCache.class,
+                    PricingCacheConstants.TTL_SECONDS,
+                    RedisConstants.CACHE_NULL_TTL,
+                    PricingCacheConstants.JITTER_SECONDS,
+                    500L,
+                    () -> {
+                        loaderCalls.incrementAndGet();
+                        loaderStarted.countDown();
+                        await(releaseLoader);
+                        return cachedRates;
+                    }));
+            assertThat(loaderStarted.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<PricingLevelCache> second = executor.submit(() -> redisUtil.queryWithCache(
+                    key,
+                    PricingLevelCache.class,
+                    PricingCacheConstants.TTL_SECONDS,
+                    RedisConstants.CACHE_NULL_TTL,
+                    PricingCacheConstants.JITTER_SECONDS,
+                    500L,
+                    () -> {
+                        loaderCalls.incrementAndGet();
+                        return pricingCache("0.7000");
+                    }));
+
+            Thread.sleep(100);
+            assertThat(second.isDone()).isFalse();
+            releaseLoader.countDown();
+
+            assertThat(first.get(5, TimeUnit.SECONDS).getRates())
+                    .containsEntry(9L, new BigDecimal("0.8000"));
+            assertThat(second.get(5, TimeUnit.SECONDS).getRates())
+                    .containsEntry(9L, new BigDecimal("0.8000"));
+            assertThat(loaderCalls).hasValue(1);
+        } finally {
+            releaseLoader.countDown();
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void evictWithLock_returnsAfterBoundedWaitWhenLockRemainsHeld() throws Exception {
+        String key = "test:bounded-eviction";
+        CountDownLatch lockAcquired = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        redisUtil.set(key, "old-rate", 60, TimeUnit.SECONDS);
+
+        Future<?> holder = executor.submit(() -> {
+            assertThat(redisUtilAcquireLock(key)).isTrue();
+            lockAcquired.countDown();
+            await(releaseLock);
+            redisUtilReleaseLock(key);
+        });
+
+        try {
+            assertThat(lockAcquired.await(5, TimeUnit.SECONDS)).isTrue();
+            long startedAt = System.nanoTime();
+            boolean evicted = redisUtil.evictWithLock(key, 100);
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+            assertThat(evicted).isFalse();
+            assertThat(elapsedMillis).isBetween(80L, 1000L);
+            assertThat(redisUtil.get(key)).isEqualTo("old-rate");
+        } finally {
+            releaseLock.countDown();
+            holder.get(5, TimeUnit.SECONDS);
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    private boolean redisUtilAcquireLock(String key) {
+        return redisLockUtil.tryLock(key);
+    }
+
+    private void redisUtilReleaseLock(String key) {
+        redisLockUtil.unlock(key);
+    }
+
+    private PricingLevelCache pricingCache(String rate) {
+        PricingLevelCache cache = new PricingLevelCache();
+        cache.setRates(Map.of(9L, new BigDecimal(rate)));
+        return cache;
     }
 
     private static void await(CountDownLatch latch) {

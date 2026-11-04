@@ -13,10 +13,6 @@ import org.springframework.data.redis.core.ValueOperations;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -143,38 +139,19 @@ class RedisUtilTest {
     }
 
     @Test
-    void miss_lockNotAcquired_keepsWaitingAndNeverQueriesDb() throws Exception {
+    void miss_lockNotAcquired_returnsDbResultWithoutCachingAfterTimeout() {
         redisUtil.setLockSleepMs(1);
         redisUtil.setLockWarnLoops(1);
         when(redisLockUtil.tryLock("k")).thenReturn(false);
         when(valueOps.get("k")).thenReturn(null);
-        AtomicBoolean dbCalled = new AtomicBoolean(false);
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-        Future<String> future = executor.submit(() -> redisUtil.queryWithCache("k", String.class, 60, () -> {
-            dbCalled.set(true);
-            return "db-data";
-        }));
 
-        try {
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> future.get(100, TimeUnit.MILLISECONDS))
-                    .isInstanceOf(TimeoutException.class);
-            assertThat(dbCalled).isFalse();
-        } finally {
-            future.cancel(true);
-            executor.shutdownNow();
-            executor.awaitTermination(1, TimeUnit.SECONDS);
-        }
+        String result = redisUtil.queryWithCache(
+                "k", String.class, 60,
+                RedisConstants.CACHE_NULL_TTL, RedisConstants.CACHE_JITTER_MAX, 20L,
+                () -> "db-data");
+
+        assertThat(result).isEqualTo("db-data");
+        verify(valueOps, never()).set(anyString(), any(), anyLong(), any(TimeUnit.class));
     }
 
-    @Test
-    void evictWithLock_waitsForInFlightRebuildThenDeletes() {
-        redisUtil.setLockSleepMs(1);
-        when(redisLockUtil.tryLock("k")).thenReturn(false, true);
-
-        redisUtil.evictWithLock("k");
-
-        verify(redisTemplate).delete("k");
-        verify(redisLockUtil, org.mockito.Mockito.times(2)).tryLock("k");
-        verify(redisLockUtil).unlock("k");
-    }
 }

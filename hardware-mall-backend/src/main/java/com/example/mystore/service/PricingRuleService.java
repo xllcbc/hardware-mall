@@ -21,8 +21,4 @@ public interface PricingRuleService {
     void copyDiscounts(Long levelId, Long sourceLevelId);
 
     boolean isComplete(Long levelId);
-
-    void evictLevelCache(Long levelId);
-
-    void evictRetailLevelIdCache();
 }

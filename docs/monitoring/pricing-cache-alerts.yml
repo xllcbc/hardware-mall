@@ -1,0 +1,23 @@
+groups:
+  - name: pricing-cache-invalidation
+    rules:
+      - alert: PricingCacheInvalidationFailure
+        expr: increase(pricing_cache_invalidation_total{result="failure"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pricing cache invalidation is failing"
+          description: "Redis invalidation failed or timed out. Prices may remain stale until the 300-second TTL expires."
+
+      - alert: PricingCacheInvalidationNotRecovering
+        expr: pricing_cache_invalidation_consecutive_failures > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pricing cache invalidation has not recovered"
+          description: "Consecutive invalidation failures have persisted for two minutes."
+
+      - record: pricing_cache_invalidation:recoveries:rate5m
+        expr: rate(pricing_cache_invalidation_recoveries_total[5m])
