@@ -30,6 +30,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import com.example.mystore.entity.vo.SpecVO;
@@ -104,6 +105,7 @@ public class SpuServiceImpl implements SpuService {
     }
 
     @Override
+    @Transactional
     public Spu createSpu(Spu spu) {
         spu.setCreateTime(LocalDateTime.now());
         spu.setUpdateTime(LocalDateTime.now());
@@ -124,6 +126,7 @@ public class SpuServiceImpl implements SpuService {
     }
 
     @Override
+    @Transactional
     public Spu updateSpu(Spu spu) {
         Spu exist = spuMapper.selectById(spu.getId());
         if (exist == null) {
@@ -170,6 +173,7 @@ public class SpuServiceImpl implements SpuService {
     }
 
     @Override
+    @Transactional
     public void deleteSpu(Long id) {
         Spu spu = spuMapper.selectById(id);
         if (spu == null) {
@@ -181,6 +185,7 @@ public class SpuServiceImpl implements SpuService {
     }
 
     @Override
+    @Transactional
     public void updateStatus(Long id, Integer status) {
         Spu spu = spuMapper.selectById(id);
         if (spu == null) {

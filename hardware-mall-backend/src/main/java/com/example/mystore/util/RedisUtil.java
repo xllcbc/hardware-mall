@@ -120,12 +120,45 @@ public class RedisUtil {
     }
 
     /**
+     * 按模式删除缓存，并对匹配 key 及其正在重建的锁逐一执行有界等待，
+     * 防止旧数据在失效完成后被并发回填。
+     */
+    public long evictByPatternWithLock(String pattern) {
+        return evictByPatternWithLock(pattern, DEFAULT_EVICT_LOCK_WAIT_MILLIS);
+    }
+
+    public long evictByPatternWithLock(String pattern, long maxWaitMillis) {
+        Set<String> keys = scanByPattern(pattern);
+        Set<String> lockKeys = scanByPattern(RedisConstants.PREFIX_CACHE_LOCK + pattern);
+        for (String lockKey : lockKeys) {
+            keys.add(lockKey.substring(RedisConstants.PREFIX_CACHE_LOCK.length()));
+        }
+
+        long deleted = 0;
+        for (String key : keys) {
+            if (evictWithLock(key, maxWaitMillis)) {
+                deleted++;
+            }
+        }
+        return deleted;
+    }
+
+    /**
      * 按模式删除 key，使用 SCAN 避免阻塞（生产环境禁用 KEYS）
      *
      * @param pattern 匹配模式，如 "product:list:*"
      * @return 删除的 key 数量
      */
     public long deleteByPattern(String pattern) {
+        Set<String> keys = scanByPattern(pattern);
+        if (keys == null || keys.isEmpty()) {
+            return 0;
+        }
+        Long deleted = redisTemplate.delete(keys);
+        return deleted == null ? 0 : deleted;
+    }
+
+    private Set<String> scanByPattern(String pattern) {
         Set<String> keys = redisTemplate.execute((org.springframework.data.redis.core.RedisCallback<Set<String>>) connection -> {
             Set<String> matched = new java.util.HashSet<>();
             try (org.springframework.data.redis.core.Cursor<byte[]> cursor =
@@ -137,11 +170,7 @@ public class RedisUtil {
             }
             return matched;
         });
-        if (keys == null || keys.isEmpty()) {
-            return 0;
-        }
-        Long deleted = redisTemplate.delete(keys);
-        return deleted == null ? 0 : deleted;
+        return keys == null ? Collections.emptySet() : keys;
     }
 
     public boolean hasKey(String key) {
@@ -158,6 +187,10 @@ public class RedisUtil {
 
     public boolean setIfAbsent(String key, Object value, long timeout, TimeUnit unit) {
         return Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(key, value, timeout, unit));
+    }
+
+    public boolean setIfAbsent(String key, Object value) {
+        return Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(key, value));
     }
 
     public Long incr(String key) {

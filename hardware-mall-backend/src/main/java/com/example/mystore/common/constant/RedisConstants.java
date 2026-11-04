@@ -18,6 +18,7 @@ public class RedisConstants {
     public static final String PREFIX_PRODUCT_RECOMMEND = "product:recommend:v4";
     public static final String PREFIX_PRODUCT_LIST = "product:list:v4:";
     public static final String PREFIX_PRODUCT_SEARCH = "product:search:v2:";
+    public static final String PREFIX_PRODUCT_CACHE_GENERATION = "product:cache:generation";
     public static final String PREFIX_PRICING_LEVEL = "pricing:level:";
     public static final String PREFIX_PRICING_RETAIL_LEVEL_ID = "pricing:retail-level-id";
     public static final String PREFIX_SKU_STOCK = "sku:stock:";
@@ -25,6 +26,7 @@ public class RedisConstants {
     public static final String PREFIX_STOCK_EVICT_FAILED = "stock:cache:evict:failed";
     public static final String PREFIX_RATE_LIMIT = "rate:limit:";
     public static final String PREFIX_ORDER_IDEMPOTENCY = "order:idem:";
+    public static final String PREFIX_CACHE_LOCK = "lock:";
 
     public static final long CACHE_TTL_HOUR = 3600L;
     public static final long CACHE_TTL_DAY = 86400L;

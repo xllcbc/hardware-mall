@@ -48,6 +48,14 @@ class ProductCacheInvalidationListenerTest {
     }
 
     @Test
+    void skuBatchChanged_invalidatesAllSkuCachesAtOnce() {
+        listener.onProductSkuBatchChanged(new ProductSkuBatchChangedEvent(
+                11L, java.util.List.of(22L, 23L)));
+
+        verify(productCacheService).invalidateAfterSkuBatchChange(11L, java.util.List.of(22L, 23L));
+    }
+
+    @Test
     void listener_runsAfterCommitWithFallbackExecution() throws Exception {
         Method method = ProductCacheInvalidationListener.class.getMethod(
                 "onProductCacheInvalidation", ProductCacheInvalidationEvent.class);

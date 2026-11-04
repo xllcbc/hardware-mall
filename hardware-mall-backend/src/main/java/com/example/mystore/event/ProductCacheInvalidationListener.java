@@ -30,4 +30,17 @@ public class ProductCacheInvalidationListener {
                     event.type(), event.spuId(), event.skuId(), e);
         }
     }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void onProductSkuBatchChanged(ProductSkuBatchChangedEvent event) {
+        if (event == null || event.skuIds().isEmpty()) {
+            return;
+        }
+        try {
+            productCacheService.invalidateAfterSkuBatchChange(event.spuId(), event.skuIds());
+        } catch (RuntimeException e) {
+            log.error("批量 SKU 缓存失效失败, spuId={}, skuIds={}",
+                    event.spuId(), event.skuIds(), e);
+        }
+    }
 }

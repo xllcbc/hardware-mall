@@ -26,7 +26,6 @@ public interface SkuService {
     boolean deductStock(Long skuId, Integer quantity);
     void restoreStock(Long skuId, Integer quantity);
     List<Sku> previewSkusByTemplate(Long spuId);
-    boolean syncStockToCache(Long skuId);
     SkuConfigVO getSkuConfig(Long spuId);
     SkuConfigVO saveSkuConfig(Long spuId, SaveSkuConfigRequest request);
 }

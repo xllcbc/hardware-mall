@@ -15,6 +15,7 @@ import com.example.mystore.entity.vo.SkuConfigTemplateVO;
 import com.example.mystore.entity.vo.SkuConfigVO;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
+import com.example.mystore.event.ProductSkuBatchChangedEvent;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpecItemMapper;
@@ -330,6 +331,7 @@ public class SkuServiceImpl implements SkuService {
     }
 
     @Override
+    @Transactional
     public void deleteSku(Long id) {
         Sku sku = skuMapper.selectById(id);
         if (sku == null) {
@@ -339,7 +341,11 @@ public class SkuServiceImpl implements SkuService {
         sku.setDeleteTime(System.currentTimeMillis());
         skuMapper.updateById(sku);
         if (sku.getImage() != null) {
-            ossService.deleteFile(sku.getImage());
+            try {
+                ossService.deleteFile(sku.getImage());
+            } catch (RuntimeException e) {
+                log.warn("SKU 图片清理失败, skuId={}, image={}", id, sku.getImage(), e);
+            }
         }
         publishSkuChanged(spuId, id);
         publishStockEvict(id);
@@ -409,24 +415,6 @@ public class SkuServiceImpl implements SkuService {
             result.add(sku);
         }
         return result;
-    }
-
-    @Override
-    public boolean syncStockToCache(Long skuId) {
-        try {
-            Sku sku = skuMapper.selectById(skuId);
-            if (sku != null && sku.getStock() != null) {
-                redisUtil.set(RedisConstants.PREFIX_SKU_STOCK + skuId,
-                        sku.getStock(),
-                        RedisConstants.SKU_STOCK_TTL_SECONDS,
-                        TimeUnit.SECONDS);
-                return true;
-            }
-            return false;
-        } catch (Exception e) {
-            log.error("库存缓存同步失败, skuId={}", skuId, e);
-            return false;
-        }
     }
 
     @Override
@@ -531,9 +519,6 @@ public class SkuServiceImpl implements SkuService {
         invalidateSkuConfigCaches(spuId, changedSkus, deletedSkus);
         return getSkuConfig(spuId);
     }
-
-    // 已删除 deductStockFromCache / restoreStockToCache
-    // 库存缓存改为事务提交后由 OrderServiceImpl 统一调用 syncStockToCache() 同步
 
     private String getTemplateName(List<SpecTemplate> templates, Long templateId) {
         for (SpecTemplate template : templates) {
@@ -727,16 +712,16 @@ public class SkuServiceImpl implements SkuService {
     }
 
     private void invalidateSkuConfigCaches(Long spuId, List<Sku> changedSkus, List<Sku> deletedSkus) {
-        redisUtil.delete(RedisConstants.PREFIX_PRODUCT_DETAIL + spuId);
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
-
+        List<Long> affectedSkuIds = new ArrayList<>();
         for (Sku sku : changedSkus) {
-            redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + sku.getId());
-            syncStockToCache(sku.getId());
+            affectedSkuIds.add(sku.getId());
         }
         for (Sku sku : deletedSkus) {
-            redisUtil.delete(RedisConstants.PREFIX_SKU_INFO + sku.getId());
-            redisUtil.delete(RedisConstants.PREFIX_SKU_STOCK + sku.getId());
+            affectedSkuIds.add(sku.getId());
+        }
+        if (!affectedSkuIds.isEmpty()) {
+            eventPublisher.publishEvent(new ProductSkuBatchChangedEvent(spuId, affectedSkuIds));
+            eventPublisher.publishEvent(new StockCacheEvent(affectedSkuIds));
         }
     }
 
