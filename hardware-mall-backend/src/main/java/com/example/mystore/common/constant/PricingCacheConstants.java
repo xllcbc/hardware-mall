@@ -1,0 +1,11 @@
+package com.example.mystore.common.constant;
+
+public final class PricingCacheConstants {
+
+    private PricingCacheConstants() {
+    }
+
+    public static final long TTL_SECONDS = 240L;
+    public static final long JITTER_SECONDS = 60L;
+    public static final long MAX_STALE_SECONDS = TTL_SECONDS + JITTER_SECONDS;
+}

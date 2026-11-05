@@ -10,13 +10,18 @@ import com.example.mystore.entity.dto.SaveSkuConfigRequest;
 import com.example.mystore.entity.dto.SaveSkuRowRequest;
 import com.example.mystore.entity.vo.SkuConfigVO;
 import com.example.mystore.entity.vo.SpecVO;
+import com.example.mystore.event.ProductCacheInvalidationEvent;
+import com.example.mystore.event.ProductSkuBatchChangedEvent;
+import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpecItemMapper;
 import com.example.mystore.mapper.SpecTemplateMapper;
 import com.example.mystore.mapper.SpuMapper;
+import com.example.mystore.service.ProductCacheService;
 import com.example.mystore.service.OssService;
 import com.example.mystore.service.SpecItemService;
 import com.example.mystore.service.SpecTemplateService;
+import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +29,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
@@ -31,8 +38,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -64,6 +73,15 @@ class SkuServiceImplTest {
     @Mock
     private RedisUtil redisUtil;
 
+    @Mock
+    private RedisLockUtil redisLockUtil;
+
+    @Mock
+    private ProductCacheService productCacheService;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     @InjectMocks
     private SkuServiceImpl skuService;
 
@@ -72,6 +90,7 @@ class SkuServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        ReflectionTestUtils.setField(skuService, "stockLockWaitMillis", 100L);
         SpecVO spec1 = new SpecVO();
         spec1.setTemplateId(1L);
         spec1.setItemId(1L);
@@ -105,9 +124,9 @@ class SkuServiceImplTest {
 
     @Test
     void testGetSkuById_CacheHit() {
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_SKU_INFO + 1L), eq(Sku.class), anyLong(), any()))
-                .thenReturn(sku1);
-        when(redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + 1L)).thenReturn(80);
+        when(productCacheService.getSkusByIds(eq(List.of(1L)), any()))
+                .thenReturn(List.of(sku1));
+        stubStockQuery(1L, 80);
 
         Sku result = skuService.getSkuById(1L);
 
@@ -118,15 +137,108 @@ class SkuServiceImplTest {
     }
 
     @Test
+    void getSkuMapByIds_loadsStockInBatchAndFiltersDeletedSku() {
+        Sku cached = new Sku();
+        cached.setId(1L);
+        cached.setSpuId(1L);
+        cached.setPrice(new BigDecimal("199.00"));
+        cached.setStatus(1);
+        cached.setDeleteTime(0L);
+
+        Sku deleted = new Sku();
+        deleted.setId(2L);
+        deleted.setDeleteTime(System.currentTimeMillis());
+
+        when(productCacheService.getSkusByIds(eq(List.of(1L, 2L)), any()))
+                .thenReturn(Arrays.asList(cached, deleted));
+        when(redisUtil.multiGet(List.of(
+                RedisConstants.PREFIX_SKU_STOCK + 1L)))
+                .thenReturn(Collections.singletonList(null), Collections.singletonList(null));
+        when(redisLockUtil.tryLock(
+                eq(RedisConstants.PREFIX_SKU_STOCK + 1L), anyLong())).thenReturn(true);
+
+        Sku loadedFromDb = new Sku();
+        loadedFromDb.setId(1L);
+        loadedFromDb.setStock(55);
+        when(skuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(loadedFromDb));
+
+        Map<Long, Sku> result = skuService.getSkuMapByIds(List.of(1L, 2L));
+
+        assertThat(result).containsOnlyKeys(1L);
+        assertThat(result.get(1L).getStock()).isEqualTo(55);
+        verify(redisUtil).set(
+                RedisConstants.PREFIX_SKU_STOCK + 1L,
+                55,
+                RedisConstants.SKU_STOCK_TTL_SECONDS,
+                TimeUnit.SECONDS);
+        verify(redisLockUtil).unlock(RedisConstants.PREFIX_SKU_STOCK + 1L);
+    }
+
+    @Test
+    void getSkuMapByIds_stockNullSentinel_returnsNullStockWithoutDbQuery() {
+        when(productCacheService.getSkusByIds(eq(List.of(1L, 2L)), any()))
+                .thenReturn(Arrays.asList(sku1, sku2));
+        when(redisUtil.multiGet(List.of(
+                RedisConstants.PREFIX_SKU_STOCK + 1L,
+                RedisConstants.PREFIX_SKU_STOCK + 2L)))
+                .thenReturn(Arrays.asList(RedisConstants.CACHE_NULL, 30));
+        when(redisUtil.isNull(RedisConstants.CACHE_NULL)).thenReturn(true);
+
+        Map<Long, Sku> result = skuService.getSkuMapByIds(List.of(1L, 2L));
+
+        assertThat(result.get(1L).getStock()).isNull();
+        assertThat(result.get(2L).getStock()).isEqualTo(30);
+        verify(skuMapper, never()).selectBatchIds(any());
+    }
+
+    @Test
+    void getSkuMapByIds_allStockHits_returnsCachedStocksWithoutDbQuery() {
+        when(productCacheService.getSkusByIds(eq(List.of(1L, 2L)), any()))
+                .thenReturn(Arrays.asList(sku1, sku2));
+        when(redisUtil.multiGet(List.of(
+                RedisConstants.PREFIX_SKU_STOCK + 1L,
+                RedisConstants.PREFIX_SKU_STOCK + 2L)))
+                .thenReturn(Arrays.asList(50, 30));
+
+        Map<Long, Sku> result = skuService.getSkuMapByIds(List.of(1L, 2L));
+
+        assertThat(result.get(1L).getStock()).isEqualTo(50);
+        assertThat(result.get(2L).getStock()).isEqualTo(30);
+        verify(skuMapper, never()).selectBatchIds(any());
+        verify(redisUtil, never()).set(any(), any(), anyLong(), any());
+    }
+
+    @Test
+    void createSku_publishesSkuChangedEvent() {
+        Spu spu = new Spu();
+        spu.setId(1L);
+        when(spuMapper.selectById(1L)).thenReturn(spu);
+        when(skuMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(skuMapper.insert(any(Sku.class))).thenAnswer(inv -> {
+            inv.getArgument(0, Sku.class).setId(5L);
+            return 1;
+        });
+
+        Sku incoming = new Sku();
+        incoming.setSpuId(1L);
+        incoming.setSpecs(Collections.emptyList());
+        incoming.setPrice(new BigDecimal("10.00"));
+        incoming.setStock(10);
+
+        skuService.createSku(incoming);
+
+        verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.SKU_CHANGED,
+                1L,
+                5L,
+                false));
+    }
+
+    @Test
     void testGetSkuById_MetadataMiss_StockFromCache() {
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_SKU_INFO + 1L), eq(Sku.class), anyLong(), any()))
-                .thenAnswer(inv -> {
-                    @SuppressWarnings("unchecked")
-                    java.util.function.Supplier<Sku> supplier = inv.getArgument(3);
-                    return supplier.get();
-                });
-        when(redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + 1L)).thenReturn(60);
-        when(skuMapper.selectById(1L)).thenReturn(sku1);
+        when(productCacheService.getSkusByIds(eq(List.of(1L)), any()))
+                .thenReturn(List.of(sku1));
+        stubStockQuery(1L, 60);
 
         Sku result = skuService.getSkuById(1L);
 
@@ -137,16 +249,8 @@ class SkuServiceImplTest {
 
     @Test
     void testGetSkuById_Deleted() {
-        Sku deleted = new Sku();
-        deleted.setId(3L);
-        deleted.setDeleteTime(System.currentTimeMillis());
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_SKU_INFO + 3L), eq(Sku.class), anyLong(), any()))
-                .thenAnswer(inv -> {
-                    @SuppressWarnings("unchecked")
-                    java.util.function.Supplier<Sku> supplier = inv.getArgument(3);
-                    return supplier.get();
-                });
-        when(skuMapper.selectById(3L)).thenReturn(deleted);
+        when(productCacheService.getSkusByIds(eq(List.of(3L)), any()))
+                .thenReturn(Collections.emptyList());
 
         assertThatThrownBy(() -> skuService.getSkuById(3L))
                 .isInstanceOf(RuntimeException.class)
@@ -176,6 +280,10 @@ class SkuServiceImplTest {
     void testCreateSku_NewCombo_Inserts() {
         when(spuMapper.selectById(1L)).thenReturn(new Spu());
         when(skuMapper.selectList(any())).thenReturn(Collections.singletonList(sku2));
+        when(skuMapper.insert(any(Sku.class))).thenAnswer(inv -> {
+            inv.getArgument(0, Sku.class).setId(5L);
+            return 1;
+        });
 
         Sku incoming = new Sku();
         incoming.setSpuId(1L);
@@ -188,14 +296,13 @@ class SkuServiceImplTest {
 
         verify(skuMapper).insert(any(Sku.class));
         assertThat(result.getSpecHash()).hasSize(32).matches("[0-9a-f]{32}");
-        verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
-        // M4: 新增 SKU 也要失效商品列表缓存
-        verify(redisUtil).deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.SKU_CHANGED, 1L, 5L, false));
+        verify(eventPublisher).publishEvent(new StockCacheEvent(List.of(5L)));
     }
 
     @Test
     void testUpdateSku_PriceChange_InvalidatesListCache() {
-        // M4: 改价后列表页最长 1 小时显示旧价, 必须按模式失效 product:list:*
         when(skuMapper.selectById(1L)).thenReturn(sku1);
 
         Sku incoming = new Sku();
@@ -204,8 +311,8 @@ class SkuServiceImplTest {
 
         skuService.updateSku(incoming);
 
-        verify(redisUtil).deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
-        verify(redisUtil).delete(RedisConstants.PREFIX_SKU_INFO + 1L);
+        verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.SKU_CHANGED, 1L, 1L, false));
     }
 
     @Test
@@ -265,8 +372,9 @@ class SkuServiceImplTest {
         assertThat(result.getStatus()).isEqualTo(1);
         assertThat(result.getSpecHash()).hasSize(32).matches("[0-9a-f]{32}");
         assertThat(result.getPrice()).isEqualByComparingTo(new BigDecimal("66.00"));
-        verify(redisUtil).delete(RedisConstants.PREFIX_SKU_INFO + 9L);
-        verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
+        verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.SKU_CHANGED, 1L, 9L, false));
+        verify(eventPublisher).publishEvent(new StockCacheEvent(List.of(9L)));
     }
 
     @Test
@@ -412,7 +520,7 @@ class SkuServiceImplTest {
 
     @Test
     void testGetStockById_CacheHit() {
-        when(redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + 1L)).thenReturn(50);
+        stubStockQuery(1L, 50);
 
         Integer result = skuService.getStockById(1L);
 
@@ -422,7 +530,18 @@ class SkuServiceImplTest {
 
     @Test
     void testGetStockById_CacheMiss_FallbackToDb() {
-        when(redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + 1L)).thenReturn(null);
+        when(redisUtil.queryWithCache(
+                eq(RedisConstants.PREFIX_SKU_STOCK + 1L),
+                eq(Integer.class),
+                eq(RedisConstants.SKU_STOCK_TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(0L),
+                eq(100L),
+                any())).thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    java.util.function.Supplier<Integer> loader = invocation.getArgument(6);
+                    return loader.get();
+                });
         when(skuMapper.selectById(1L)).thenReturn(sku1);
 
         Integer result = skuService.getStockById(1L);
@@ -432,47 +551,34 @@ class SkuServiceImplTest {
     }
 
     @Test
-    void testGetStockById_NullSentinel_FallbackToDb() {
-        when(redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + 1L)).thenReturn(RedisConstants.CACHE_NULL);
-        when(redisUtil.isNull(RedisConstants.CACHE_NULL)).thenReturn(true);
-        when(skuMapper.selectById(1L)).thenReturn(sku1);
+    void testGetStockById_NullSentinel_ReturnsNullWithoutDb() {
+        stubStockQuery(1L, null);
 
         Integer result = skuService.getStockById(1L);
 
-        assertThat(result).isEqualTo(50);
-        verify(skuMapper).selectById(1L);
+        assertThat(result).isNull();
+        verify(skuMapper, never()).selectById(any());
     }
 
     @Test
     void testGetStockById_SkuNotFound() {
-        when(redisUtil.get(RedisConstants.PREFIX_SKU_STOCK + 99L)).thenReturn(null);
+        when(redisUtil.queryWithCache(
+                eq(RedisConstants.PREFIX_SKU_STOCK + 99L),
+                eq(Integer.class),
+                eq(RedisConstants.SKU_STOCK_TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(0L),
+                eq(100L),
+                any())).thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    java.util.function.Supplier<Integer> loader = invocation.getArgument(6);
+                    return loader.get();
+                });
         when(skuMapper.selectById(99L)).thenReturn(null);
 
         Integer result = skuService.getStockById(99L);
 
         assertThat(result).isNull();
-    }
-
-    @Test
-    void testSyncStockToCache_Success() {
-        when(skuMapper.selectById(1L)).thenReturn(sku1);
-
-        boolean result = skuService.syncStockToCache(1L);
-
-        assertThat(result).isTrue();
-        verify(redisUtil).set(RedisConstants.PREFIX_SKU_STOCK + 1L, 50);
-    }
-
-    @Test
-    void testSyncStockToCache_NullStock() {
-        Sku noStock = new Sku();
-        noStock.setId(3L);
-        noStock.setStock(null);
-        when(skuMapper.selectById(3L)).thenReturn(noStock);
-
-        boolean result = skuService.syncStockToCache(3L);
-
-        assertThat(result).isFalse();
     }
 
     @Test
@@ -511,11 +617,23 @@ class SkuServiceImplTest {
         skuService.deleteSku(1L);
 
         verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku -> sku.getDeleteTime() > 0));
-        verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
-        verify(redisUtil).delete(RedisConstants.PREFIX_SKU_INFO + 1L);
-        // M4: 删除 SKU 清库存缓存 + 失效列表缓存
-        verify(redisUtil).delete(RedisConstants.PREFIX_SKU_STOCK + 1L);
-        verify(redisUtil).deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
+        verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.SKU_CHANGED, 1L, 1L, false));
+        verify(eventPublisher).publishEvent(new StockCacheEvent(List.of(1L)));
+    }
+
+    @Test
+    void deleteSku_fileCleanupFailureDoesNotSkipCacheInvalidation() {
+        sku1.setImage("https://example.test/sku.png");
+        when(skuMapper.selectById(1L)).thenReturn(sku1);
+        doThrow(new RuntimeException("oss unavailable")).when(ossService).deleteFile(sku1.getImage());
+
+        assertThatCode(() -> skuService.deleteSku(1L)).doesNotThrowAnyException();
+
+        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku -> sku.getDeleteTime() > 0));
+        verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
+                ProductCacheInvalidationEvent.Type.SKU_CHANGED, 1L, 1L, false));
+        verify(eventPublisher).publishEvent(new StockCacheEvent(List.of(1L)));
     }
 
     @Test
@@ -559,14 +677,12 @@ class SkuServiceImplTest {
                 selectCount.getAndIncrement() == 0
                         ? Arrays.asList(existing, removed)
                         : Arrays.asList(existing, inserted[0]));
-        when(skuMapper.selectById(1L)).thenReturn(existing);
         when(skuMapper.insert(any(Sku.class))).thenAnswer(inv -> {
             Sku insertedSku = inv.getArgument(0);
             insertedSku.setId(3L);
             inserted[0] = insertedSku;
             return 1;
         });
-        when(skuMapper.selectById(3L)).thenAnswer(inv -> inserted[0]);
         when(specTemplateService.getTemplatesByCategory(1L)).thenReturn(Collections.singletonList(template));
         when(specItemService.getItemsByTemplate(1L)).thenReturn(Collections.emptyList());
 
@@ -587,9 +703,14 @@ class SkuServiceImplTest {
                 Long.valueOf(3L).equals(sku.getId()) && sku.getStock() == 7));
         verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku ->
                 Long.valueOf(2L).equals(sku.getId()) && sku.getDeleteTime() > 0));
-        verify(redisUtil).delete(RedisConstants.PREFIX_PRODUCT_DETAIL + 1L);
-        verify(redisUtil).deleteByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*");
-        verify(redisUtil).delete(RedisConstants.PREFIX_SKU_STOCK + 2L);
+        verify(eventPublisher).publishEvent((Object) argThat(event ->
+                event instanceof ProductSkuBatchChangedEvent batchEvent
+                        && batchEvent.skuIds().containsAll(List.of(1L, 2L, 3L))));
+        verify(eventPublisher).publishEvent((Object) argThat(event ->
+                event instanceof StockCacheEvent stockEvent
+                        && stockEvent.skuIds().containsAll(List.of(1L, 2L, 3L))));
+        verify(redisUtil, never()).delete(any(String.class));
+        verify(redisUtil, never()).deleteByPattern(any());
     }
 
     @Test
@@ -654,7 +775,6 @@ class SkuServiceImplTest {
         when(skuMapper.selectList(any())).thenReturn(
                 Collections.singletonList(deleted),
                 Collections.singletonList(deleted));
-        when(skuMapper.selectById(9L)).thenReturn(deleted);
         when(specTemplateMapper.selectById(1L)).thenReturn(template);
         when(specItemMapper.selectById(1L)).thenReturn(item);
         when(specTemplateService.getTemplatesByCategory(1L)).thenReturn(Collections.emptyList());
@@ -679,6 +799,17 @@ class SkuServiceImplTest {
         spu.setName("测试商品");
         spu.setDeleteTime(0L);
         return spu;
+    }
+
+    private void stubStockQuery(Long skuId, Integer stock) {
+        when(redisUtil.queryWithCache(
+                eq(RedisConstants.PREFIX_SKU_STOCK + skuId),
+                eq(Integer.class),
+                eq(RedisConstants.SKU_STOCK_TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(0L),
+                eq(100L),
+                any())).thenReturn(stock);
     }
 
     private SpecVO spec(Long templateId, Long itemId) {

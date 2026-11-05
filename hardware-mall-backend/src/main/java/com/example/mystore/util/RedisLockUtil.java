@@ -1,5 +1,6 @@
 package com.example.mystore.util;
 
+import com.example.mystore.common.constant.RedisConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
@@ -18,7 +19,6 @@ import java.util.concurrent.TimeUnit;
 public class RedisLockUtil {
 
     private final RedissonClient redissonClient;
-    private static final String LOCK_PREFIX = "lock:";
 
     /**
      * 尝试获取分布式锁（非阻塞）
@@ -31,11 +31,20 @@ public class RedisLockUtil {
      * @return true=获取成功，false=获取失败（锁已被其他线程持有）
      */
     public boolean tryLock(String key) {
-        RLock lock = redissonClient.getLock(LOCK_PREFIX + key);
+        return tryLock(key, 0L);
+    }
+
+    /**
+     * 在有限时间内尝试获取分布式锁。
+     *
+     * @param key           锁的业务 key
+     * @param maxWaitMillis 最长等待毫秒数，0 表示立即返回
+     */
+    public boolean tryLock(String key, long maxWaitMillis) {
+        RLock lock = redissonClient.getLock(RedisConstants.PREFIX_CACHE_LOCK + key);
         try {
-            // waitTime=0: 不等待，拿不到立刻返回 false
             // leaseTime=-1: 启用看门狗自动续期（默认 30 秒）
-            return lock.tryLock(0, -1, TimeUnit.SECONDS);
+            return lock.tryLock(Math.max(0L, maxWaitMillis), -1, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("获取锁被中断, key={}", key);
@@ -51,7 +60,7 @@ public class RedisLockUtil {
      * @param key 锁的标识（与 tryLock 时传入的 key 一致）
      */
     public void unlock(String key) {
-        RLock lock = redissonClient.getLock(LOCK_PREFIX + key);
+        RLock lock = redissonClient.getLock(RedisConstants.PREFIX_CACHE_LOCK + key);
         if (lock.isHeldByCurrentThread()) {
             lock.unlock();
         } else {

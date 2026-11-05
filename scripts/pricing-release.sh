@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="${PRICING_RELEASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+DB_DIR="${PRICING_RELEASE_DB_DIR:-$ROOT_DIR/hardware-mall-backend/src/main/resources/db}"
+MIGRATION="${PRICING_RELEASE_MIGRATION:-$DB_DIR/migration_2026-11-02_multi_level_pricing_release.sql}"
+VERIFY="${PRICING_RELEASE_VERIFY:-$DB_DIR/pricing_release_verify.sql}"
+
+DB_PORT="${DB_PORT:-3306}"
+REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+
+MYSQL=(mysql --protocol=TCP --default-character-set=utf8mb4
+  -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USERNAME")
+MYSQLDUMP=(mysqldump --protocol=TCP --default-character-set=utf8mb4
+  --single-transaction --routines --triggers --events --set-gtid-purged=OFF
+  -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USERNAME")
+
+usage() {
+  cat <<'EOF'
+Usage:
+  pricing-release.sh backup <backup.sql>
+  pricing-release.sh preflight <backup.sql>
+  pricing-release.sh migrate <backup.sql>
+  pricing-release.sh verify
+  pricing-release.sh restore <backup.sql>
+  pricing-release.sh rollback-drill <backup.sql> [previous-image]
+  pricing-release.sh clean-cache
+EOF
+}
+
+require_db_env() {
+  : "${DB_HOST:?set DB_HOST}"
+  : "${DB_NAME:?set DB_NAME}"
+  : "${DB_USERNAME:?set DB_USERNAME}"
+  : "${MYSQL_PWD:?set MYSQL_PWD}"
+}
+
+require_file() {
+  local path="$1"
+  if [[ ! -s "$path" ]]; then
+    echo "Required file is missing or empty: $path" >&2
+    exit 2
+  fi
+}
+
+verify_backup_checksum() {
+  local backup="$1"
+  if [[ ! -s "$backup.sha256" ]]; then
+    echo "Required checksum file is missing or empty: $backup.sha256" >&2
+    exit 2
+  fi
+  sha256sum -c "$backup.sha256"
+}
+
+case "${1:-}" in
+  backup)
+    require_db_env
+    backup="${2:?backup path required}"
+    mkdir -p "$(dirname "$backup")"
+    "${MYSQLDUMP[@]}" "$DB_NAME" > "$backup"
+    sha256sum "$backup" > "$backup.sha256"
+    cat "$backup.sha256"
+    ;;
+  preflight)
+    require_db_env
+    backup="${2:?backup path required}"
+    require_file "$backup"
+    verify_backup_checksum "$backup"
+    scratch="${DB_NAME}_pricing_preflight"
+    "${MYSQL[@]}" -e "DROP DATABASE IF EXISTS \`$scratch\`; CREATE DATABASE \`$scratch\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+    "${MYSQL[@]}" "$scratch" < "$backup"
+    "${MYSQL[@]}" "$scratch" < "$MIGRATION"
+    "${MYSQL[@]}" "$scratch" < "$VERIFY"
+    echo "Preflight database retained for inspection: $scratch"
+    ;;
+  migrate)
+    require_db_env
+    backup="${2:?backup path required}"
+    require_file "$backup"
+    verify_backup_checksum "$backup"
+    "${MYSQL[@]}" "$DB_NAME" < "$MIGRATION"
+    ;;
+  verify)
+    require_db_env
+    "${MYSQL[@]}" "$DB_NAME" < "$VERIFY"
+    ;;
+  restore)
+    require_db_env
+    backup="${2:?backup path required}"
+    require_file "$backup"
+    verify_backup_checksum "$backup"
+    "${MYSQL[@]}" -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+    "${MYSQL[@]}" "$DB_NAME" < "$backup"
+    ;;
+  rollback-drill)
+    require_db_env
+    backup="${2:?backup path required}"
+    previous_image="${3:-}"
+    require_file "$backup"
+    verify_backup_checksum "$backup"
+
+    if [[ -n "$previous_image" ]] && ! docker image inspect "$previous_image" >/dev/null 2>&1; then
+      echo "Previous release image is unavailable: $previous_image" >&2
+      exit 5
+    fi
+
+    scratch="${DB_NAME}_rollback_drill"
+    "${MYSQL[@]}" -e "DROP DATABASE IF EXISTS \`$scratch\`; CREATE DATABASE \`$scratch\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+    "${MYSQL[@]}" "$scratch" < "$backup"
+    mysqlcheck --protocol=TCP --default-character-set=utf8mb4 \
+      -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USERNAME" --check "$scratch" >/dev/null
+
+    table_count="$("${MYSQL[@]}" -N -B -e \
+      "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$scratch';")"
+    if [[ "${table_count:-0}" -lt 1 ]]; then
+      echo "Rollback drill restored no tables in $scratch" >&2
+      exit 6
+    fi
+    echo "PASS: rollback backup restored to $scratch (${table_count} tables)"
+    if [[ -n "$previous_image" ]]; then
+      echo "PASS: previous release image present: $previous_image"
+    fi
+    ;;
+  clean-cache)
+    redis_cli=(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" --no-auth-warning)
+    if [[ -n "${REDIS_PASSWORD:-}" ]]; then
+      export REDISCLI_AUTH="$REDIS_PASSWORD"
+    fi
+    if ! "${redis_cli[@]}" ping >/dev/null; then
+      echo "Redis ping failed" >&2
+      exit 3
+    fi
+
+    scan_file="$(mktemp)"
+    trap 'rm -f "$scan_file"' EXIT
+    : > "$scan_file"
+    for pattern in 'pricing:*' 'product:list:*' 'product:detail:*' 'product:recommend:*' \
+      'product:search:*' 'product:cache:generation' 'sku:info:*'; do
+      if ! "${redis_cli[@]}" --scan --pattern "$pattern" >> "$scan_file"; then
+        echo "Redis cache scan failed for pattern: $pattern" >&2
+        exit 4
+      fi
+    done
+    sort -u "$scan_file" -o "$scan_file"
+
+    deleted=0
+    while IFS= read -r key; do
+      [[ -z "$key" ]] && continue
+      "${redis_cli[@]}" DEL "$key" >/dev/null
+      deleted=$((deleted + 1))
+    done < "$scan_file"
+    echo "Deleted $deleted pricing cache keys"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

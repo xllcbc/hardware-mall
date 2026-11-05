@@ -2,14 +2,17 @@ package com.example.mystore.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.entity.vo.OrderVO;
+import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.DashboardStatsVO;
 import com.example.mystore.entity.vo.RecentOrderVO;
+import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;
 
 import java.util.List;
 import java.util.Map;
 
 public interface OrderService {
+    CheckoutPreviewVO previewOrder(CheckoutPreviewRequest request);
     OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey);
     Page<OrderVO> getOrderPage(Long userId, Integer status, Integer page, Integer limit);
     Page<OrderVO> getAdminOrderPage(Long userId, Integer status, String orderNo, String startDate, String endDate, Integer page, Integer limit);

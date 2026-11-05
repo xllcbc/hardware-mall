@@ -19,6 +19,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
+@org.junit.jupiter.api.Tag("h2")
 @ActiveProfiles("test")
 @Sql(scripts = "/db/schema-test.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
 @Transactional
@@ -56,6 +57,9 @@ class OrderItemBatchInsertTest {
         item1.setPrice(new BigDecimal("219.00"));
         item1.setQuantity(1);
         item1.setSubtotal(new BigDecimal("219.00"));
+        item1.setLevelId(1L);
+        item1.setLevelName("零售");
+        item1.setDiscountRate(BigDecimal.ONE);
         item1.setCreateTime(LocalDateTime.now());
 
         OrderItem item2 = new OrderItem();
@@ -66,6 +70,9 @@ class OrderItemBatchInsertTest {
         item2.setPrice(new BigDecimal("219.00"));
         item2.setQuantity(1);
         item2.setSubtotal(new BigDecimal("219.00"));
+        item2.setLevelId(1L);
+        item2.setLevelName("零售");
+        item2.setDiscountRate(BigDecimal.ONE);
         item2.setCreateTime(LocalDateTime.now());
 
         int rows = orderItemMapper.insertBatch(Arrays.asList(item1, item2));

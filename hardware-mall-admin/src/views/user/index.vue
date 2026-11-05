@@ -17,6 +17,26 @@
           filterable
           class="region-cascader"
         />
+        <el-select
+          v-model="levelFilter"
+          placeholder="按用户等级筛选"
+          clearable
+          filterable
+          class="level-select"
+        >
+          <el-option
+            v-for="level in levelOptions"
+            :key="level.id"
+            :label="level.name"
+            :value="level.id"
+          />
+        </el-select>
+        <el-switch
+          v-model="fullFields"
+          class="field-switch"
+          active-text="完整字段"
+          aria-label="切换完整字段"
+        />
       </div>
       <el-table 
         :data="tableData" 
@@ -24,8 +44,8 @@
         v-loading="loading"
         class="user-table"
       >
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column label="用户信息" min-width="200">
+        <el-table-column v-if="fullFields" prop="id" label="ID" width="72" />
+        <el-table-column label="用户" min-width="180">
           <template #default="{ row }">
             <div class="user-info-cell">
               <el-avatar :size="40" class="user-avatar" :src="row.avatarUrl">
@@ -43,7 +63,7 @@
             <span class="phone">{{ row.phone || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="role" label="角色" width="100">
+        <el-table-column v-if="fullFields" prop="role" label="角色" width="84">
           <template #default="{ row }">
             <el-tag 
               :type="row.role === USER_ROLE.ADMIN ? 'warning' : 'primary'" 
@@ -54,12 +74,19 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="地区" width="140">
+        <el-table-column label="用户等级" width="108">
+          <template #default="{ row }">
+            <el-tag :type="row.levelId === 1 ? 'info' : 'success'" size="small" effect="light">
+              {{ row.levelName || '未设置' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="地区" width="96">
           <template #default="{ row }">
             <span class="region">{{ row.city || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" label="状态" width="78">
           <template #default="{ row }">
             <el-tag 
               :type="row.status === USER_STATUS.NORMAL ? 'success' : 'danger'" 
@@ -70,34 +97,64 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="lastLoginTime" label="最后登录" width="180">
+        <el-table-column v-if="fullFields" prop="lastLoginTime" label="最后登录" width="168">
           <template #default="{ row }">
             <span class="time">{{ row.lastLoginTime || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createTime" label="注册时间" width="180">
+        <el-table-column v-if="fullFields" prop="createTime" label="注册时间" width="168">
           <template #default="{ row }">
             <span class="time">{{ row.createTime }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="260" fixed="right">
+        <el-table-column label="操作" width="140" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button link type="primary" @click="handleViewOrders(row)">
-              <el-icon><List /></el-icon>
-              订单
-            </el-button>
-            <el-button link type="success" @click="handleEditRegion(row)">
-              <el-icon><Location /></el-icon>
-              地区
-            </el-button>
-            <el-button
-              link
-              :type="row.status === 1 ? 'warning' : 'success'"
-              @click="handleToggleStatus(row)"
-            >
-              <el-icon><Switch /></el-icon>
-              {{ row.status === 1 ? '禁用' : '启用' }}
-            </el-button>
+            <div class="icon-actions">
+              <el-tooltip content="查看订单" placement="top">
+                <el-button
+                  link
+                  type="primary"
+                  class="icon-action"
+                  aria-label="查看用户订单"
+                  @click="handleViewOrders(row)"
+                >
+                  <el-icon><List /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="编辑地区" placement="top">
+                <el-button
+                  link
+                  type="success"
+                  class="icon-action"
+                  aria-label="编辑用户地区"
+                  @click="handleEditRegion(row)"
+                >
+                  <el-icon><Location /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip :content="row.status === 1 ? '禁用用户' : '启用用户'" placement="top">
+                <el-button
+                  link
+                  :type="row.status === 1 ? 'warning' : 'success'"
+                  class="icon-action"
+                  :aria-label="row.status === 1 ? '禁用用户' : '启用用户'"
+                  @click="handleToggleStatus(row)"
+                >
+                  <el-icon><Switch /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="调整所属等级" placement="top">
+                <el-button
+                  link
+                  type="warning"
+                  class="icon-action"
+                  aria-label="调整用户等级"
+                  @click="handleChangeLevel(row)"
+                >
+                  <el-icon><UserFilled /></el-icon>
+                </el-button>
+              </el-tooltip>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -131,34 +188,86 @@
         <el-button type="primary" @click="handleRegionSubmit" :loading="regionLoading">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="levelDialogVisible" title="调整用户等级" width="420px">
+      <el-form label-width="80px">
+        <el-form-item label="用户等级">
+          <el-select v-model="levelForm.levelId" placeholder="请选择用户等级" style="width: 100%">
+            <el-option
+              v-for="level in enabledLevels"
+              :key="level.id"
+              :label="level.name"
+              :value="level.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div class="dialog-tip">等级变更后该用户需要重新登录才能生效。</div>
+      <template #footer>
+        <el-button @click="levelDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="levelLoading" @click="handleLevelSubmit">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, onMounted, watch, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { provinceCityOptions } from '@/utils/regions'
-import { getUserList, updateUserStatus, updateUserRegion } from '@/api/admin/user'
+import { getUserList, updateUserStatus, updateUserRegion, updateUserLevel } from '@/api/admin/user'
+import { getUserLevelList, type UserLevel } from '@/api/admin/userLevel'
 import { USER_ROLE, USER_ROLE_TEXT, USER_STATUS, USER_STATUS_TEXT } from '@/constants/status'
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
+const fullFields = ref(false)
 const tableData = ref<any[]>([])
+let latestRequestId = 0
 
 const regionFilter = ref<string[]>([])
+const levelFilter = ref<number | null>(parseLevelIdQuery(route.query.levelId))
 
 const regionDialogVisible = ref(false)
 const regionForm = ref<string[]>([])
 const regionLoading = ref(false)
 const editingUserId = ref<number | null>(null)
+const levelDialogVisible = ref(false)
+const levelLoading = ref(false)
+const levelOptions = ref<UserLevel[]>([])
+const editingLevelUserId = ref<number | null>(null)
+const levelForm = reactive({ levelId: null as number | null })
+
+const enabledLevels = computed(() => levelOptions.value.filter(level => level.status === 1))
 
 watch(regionFilter, () => {
   pagination.page = 1
   loadData()
 })
 
+watch(levelFilter, (value) => {
+  router.replace({
+    path: route.path,
+    query: {
+      ...route.query,
+      levelId: value == null ? undefined : String(value)
+    }
+  })
+  pagination.page = 1
+  loadData()
+})
 
+watch(
+  () => route.query.levelId,
+  (value) => {
+    const nextLevelId = parseLevelIdQuery(value)
+    if (nextLevelId !== levelFilter.value) {
+      levelFilter.value = nextLevelId
+    }
+  }
+)
 
 const pagination = reactive({
   page: 1,
@@ -189,6 +298,30 @@ const handleEditRegion = (row: any) => {
   regionDialogVisible.value = true
 }
 
+const handleChangeLevel = (row: any) => {
+  editingLevelUserId.value = row.id
+  levelForm.levelId = row.levelId
+  levelDialogVisible.value = true
+}
+
+const handleLevelSubmit = async () => {
+  if (!levelForm.levelId) {
+    ElMessage.warning('请选择用户等级')
+    return
+  }
+  levelLoading.value = true
+  try {
+    await updateUserLevel(editingLevelUserId.value!, levelForm.levelId)
+    ElMessage.success('已更新用户等级，该用户需重新登录')
+    levelDialogVisible.value = false
+    loadData()
+  } catch {
+    // error handled by interceptor
+  } finally {
+    levelLoading.value = false
+  }
+}
+
 const handleRegionSubmit = async () => {
   if (!regionForm.value || regionForm.value.length < 2) {
     ElMessage.warning('请选择省市')
@@ -208,6 +341,7 @@ const handleRegionSubmit = async () => {
 }
 
 const loadData = async () => {
+  const requestId = ++latestRequestId
   loading.value = true
   try {
     const [province, city] = regionFilter.value || []
@@ -215,20 +349,42 @@ const loadData = async () => {
       page: pagination.page,
       limit: pagination.limit,
       province,
-      city
+      city,
+      levelId: levelFilter.value ?? undefined
     })
+    if (requestId !== latestRequestId) return
     tableData.value = res.records || []
     pagination.total = res.total || 0
   } catch {
     // error handled by interceptor
   } finally {
-    loading.value = false
+    if (requestId === latestRequestId) {
+      loading.value = false
+    }
+  }
+}
+
+const loadLevels = async () => {
+  try {
+    levelOptions.value = await getUserLevelList() || []
+  } catch {
+    levelOptions.value = []
   }
 }
 
 onMounted(() => {
+  loadLevels()
   loadData()
 })
+
+function parseLevelIdQuery(value: unknown): number | null {
+  const raw = Array.isArray(value) ? value[0] : value
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return null
+  }
+  const parsed = Number(raw)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
+}
 </script>
 
 <style scoped>
@@ -294,11 +450,22 @@ onMounted(() => {
 }
 
 .filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
   margin-bottom: var(--space-lg);
 }
 
 .region-cascader {
   width: 200px;
+}
+
+.level-select {
+  width: 180px;
+}
+
+.field-switch {
+  margin-left: auto;
 }
 
 .user-table {
@@ -346,6 +513,26 @@ onMounted(() => {
 .region {
   color: var(--accent-color);
   font-weight: 500;
+}
+
+.icon-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
+.icon-action {
+  width: 24px;
+  height: 24px;
+  margin-left: 0 !important;
+  padding: 0;
+  border-radius: var(--radius-sm);
+}
+
+.icon-action:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 .pagination-wrapper {

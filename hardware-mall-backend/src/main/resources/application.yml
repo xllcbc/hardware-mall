@@ -96,10 +96,25 @@ cors:
 
 cache:
   query:
-    # 缓存击穿：未抢到锁时的告警轮数，告警后继续循环等待，不绕过互斥锁查库
+    # 缓存击穿：等待期间达到该轮数时告警；定价缓存另有有限等待上限
     lock-warn-loops: 10
     # 每轮随机休眠时长上限(毫秒)，实际取 [lock-sleep-ms/2, lock-sleep-ms]
     lock-sleep-ms: 100
+
+pricing:
+  cache:
+    # 定价缓存失效与重建共用的有限锁等待上限
+    lock-wait-ms: 500
+
+product:
+  cache:
+    # 商品缓存失效、重建和批量 SKU 抢锁共用的有限等待上限
+    lock-wait-ms: 500
+
+stock:
+  cache:
+    # 单 SKU 库存缓存失效与重建共用的有限等待上限
+    lock-wait-ms: 500
 
 order:
   auto-receive:

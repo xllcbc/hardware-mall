@@ -1,6 +1,7 @@
 package com.example.mystore.common.exception;
 
 import com.example.mystore.common.result.Result;
+import com.example.mystore.entity.vo.PriceChangeVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.validation.BindException;
@@ -14,6 +15,13 @@ import jakarta.servlet.http.HttpServletRequest;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(PriceChangedException.class)
+    public Result<PriceChangeVO> handlePriceChangedException(
+            PriceChangedException e, HttpServletRequest request) {
+        log.warn("结算价格变更: {} at {}", e.getMessage(), request.getRequestURI());
+        return Result.error(e.getCode(), e.getMessage(), e.getPriceChange());
+    }
 
     @ExceptionHandler(BusinessException.class)
     public Result<Void> handleBusinessException(BusinessException e, HttpServletRequest request) {

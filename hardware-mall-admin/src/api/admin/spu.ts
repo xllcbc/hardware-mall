@@ -12,6 +12,7 @@ export interface Spu {
   salesCount?: number
   status?: number
   isRecommend?: number
+  excludeDiscount?: number
   createTime?: string
   updateTime?: string
   deleteTime?: number
@@ -22,10 +23,41 @@ export interface SpuQuery {
   limit?: number
   categoryId?: number
   keyword?: string
+  status?: number
+  levelId?: number
+}
+
+export interface AdminProductPricing {
+  id: number
+  categoryId: number
+  name: string
+  subtitle?: string
+  description?: string
+  images?: string[]
+  originalPrice?: number
+  weight?: number
+  retailMinPrice?: number
+  retailMaxPrice?: number
+  discountRate: number
+  effectiveRate: number
+  settlementMinPrice?: number
+  settlementMaxPrice?: number
+  rateMissing: boolean
+  excludeDiscount: number
+  status: number
+  isRecommend: number
+  salesCount: number
 }
 
 export const getSpuList = (params?: SpuQuery) => {
   return request.get<any>('/admin/spu/list', { params })
+}
+
+export const getAdminProductPricingList = (params?: SpuQuery) => {
+  return request.get<{ records: AdminProductPricing[]; total: number }>(
+    '/admin/spu/pricing-list',
+    { params }
+  )
 }
 
 export const getSpuById = (id: number) => {

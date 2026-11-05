@@ -1,0 +1,585 @@
+<template>
+  <div class="user-level-management">
+    <div class="page-header animate-fade-in-down">
+      <div class="header-content">
+        <h2 class="page-title">用户群体管理</h2>
+        <p class="page-desc">配置用户等级与分类倍率矩阵</p>
+      </div>
+      <el-button type="primary" class="add-btn" @click="openCreate">
+        <el-icon><Plus /></el-icon>
+        新增等级
+      </el-button>
+    </div>
+
+    <div class="card table-card animate-fade-in-up stagger-1">
+      <el-table :data="levelList" stripe v-loading="loading">
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="name" label="等级名称" min-width="160">
+          <template #default="{ row }">
+            <span class="level-name">{{ row.name }}</span>
+            <el-tag v-if="row.isRetail === 1" size="small" type="info" effect="light">零售</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="sortOrder" label="排序" width="100" />
+        <el-table-column prop="userCount" label="用户数" width="100">
+          <template #default="{ row }">
+            <el-button
+              link
+              type="primary"
+              class="user-count-link"
+              :aria-label="`查看${row.name}归属用户`"
+              @click="openUsers(row)"
+            >
+              {{ row.userCount }}
+            </el-button>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small" effect="light">
+              {{ row.status === 1 ? '启用' : '停用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="390" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="row.isRetail !== 1" link type="primary" @click="openMatrix(row)">
+              <el-icon><SetUp /></el-icon>
+              倍率矩阵
+            </el-button>
+            <el-button
+              link
+              type="success"
+              :disabled="row.status !== 1"
+              @click="openProducts(row)"
+            >
+              <el-icon><Goods /></el-icon>
+              查看商品
+            </el-button>
+            <el-button v-if="row.isRetail !== 1" link type="warning" @click="openEdit(row)">
+              <el-icon><Edit /></el-icon>
+              编辑
+            </el-button>
+            <el-button
+              v-if="row.isRetail !== 1"
+              link
+              :type="row.status === 1 ? 'warning' : 'success'"
+              @click="toggleStatus(row)"
+            >
+              {{ row.status === 1 ? '停用' : '启用' }}
+            </el-button>
+            <el-button v-if="row.isRetail !== 1" link type="danger" @click="removeLevel(row)">
+              <el-icon><Delete /></el-icon>
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <el-dialog
+      v-model="levelDialogVisible"
+      :title="editingLevel ? '编辑等级' : '新增等级'"
+      width="420px"
+    >
+      <el-form label-width="80px">
+        <el-form-item label="等级名称">
+          <el-input v-model="levelForm.name" maxlength="50" placeholder="请输入等级名称" />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number v-model="levelForm.sortOrder" :min="0" :controls="false" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="levelDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitLoading" @click="submitLevel">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="matrixDialogVisible" :title="`倍率矩阵 - ${currentLevel?.name || ''}`" width="720px">
+      <div class="matrix-toolbar">
+        <el-button @click="fillAll">
+          <el-icon><MagicStick /></el-icon>
+          一键填充
+        </el-button>
+        <el-button @click="openCopyDialog">
+          <el-icon><CopyDocument /></el-icon>
+          复制等级
+        </el-button>
+        <span class="matrix-tip">倍率范围 (0, 1]，缺口需要补齐后才能启用等级</span>
+      </div>
+      <el-table :data="discountList" max-height="430" v-loading="matrixLoading">
+        <el-table-column prop="categoryName" label="商品分类" min-width="200" />
+        <el-table-column label="倍率" width="360">
+          <template #default="{ row }">
+            <el-input-number
+              v-model="row.rate"
+              :min="0.0001"
+              :max="1"
+              :precision="4"
+              :step="0.01"
+              :controls="false"
+              placeholder="未配置"
+              @change="syncMissingFlag(row)"
+            />
+            <el-tag
+              size="small"
+              :type="getMatrixCellStatus(row.rate).configured ? 'success' : 'danger'"
+              effect="light"
+            >
+              {{ getMatrixCellStatus(row.rate).label }}
+            </el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="matrixDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="matrixLoading" @click="saveMatrix">保存矩阵</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="copyVisible" title="复制倍率矩阵" width="420px">
+      <el-form label-width="100px">
+        <el-form-item label="来源等级">
+          <el-select
+            v-model="copySourceLevelId"
+            placeholder="请选择来源等级"
+            style="width: 100%"
+            :loading="copySourceLoading"
+            @change="loadCopySourceMatrix"
+          >
+            <el-option
+              v-for="level in copySourceLevels"
+              :key="level.id"
+              :label="level.name"
+              :value="level.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="copyVisible = false">取消</el-button>
+        <el-button type="primary" :loading="matrixLoading" @click="copyMatrix">复制</el-button>
+      </template>
+    </el-dialog>
+
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, h, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  copyUserLevelDiscounts,
+  createUserLevel,
+  deleteUserLevel,
+  fillUserLevelDiscounts,
+  getUserLevelDiscounts,
+  getUserLevelList,
+  saveUserLevelDiscounts,
+  updateUserLevelInfo,
+  updateUserLevelStatus,
+  type LevelDiscount,
+  type UserLevel
+} from '@/api/admin/userLevel'
+import { getCategoryList, type Category } from '@/api/admin/category'
+import {
+  canApplyCopiedMatrix,
+  getMatrixCellStatus,
+  getMatrixStats,
+  runAfterImpactConfirmation
+} from '@/utils/pricingImpact'
+
+const router = useRouter()
+const loading = ref(false)
+const submitLoading = ref(false)
+const matrixLoading = ref(false)
+const levelList = ref<UserLevel[]>([])
+const categories = ref<Category[]>([])
+const discountList = ref<LevelDiscount[]>([])
+const currentLevel = ref<UserLevel | null>(null)
+const editingLevel = ref<UserLevel | null>(null)
+const levelDialogVisible = ref(false)
+const matrixDialogVisible = ref(false)
+const copyVisible = ref(false)
+const copySourceLoading = ref(false)
+const copySourceLoaded = ref(false)
+const copySourceLevelId = ref<number | null>(null)
+const copySourceMatrix = ref<LevelDiscount[]>([])
+const levelForm = reactive({ name: '', sortOrder: 0 })
+
+const copySourceLevels = computed(() =>
+  levelList.value.filter(level => level.id !== currentLevel.value?.id && level.isRetail !== 1)
+)
+
+const openUsers = (level: UserLevel) => {
+  router.push({ path: '/user', query: { levelId: String(level.id) } })
+}
+
+const openProducts = (level: UserLevel) => {
+  router.push({ path: '/spu', query: { levelId: String(level.id) } })
+}
+
+interface PricingImpactOptions {
+  level: UserLevel
+  categoryCount: number
+  configuredCategoryCount?: number
+  title: string
+  description: string
+  confirmButtonText: string
+  sourceLevel?: UserLevel
+}
+
+const renderImpactRow = (label: string, value: string) =>
+  h('div', {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: '20px'
+    }
+  }, [
+    h('span', { style: { color: 'var(--el-text-color-secondary)' } }, label),
+    h('strong', {
+      style: {
+        color: 'var(--el-text-color-primary)',
+        textAlign: 'right',
+        wordBreak: 'break-word'
+      }
+    }, value)
+  ])
+
+const confirmPricingImpact = async ({
+  level,
+  categoryCount,
+  configuredCategoryCount,
+  title,
+  description,
+  confirmButtonText,
+  sourceLevel
+}: PricingImpactOptions) => {
+  const rows = [
+    renderImpactRow('等级名称', level.name),
+    renderImpactRow('用户数', `${Number(level.userCount || 0).toLocaleString('zh-CN')} 人`),
+    renderImpactRow('分类数量', `${categoryCount} 个`),
+    renderImpactRow(
+      '已配置 / 缺口',
+      `${configuredCategoryCount ?? categoryCount} / ${categoryCount - (configuredCategoryCount ?? categoryCount)}`
+    )
+  ]
+  if (sourceLevel) {
+    const sourceStats = getMatrixStats(copySourceMatrix.value)
+    rows.push(
+      renderImpactRow('来源等级', sourceLevel.name),
+      renderImpactRow('来源用户数', `${Number(sourceLevel.userCount || 0).toLocaleString('zh-CN')} 人`),
+      renderImpactRow('来源已配置 / 缺口', `${sourceStats.configured} / ${sourceStats.missing}`)
+    )
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      h('div', {
+        style: {
+          display: 'grid',
+          gap: '12px'
+        }
+      }, [
+        h('p', {
+          style: {
+            margin: '0',
+            color: 'var(--el-text-color-regular)',
+            lineHeight: '1.6'
+          }
+        }, description),
+        h('div', {
+          style: {
+            display: 'grid',
+            gap: '8px',
+            padding: '12px',
+            border: '1px solid var(--el-border-color-lighter)',
+            borderRadius: '6px',
+            background: 'var(--el-fill-color-lighter)'
+          }
+        }, rows)
+      ]),
+      title,
+      {
+        type: 'warning',
+        confirmButtonText,
+        cancelButtonText: '取消'
+      }
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+const loadLevels = async () => {
+  loading.value = true
+  try {
+    levelList.value = await getUserLevelList() || []
+  } finally {
+    loading.value = false
+  }
+}
+
+const loadCategories = async () => {
+  const result: any = await getCategoryList({ page: 1, limit: 200 })
+  categories.value = result.records || []
+}
+
+const openCreate = () => {
+  editingLevel.value = null
+  levelForm.name = ''
+  levelForm.sortOrder = 0
+  levelDialogVisible.value = true
+}
+
+const openEdit = (level: UserLevel) => {
+  editingLevel.value = level
+  levelForm.name = level.name
+  levelForm.sortOrder = level.sortOrder
+  levelDialogVisible.value = true
+}
+
+const submitLevel = async () => {
+  if (!levelForm.name.trim()) {
+    ElMessage.warning('请输入等级名称')
+    return
+  }
+  submitLoading.value = true
+  try {
+    if (editingLevel.value) {
+      await updateUserLevelInfo(editingLevel.value.id, {
+        name: levelForm.name.trim(),
+        sortOrder: levelForm.sortOrder
+      })
+    } else {
+      await createUserLevel({ name: levelForm.name.trim(), sortOrder: levelForm.sortOrder })
+    }
+    ElMessage.success('保存成功')
+    levelDialogVisible.value = false
+    loadLevels()
+  } finally {
+    submitLoading.value = false
+  }
+}
+
+const toggleStatus = async (level: UserLevel) => {
+  const next = level.status === 1 ? 0 : 1
+  await ElMessageBox.confirm(
+    next === 1 ? '启用前必须确保所有分类倍率已配置，是否继续？' : '停用后该等级用户仍按原倍率取价，是否继续？',
+    '提示',
+    { type: 'warning' }
+  )
+  await updateUserLevelStatus(level.id, next)
+  ElMessage.success('状态已更新')
+  loadLevels()
+}
+
+const removeLevel = async (level: UserLevel) => {
+  await ElMessageBox.confirm('删除后不可恢复，且仅允许删除无用户引用的等级。', '警告', { type: 'warning' })
+  await deleteUserLevel(level.id)
+  ElMessage.success('删除成功')
+  loadLevels()
+}
+
+const openMatrix = async (level: UserLevel) => {
+  currentLevel.value = level
+  matrixDialogVisible.value = true
+  matrixLoading.value = true
+  try {
+    discountList.value = await getUserLevelDiscounts(level.id) || []
+  } finally {
+    matrixLoading.value = false
+  }
+}
+
+const syncMissingFlag = (item: LevelDiscount) => {
+  item.missing = item.rate == null
+}
+
+const saveMatrix = async () => {
+  if (!currentLevel.value) return
+  discountList.value.forEach(syncMissingFlag)
+  const items = discountList.value
+    .filter(item => item.rate != null)
+    .map(item => ({ categoryId: item.categoryId, rate: Number(item.rate) }))
+  if (!items.length) {
+    ElMessage.warning('请至少配置一个分类倍率')
+    return
+  }
+  await runAfterImpactConfirmation(
+    () => confirmPricingImpact({
+      level: currentLevel.value!,
+      categoryCount: discountList.value.length,
+      configuredCategoryCount: items.length,
+      title: '确认保存倍率矩阵',
+      description: '未配置分类将按零售倍率 1.0000 兜底。保存后将立即影响该等级用户的商品取价。',
+      confirmButtonText: '确认保存'
+    }),
+    async () => {
+      matrixLoading.value = true
+      try {
+        await saveUserLevelDiscounts(currentLevel.value!.id, items)
+        ElMessage.success('倍率矩阵已保存')
+        discountList.value = await getUserLevelDiscounts(currentLevel.value!.id) || []
+        loadLevels()
+      } finally {
+        matrixLoading.value = false
+      }
+    }
+  )
+}
+
+const fillAll = async () => {
+  if (!currentLevel.value) return
+  let value: string
+  try {
+    ({ value } = await ElMessageBox.prompt('请输入要填充到全部分类的倍率，范围 (0, 1]', '一键填充', {
+      inputPattern: /^(0(\.\d{1,4})?|1(\.0{1,4})?)$/,
+      inputErrorMessage: '请输入 0 到 1 之间的倍率，最多四位小数'
+    }))
+  } catch {
+    return
+  }
+  const rate = Number(value)
+  if (rate <= 0 || rate > 1) {
+    ElMessage.warning('倍率必须在 (0, 1] 之间')
+    return
+  }
+  await runAfterImpactConfirmation(
+    () => confirmPricingImpact({
+      level: currentLevel.value!,
+      categoryCount: discountList.value.length,
+      configuredCategoryCount: discountList.value.length,
+      title: '确认一键填充',
+      description: `将把全部分类倍率覆盖为 ${rate.toFixed(4)}，保存后将立即影响该等级用户的商品取价。`,
+      confirmButtonText: '确认填充'
+    }),
+    async () => {
+      await fillUserLevelDiscounts(currentLevel.value!.id, rate)
+      ElMessage.success('已填充全部分类')
+      discountList.value = await getUserLevelDiscounts(currentLevel.value!.id) || []
+    }
+  )
+}
+
+const openCopyDialog = () => {
+  copySourceLevelId.value = null
+  copySourceMatrix.value = []
+  copySourceLoaded.value = false
+  copyVisible.value = true
+}
+
+const loadCopySourceMatrix = async (sourceLevelId: number) => {
+  copySourceLoading.value = true
+  copySourceLoaded.value = false
+  try {
+    copySourceMatrix.value = await getUserLevelDiscounts(sourceLevelId) || []
+    copySourceLoaded.value = true
+  } finally {
+    copySourceLoading.value = false
+  }
+}
+
+const copyMatrix = async () => {
+  if (!currentLevel.value || !copySourceLevelId.value) {
+    ElMessage.warning('请选择来源等级')
+    return
+  }
+  const sourceLevel = levelList.value.find(level => level.id === copySourceLevelId.value)
+  if (!sourceLevel) {
+    ElMessage.warning('来源等级不存在，请重新选择')
+    return
+  }
+  if (copySourceLoading.value || !copySourceLoaded.value) {
+    ElMessage.warning('来源等级矩阵仍在加载，请稍后重试')
+    return
+  }
+  const sourceStats = getMatrixStats(copySourceMatrix.value)
+  if (!canApplyCopiedMatrix(currentLevel.value.status, sourceStats)) {
+    ElMessage.warning('来源等级存在缺口，不能复制到已启用等级')
+    return
+  }
+  await runAfterImpactConfirmation(
+    () => confirmPricingImpact({
+      level: currentLevel.value!,
+      categoryCount: sourceStats.total,
+      configuredCategoryCount: sourceStats.configured,
+      title: '确认复制倍率矩阵',
+      description: '目标等级现有倍率将被来源等级的已配置矩阵替换，来源缺失的分类仍会保持缺口。',
+      confirmButtonText: '确认复制',
+      sourceLevel
+    }),
+    async () => {
+      matrixLoading.value = true
+      try {
+        await copyUserLevelDiscounts(currentLevel.value!.id, copySourceLevelId.value!)
+        ElMessage.success(sourceStats.missing ? '复制完成，缺口仍需手动补齐' : '复制完成')
+        copyVisible.value = false
+        discountList.value = await getUserLevelDiscounts(currentLevel.value!.id) || []
+      } finally {
+        matrixLoading.value = false
+      }
+    }
+  )
+}
+
+onMounted(() => {
+  loadLevels()
+  loadCategories()
+})
+</script>
+
+<style scoped>
+.user-level-management {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-lg);
+}
+
+.header-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.page-title {
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.page-desc {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.level-name {
+  margin-right: 8px;
+  font-weight: 500;
+}
+
+.matrix-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.matrix-tip {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+</style>

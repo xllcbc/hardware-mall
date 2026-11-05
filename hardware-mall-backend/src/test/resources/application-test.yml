@@ -11,8 +11,8 @@ spring:
       mode: always
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/*.xml
@@ -90,6 +90,14 @@ aliyun:
 
 cors:
   allowed-origins: http://localhost:*
+
+product:
+  cache:
+    lock-wait-ms: 500
+
+stock:
+  cache:
+    lock-wait-ms: 100
 
 dingtalk:
   webhook: ""

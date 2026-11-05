@@ -5,20 +5,28 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
+import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.exception.BusinessException;
+import com.example.mystore.common.exception.PriceChangedException;
 import com.example.mystore.entity.db.*;
+import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;
+import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.PayService;
+import com.example.mystore.service.PriceService;
+import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.SkuService;
+import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
-import com.example.mystore.event.StockSyncEvent;
+import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
+import com.example.mystore.util.UserContext;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +35,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -35,6 +44,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -80,6 +90,13 @@ class OrderServiceImplTest {
     private PaymentRecordMapper paymentRecordMapper;
     @Mock
     private WechatOrderShippingService wechatOrderShippingService;
+    @Mock
+    private PricingRuleService pricingRuleService;
+    @Mock
+    private UserLevelService userLevelService;
+
+    @Spy
+    private PriceService priceService = new PriceServiceImpl();
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -127,8 +144,14 @@ class OrderServiceImplTest {
 
         spu = new Spu();
         spu.setId(1L);
+        spu.setCategoryId(1L);
         spu.setName("防盗门锁 C级");
         spu.setSalesCount(52);
+        spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        lenient().when(pricingRuleService.rateFor(any(), any(), anyBoolean()))
+                .thenReturn(BigDecimal.ONE);
+        lenient().when(pricingRuleService.resolveRetailLevelId()).thenReturn(1L);
+        lenient().when(userLevelService.getName(any())).thenReturn("零售");
     }
 
     @Test
@@ -187,7 +210,7 @@ class OrderServiceImplTest {
     void testCreateOrder_StockInsufficient() {
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(skuService.getSkuById(5L)).thenReturn(sku);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
         when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
 
         CreateOrderRequest.CartItem item = new CreateOrderRequest.CartItem();
@@ -241,7 +264,7 @@ class OrderServiceImplTest {
         when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(skuService.getSkuById(5L)).thenReturn(sku);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
 
         CreateOrderRequest.CartItem item = new CreateOrderRequest.CartItem();
         item.setSkuId(5L);
@@ -256,6 +279,123 @@ class OrderServiceImplTest {
                 .hasMessageContaining("库存不足");
 
         verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "stock-key");
+    }
+
+    @Test
+    void previewOrder_customLevel_returnsServerSettlementWithoutWriting() {
+        UserContext.setLevelId(2L);
+        try {
+            when(pricingRuleService.rateFor(2L, 1L, false))
+                    .thenReturn(new BigDecimal("0.8000"));
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+            CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+            line.setSkuId(5L);
+            line.setQuantity(2);
+            CheckoutPreviewRequest request = new CheckoutPreviewRequest();
+            request.setItems(List.of(line));
+
+            CheckoutPreviewVO preview = orderService.previewOrder(request);
+
+            assertThat(preview.getItems()).hasSize(1);
+            assertThat(preview.getItems().get(0).getPrice()).isEqualByComparingTo("175.20");
+            assertThat(preview.getItems().get(0).getSubtotal()).isEqualByComparingTo("350.40");
+            assertThat(preview.getGoodsAmount()).isEqualByComparingTo("350.40");
+            assertThat(preview.getFreightAmount()).isEqualByComparingTo("0.00");
+            assertThat(preview.getPayAmount()).isEqualByComparingTo("350.40");
+            verify(orderMapper, never()).insert(any(Order.class));
+            verify(cartMapper, never()).update(any(), any());
+            verify(skuService, never()).deductStock(anyLong(), anyInt());
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void createOrder_priceChanged_returnsLatestPreviewAndReleasesIdempotencyKey() {
+        UserContext.setLevelId(2L);
+        try {
+            when(pricingRuleService.rateFor(2L, 1L, false))
+                    .thenReturn(new BigDecimal("0.8000"));
+            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+            CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+            line.setSkuId(5L);
+            line.setQuantity(2);
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setItems(List.of(line));
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+            request.setExpectedPayAmount(new BigDecimal("300.00"));
+
+            assertThatThrownBy(() -> orderService.createOrder(2L, request, "changed-key"))
+                    .isInstanceOfSatisfying(PriceChangedException.class, error -> {
+                        assertThat(error.getPriceChange().getExpectedPayAmount())
+                                .isEqualByComparingTo("300.00");
+                        assertThat(error.getPriceChange().getPreview().getItems().get(0).getPrice())
+                                .isEqualByComparingTo("175.20");
+                        assertThat(error.getPriceChange().getPreview().getPayAmount())
+                                .isEqualByComparingTo("350.40");
+                    });
+
+            verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "changed-key");
+            verify(skuService, never()).deductStock(anyLong(), anyInt());
+            verify(orderMapper, never()).insert(any(Order.class));
+            verify(cartMapper, never()).update(any(), any());
+            verify(applicationEventPublisher, never()).publishEvent(any());
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void createOrder_stockDeductionFailure_abortsBeforeOrderAndReleasesIdempotencyKey() {
+        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+
+        Sku secondSku = new Sku();
+        secondSku.setId(6L);
+        secondSku.setSpuId(2L);
+        secondSku.setPrice(new BigDecimal("99.00"));
+        secondSku.setStock(10);
+        secondSku.setStatus(1);
+
+        Spu secondSpu = new Spu();
+        secondSpu.setId(2L);
+        secondSpu.setCategoryId(1L);
+        secondSpu.setName("不锈钢合页");
+        secondSpu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku, 6L, secondSku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu, secondSpu));
+        when(skuService.deductStock(5L, 2)).thenReturn(true);
+        when(skuService.deductStock(6L, 3)).thenReturn(false);
+
+        CreateOrderRequest.CartItem first = new CreateOrderRequest.CartItem();
+        first.setSkuId(5L);
+        first.setQuantity(2);
+        CreateOrderRequest.CartItem second = new CreateOrderRequest.CartItem();
+        second.setSkuId(6L);
+        second.setQuantity(3);
+        CreateOrderRequest request = new CreateOrderRequest();
+        request.setItems(List.of(first, second));
+        request.setAddressId(1L);
+        request.setLogisticsId(1L);
+        request.setExpectedPayAmount(new BigDecimal("735.00"));
+
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "rollback-key"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("库存扣减失败");
+
+        verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "rollback-key");
+        verify(orderMapper, never()).insert(any(Order.class));
+        verify(cartMapper, never()).update(any(), any());
     }
 
     @Test
@@ -482,7 +622,7 @@ class OrderServiceImplTest {
         when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(skuService.getSkuById(5L)).thenReturn(sku);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
         when(spuMapper.selectBatchIds(any())).thenReturn(Collections.emptyList());
 
         CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
@@ -536,8 +676,7 @@ class OrderServiceImplTest {
         spuB.setName("不锈钢合页");
         spuB.setImages(java.util.List.of("img-b.jpg"));
 
-        when(skuService.getSkuById(5L)).thenReturn(skuA);
-        when(skuService.getSkuById(6L)).thenReturn(skuB);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, skuA, 6L, skuB));
         when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(spuA, spuB));
         when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
         when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
@@ -566,6 +705,7 @@ class OrderServiceImplTest {
         request.setAddressId(1L);
         request.setLogisticsId(1L);
         request.setItems(java.util.List.of(i1, i2));
+        request.setExpectedPayAmount(new BigDecimal("735.00"));
 
         OrderVO vo = orderService.createOrder(2L, request, "k");
 
@@ -593,6 +733,238 @@ class OrderServiceImplTest {
         assertThat(second.getProductImage()).isEqualTo("img-b.jpg");
         assertThat(second.getQuantity()).isEqualTo(3);
         assertThat(second.getSubtotal()).isEqualByComparingTo("297.00");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void customLevel_getsDiscountedPriceAndSnapshot() {
+        UserContext.setLevelId(2L);
+        try {
+            when(pricingRuleService.rateFor(2L, 1L, false)).thenReturn(new BigDecimal("0.8000"));
+            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+
+            Sku pricedSku = new Sku();
+            pricedSku.setId(5L);
+            pricedSku.setSpuId(1L);
+            pricedSku.setPrice(new BigDecimal("25.00"));
+            pricedSku.setStock(40);
+            pricedSku.setStatus(1);
+
+            Spu pricedSpu = new Spu();
+            pricedSpu.setId(1L);
+            pricedSpu.setCategoryId(1L);
+            pricedSpu.setName("防盗门锁 C级");
+            pricedSpu.setImages(java.util.List.of("img-a.jpg"));
+            pricedSpu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, pricedSku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));
+            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+                inv.getArgument(0, Order.class).setId(100L);
+                return 1;
+            });
+            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
+                Order o = new Order();
+                o.setId(100L);
+                o.setUserId(2L);
+                o.setOrderNo("SO1");
+                o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+                o.setAddressId(1L);
+                o.setLogisticsId(1L);
+                return o;
+            });
+            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+            CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
+            i1.setSkuId(5L);
+            i1.setQuantity(2);
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+            request.setItems(java.util.List.of(i1));
+            request.setExpectedPayAmount(new BigDecimal("40.00"));
+
+            orderService.createOrder(2L, request, "k");
+
+            ArgumentCaptor<java.util.List<OrderItem>> captor = ArgumentCaptor.forClass(java.util.List.class);
+            verify(orderItemMapper).insertBatch(captor.capture());
+            OrderItem item = captor.getValue().get(0);
+            assertThat(item.getPrice()).isEqualByComparingTo("20.00");
+            assertThat(item.getLevelId()).isEqualTo(2L);
+            assertThat(item.getDiscountRate()).isEqualByComparingTo("0.8000");
+            assertThat(item.getSubtotal()).isEqualByComparingTo("40.00");
+
+            ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
+            verify(orderMapper).insert(orderCaptor.capture());
+            assertThat(orderCaptor.getValue().getPayAmount()).isEqualByComparingTo("40.00");
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void retailUser_getsRetailPriceAndSnapshot() {
+        UserContext.setLevelId(1L);
+        try {
+            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+
+            Sku pricedSku = new Sku();
+            pricedSku.setId(5L);
+            pricedSku.setSpuId(1L);
+            pricedSku.setPrice(new BigDecimal("25.00"));
+            pricedSku.setStock(40);
+            pricedSku.setStatus(1);
+
+            Spu pricedSpu = new Spu();
+            pricedSpu.setId(1L);
+            pricedSpu.setCategoryId(1L);
+            pricedSpu.setName("防盗门锁 C级");
+            pricedSpu.setImages(java.util.List.of("img-a.jpg"));
+            pricedSpu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, pricedSku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));
+            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+                inv.getArgument(0, Order.class).setId(100L);
+                return 1;
+            });
+            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
+                Order o = new Order();
+                o.setId(100L);
+                o.setUserId(2L);
+                o.setOrderNo("SO1");
+                o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+                o.setAddressId(1L);
+                o.setLogisticsId(1L);
+                return o;
+            });
+            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+            CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
+            i1.setSkuId(5L);
+            i1.setQuantity(2);
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+            request.setItems(java.util.List.of(i1));
+            request.setExpectedPayAmount(new BigDecimal("50.00"));
+
+            orderService.createOrder(2L, request, "k");
+
+            ArgumentCaptor<java.util.List<OrderItem>> captor = ArgumentCaptor.forClass(java.util.List.class);
+            verify(orderItemMapper).insertBatch(captor.capture());
+            OrderItem item = captor.getValue().get(0);
+            assertThat(item.getPrice()).isEqualByComparingTo("25.00");
+            assertThat(item.getLevelId()).isEqualTo(1L);
+            assertThat(item.getDiscountRate()).isEqualByComparingTo("1.0000");
+            assertThat(item.getSubtotal()).isEqualByComparingTo("50.00");
+
+            ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
+            verify(orderMapper).insert(orderCaptor.capture());
+            assertThat(orderCaptor.getValue().getPayAmount()).isEqualByComparingTo("50.00");
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void orderSnapshot_isVisibleToAdminOnly() {
+        Order order = new Order();
+        order.setId(100L);
+        order.setOrderNo("SO-SNAPSHOT");
+        order.setUserId(2L);
+        order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+        order.setAddressId(1L);
+        order.setLogisticsId(1L);
+        when(orderMapper.selectOne(any())).thenReturn(order);
+        when(orderMapper.selectById(100L)).thenReturn(order);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(paymentRecordMapper.selectOne(any())).thenReturn(null);
+
+        OrderItem item = new OrderItem();
+        item.setId(1L);
+        item.setOrderId(100L);
+        item.setSkuId(5L);
+        item.setSpuId(1L);
+        item.setProductName("防盗门锁 C级");
+        item.setPrice(new BigDecimal("20.00"));
+        item.setLevelId(2L);
+        item.setLevelName("批发A");
+        item.setDiscountRate(new BigDecimal("0.8000"));
+        item.setQuantity(1);
+        item.setSubtotal(new BigDecimal("20.00"));
+        when(orderItemMapper.selectList(any())).thenReturn(List.of(item));
+
+        OrderVO userView = orderService.getOrderByOrderNo("SO-SNAPSHOT");
+        assertThat(userView.getItems().get(0).getLevelId()).isNull();
+        assertThat(userView.getItems().get(0).getLevelName()).isNull();
+        assertThat(userView.getItems().get(0).getDiscountRate()).isNull();
+
+        OrderVO adminView = orderService.getAdminOrderById(100L);
+        assertThat(adminView.getItems().get(0).getLevelId()).isEqualTo(2L);
+        assertThat(adminView.getItems().get(0).getLevelName()).isEqualTo("批发A");
+        assertThat(adminView.getItems().get(0).getDiscountRate()).isEqualByComparingTo("0.8000");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void order_usesBatchSkuLookupForDuplicateLines() {
+        UserContext.setLevelId(1L);
+        try {
+            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(spu));
+            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+                inv.getArgument(0, Order.class).setId(100L);
+                return 1;
+            });
+            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
+                Order order = new Order();
+                order.setId(100L);
+                order.setUserId(2L);
+                order.setOrderNo("SO2");
+                order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+                order.setAddressId(1L);
+                order.setLogisticsId(1L);
+                return order;
+            });
+            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+            CreateOrderRequest.CartItem first = new CreateOrderRequest.CartItem();
+            first.setSkuId(5L);
+            first.setQuantity(1);
+            CreateOrderRequest.CartItem second = new CreateOrderRequest.CartItem();
+            second.setSkuId(5L);
+            second.setQuantity(2);
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+            request.setItems(java.util.List.of(first, second));
+            request.setExpectedPayAmount(new BigDecimal("657.00"));
+
+            orderService.createOrder(2L, request, "batch-key");
+
+            verify(skuService, times(1)).getSkuMapByIds(any());
+            verify(skuService, never()).getSkuById(any());
+            ArgumentCaptor<java.util.List<OrderItem>> captor = ArgumentCaptor.forClass(java.util.List.class);
+            verify(orderItemMapper).insertBatch(captor.capture());
+            assertThat(captor.getValue()).hasSize(2);
+            assertThat(captor.getValue().get(0).getSkuId()).isEqualTo(5L);
+            assertThat(captor.getValue().get(1).getSkuId()).isEqualTo(5L);
+        } finally {
+            UserContext.clear();
+        }
     }
 
     @Test
@@ -725,7 +1097,7 @@ class OrderServiceImplTest {
 
         // 库存恢复已迁到退款回调(6→7 确认成功后), refundOrder 不再还库存不发事件
         verify(skuService, never()).restoreStock(any(), any());
-        verify(applicationEventPublisher, never()).publishEvent(any(StockSyncEvent.class));
+        verify(applicationEventPublisher, never()).publishEvent(any(StockCacheEvent.class));
     }
 
     @Test

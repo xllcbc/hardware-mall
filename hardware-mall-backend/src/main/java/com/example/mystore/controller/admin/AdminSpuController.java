@@ -2,10 +2,16 @@ package com.example.mystore.controller.admin;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.result.Result;
+import com.example.mystore.common.constant.UserLevelStatusConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Category;
 import com.example.mystore.entity.db.Spu;
+import com.example.mystore.entity.db.UserLevel;
+import com.example.mystore.entity.vo.AdminProductPricingVO;
 import com.example.mystore.service.CategoryService;
 import com.example.mystore.service.SpuService;
+import com.example.mystore.service.UserLevelService;
+import com.example.mystore.util.PageUtil;
 import com.example.mystore.annotation.RequireAdmin;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +25,7 @@ public class AdminSpuController {
 
     private final CategoryService categoryService;
     private final SpuService spuService;
+    private final UserLevelService userLevelService;
 
     @GetMapping("/category/list")
     public Result<Page<Category>> getCategoryList(
@@ -63,6 +70,24 @@ public class AdminSpuController {
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "20") Integer limit) {
         return Result.success(spuService.getSpuPage(categoryId, keyword, page, limit, status));
+    }
+
+    @GetMapping("/pricing-list")
+    public Result<Page<AdminProductPricingVO>> getPricingList(
+            @RequestParam(required = false) Long levelId,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer status,
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "20") Integer limit) {
+        if (levelId != null) {
+            UserLevel level = userLevelService.getById(levelId);
+            if (!Integer.valueOf(UserLevelStatusConstants.STATUS_ENABLED).equals(level.getStatus())) {
+                throw new BusinessException("价格视角等级未启用");
+            }
+        }
+        return Result.success(spuService.getAdminProductPricingPage(
+                levelId, categoryId, keyword, status, page, PageUtil.clampLimit(limit, 20, 50)));
     }
 
     @GetMapping("/{id}")

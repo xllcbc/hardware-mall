@@ -21,6 +21,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
+@org.junit.jupiter.api.Tag("h2")
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class AdminAuthControllerTest {

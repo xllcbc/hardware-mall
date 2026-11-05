@@ -1,5 +1,5 @@
 import request from '@/utils/request'
-import type { Order } from '@/types'
+import type { CheckoutPreview, Order } from '@/types'
 
 interface PageResult<T> {
   records: T[]
@@ -12,7 +12,12 @@ export interface CreateOrderData {
   items: { skuId: number; quantity: number }[]
   addressId: number
   logisticsId: number
+  expectedPayAmount: number
   buyerRemark?: string
+}
+
+export const getCheckoutPreview = (data: { items: { skuId: number; quantity: number }[] }) => {
+  return request.post<CheckoutPreview>('/user/order/preview', data)
 }
 
 export const createOrder = (data: CreateOrderData, idemKey: string) => {

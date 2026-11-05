@@ -5,6 +5,7 @@ import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,8 +72,42 @@ class CreateOrderRequestValidationTest {
         ci.setQuantity(1);
         req.setAddressId(1L);
         req.setLogisticsId(1L);
+        req.setExpectedPayAmount(new BigDecimal("10.00"));
         req.setBuyerRemark("限".repeat(500));
 
         assertThat(validator.validate(req)).isEmpty();
+    }
+
+    @Test
+    void missingExpectedPayAmount_shouldViolate() {
+        CreateOrderRequest req = new CreateOrderRequest();
+        CreateOrderRequest.CartItem ci = new CreateOrderRequest.CartItem();
+        ci.setSkuId(1L);
+        ci.setQuantity(1);
+        req.setItems(java.util.List.of(ci));
+        req.setAddressId(1L);
+        req.setLogisticsId(1L);
+
+        Set<ConstraintViolation<CreateOrderRequest>> violations = validator.validate(req);
+
+        assertThat(violations.stream().map(c -> c.getPropertyPath().toString()))
+                .contains("expectedPayAmount");
+    }
+
+    @Test
+    void negativeExpectedPayAmount_shouldViolate() {
+        CreateOrderRequest req = new CreateOrderRequest();
+        CreateOrderRequest.CartItem ci = new CreateOrderRequest.CartItem();
+        ci.setSkuId(1L);
+        ci.setQuantity(1);
+        req.setItems(java.util.List.of(ci));
+        req.setAddressId(1L);
+        req.setLogisticsId(1L);
+        req.setExpectedPayAmount(new BigDecimal("-0.01"));
+
+        Set<ConstraintViolation<CreateOrderRequest>> violations = validator.validate(req);
+
+        assertThat(violations.stream().map(c -> c.getPropertyPath().toString()))
+                .contains("expectedPayAmount");
     }
 }

@@ -1,12 +1,9 @@
 package com.example.mystore.controller.user;
 
 import com.example.mystore.annotation.RateLimit;
-import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.result.Result;
 import com.example.mystore.entity.db.User;
 import com.example.mystore.service.UserService;
-import com.example.mystore.util.JwtUtil;
-import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.UserContext;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,29 +18,18 @@ import java.util.Map;
 public class UserController {
 
     private final UserService userService;
-    private final JwtUtil jwtUtil;
-    private final RedisUtil redisUtil;
 
     @PostMapping("/login")
     @RateLimit(key = "user:login", count = 10, time = 60)
     public Result<Map<String, Object>> login(@RequestBody Map<String, String> params) {
         String code = params.get("code");
         User user = userService.login(code);
-
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("userId", user.getId());
-        claims.put("role", user.getRole());
-        String token = jwtUtil.generateToken(claims);
-
-        redisUtil.sAdd(RedisConstants.PREFIX_USER_TOKENS + user.getId(), token);
-
-        if (user.getOpenid() != null) {
-            user.setOpenid(null);
-        }
+        String token = userService.issueLoginToken(user.getId());
+        User userInfo = userService.getUserInfo(user.getId());
 
         Map<String, Object> data = new HashMap<>();
         data.put("token", token);
-        data.put("userInfo", user);
+        data.put("userInfo", userInfo);
         return Result.success(data);
     }
 

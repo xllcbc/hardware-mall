@@ -36,6 +36,8 @@ public class Spu {
 
     private Integer isRecommend;
 
+    private Integer excludeDiscount;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;

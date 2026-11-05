@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
+@org.junit.jupiter.api.Tag("h2")
 @ActiveProfiles("test")
 @Sql(scripts = "/db/schema-test.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
 @Transactional

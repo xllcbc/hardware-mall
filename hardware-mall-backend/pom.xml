@@ -22,6 +22,7 @@
         <java.version>17</java.version>
         <mybatis-plus.version>3.5.7</mybatis-plus.version>
         <jjwt.version>0.12.6</jjwt.version>
+        <test.groups>!integration</test.groups>
     </properties>
 
     <dependencies>
@@ -180,6 +181,34 @@
                     </excludes>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <groups>${test.groups}</groups>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>unit-tests</id>
+            <properties>
+                <test.groups>!integration &amp; !h2</test.groups>
+            </properties>
+        </profile>
+        <profile>
+            <id>h2-tests</id>
+            <properties>
+                <test.groups>h2</test.groups>
+            </properties>
+        </profile>
+        <profile>
+            <id>integration-tests</id>
+            <properties>
+                <test.groups>integration</test.groups>
+            </properties>
+        </profile>
+    </profiles>
 </project>

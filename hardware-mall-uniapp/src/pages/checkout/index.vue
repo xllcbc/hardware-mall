@@ -25,6 +25,7 @@
           <text class="items-title">商品清单</text>
           <text class="items-count">共{{ orderItems.length }}件</text>
         </view>
+        <view v-if="previewLoading" class="items-loading">正在计算结算金额...</view>
         <view class="item" v-for="item in orderItems" :key="item.skuId || item.productId">
           <image class="item-image" :src="item.productImage || '/static/images/placeholder.svg'" mode="aspectFill" lazy-load />
           <view class="item-info">
@@ -73,7 +74,9 @@
         </view>
       </view>
       <view class="footer-right">
-        <view class="pay-btn" @tap="submitOrder">提交订单</view>
+        <view class="pay-btn" :class="{ disabled: previewLoading || !preview }" @tap="submitOrder">
+          {{ previewLoading ? '计算中...' : '提交订单' }}
+        </view>
       </view>
     </view>
   </view>
@@ -87,10 +90,12 @@ import { usePreOrderStore } from '@/stores/preOrder'
 import { useUserStore } from '@/stores/user'
 import { getAddressList } from '@/api/address'
 import { getLogisticsList } from '@/api/logistics'
-import { createOrder, getOrderDetail, getIdempotencyToken } from '@/api/order'
+import { createOrder, getCheckoutPreview, getOrderDetail, getIdempotencyToken } from '@/api/order'
 import { prepayOrder } from '@/api/pay'
+import { ApiError, API_CODE_PRICE_CHANGED } from '@/utils/request'
+import { decidePriceChange, shouldBlockPayment } from '@/utils/checkoutPricing'
 import { requireLogin } from '@/utils/auth'
-import type { Address, Logistics } from '@/types'
+import type { Address, CheckoutPreview, Logistics } from '@/types'
 
 const cartStore = useCartStore()
 const preOrderStore = usePreOrderStore()
@@ -102,36 +107,30 @@ const selectedLogistics = ref<Logistics | null>(null)
 const buyerRemark = ref('')
 const submitted = ref(false)
 const idemKey = ref('')
+const preview = ref<CheckoutPreview | null>(null)
+const previewLoading = ref(false)
 
 const isDirectBuy = computed(() => preOrderStore.item !== null)
 
-const orderItems = computed(() => {
+const requestItems = computed(() => {
   if (isDirectBuy.value) {
     const item = preOrderStore.item
     if (!item) return []
     return [{
       skuId: item.skuId,
-      productId: item.productId,
-      productName: item.productName,
-      productImage: item.productImage,
-      spec: item.spec,
-      price: item.price,
-      quantity: item.quantity,
-      subtotal: item.price * item.quantity
+      quantity: item.quantity
     }]
   }
-  return cartStore.selectedItems
+  return cartStore.selectedItems.map(item => ({
+    skuId: item.skuId,
+    quantity: item.quantity
+  }))
 })
 
-const goodsAmount = computed(() =>
-  orderItems.value.reduce((sum, item) => sum + item.subtotal, 0)
-)
-
-const freightAmount = computed(() => {
-  return 0
-})
-
-const payAmount = computed(() => goodsAmount.value + freightAmount.value)
+const orderItems = computed(() => preview.value?.items ?? [])
+const goodsAmount = computed(() => preview.value?.goodsAmount ?? 0)
+const freightAmount = computed(() => preview.value?.freightAmount ?? 0)
+const payAmount = computed(() => preview.value?.payAmount ?? 0)
 
 const formatPrice = (price: number) => {
   return price.toFixed(2)
@@ -171,11 +170,29 @@ const loadLogistics = async () => {
   }
 }
 
+const refreshPreview = async () => {
+  const items = requestItems.value
+  if (!items.length) {
+    preview.value = null
+    return
+  }
+  previewLoading.value = true
+  try {
+    preview.value = await getCheckoutPreview({ items })
+  } catch (e) {
+    preview.value = null
+    console.error('加载结算预览失败:', e)
+  } finally {
+    previewLoading.value = false
+  }
+}
+
 onShow(() => {
   // 未登录不请求结算接口, 不强制跳转(审核合规); 需要结算时再走 requireLogin
   if (!userStore.isLoggedIn) return
   loadAddresses()
   loadLogistics()
+  refreshPreview()
 })
 
 const selectAddress = () => {
@@ -193,7 +210,7 @@ const submitOrder = async () => {
     uni.showToast({ title: '请选择收货地址', icon: 'none' })
     return
   }
-  if (!isDirectBuy.value && orderItems.value.length === 0) {
+  if (!isDirectBuy.value && requestItems.value.length === 0) {
     uni.showToast({ title: '请先在购物车选择商品', icon: 'none' })
     setTimeout(() => {
       uni.redirectTo({ url: '/pages/cart/index' })
@@ -204,17 +221,25 @@ const submitOrder = async () => {
     uni.showToast({ title: '暂无可用配送方式', icon: 'none' })
     return
   }
+  if (previewLoading.value) return
+  if (!preview.value) {
+    await refreshPreview()
+    if (!preview.value) {
+      uni.showToast({ title: '结算金额加载失败，请稍后重试', icon: 'none' })
+      return
+    }
+  }
 
   submitted.value = true
+  const expectedPayAmount = preview.value.payAmount
   try {
-    const items = isDirectBuy.value
-      ? [{ skuId: preOrderStore.item.skuId, quantity: preOrderStore.item.quantity }]
-      : orderItems.value.map(item => ({ skuId: item.skuId, quantity: item.quantity }))
+    const items = requestItems.value
 
     const orderData = {
       items,
       addressId: selectedAddress.value.id,
       logisticsId: selectedLogistics.value.id,
+      expectedPayAmount,
       buyerRemark: buyerRemark.value
     }
 
@@ -226,10 +251,21 @@ const submitOrder = async () => {
 
     if (isDirectBuy.value) {
       preOrderStore.clearItem()
+    } else {
+      cartStore.clearSelected()
     }
 
-    if (!isDirectBuy.value) {
-      cartStore.clearSelected()
+    if (shouldBlockPayment(order.payAmount, expectedPayAmount)) {
+      submitted.value = false
+      uni.showModal({
+        title: '订单金额异常',
+        content: `订单应付 ¥${formatPrice(order.payAmount)}，确认金额 ¥${formatPrice(expectedPayAmount)}，已停止支付。`,
+        showCancel: false,
+        success: () => {
+          uni.redirectTo({ url: `/pages/order/detail?id=${order.id}` })
+        }
+      })
+      return
     }
 
     try {
@@ -271,6 +307,30 @@ const submitOrder = async () => {
       }, 1500)
     }
   } catch (e: any) {
+    if (e instanceof ApiError
+      && e.code === API_CODE_PRICE_CHANGED
+      && e.data?.preview) {
+      const latestPreview = e.data.preview as CheckoutPreview
+      const latestAmount = Number(latestPreview.payAmount)
+      const previousAmount = Number(e.data.expectedPayAmount ?? expectedPayAmount)
+      submitted.value = false
+      idemKey.value = ''
+      preview.value = latestPreview
+      uni.showModal({
+        title: '商品价格已更新',
+        content: `原应付 ¥${formatPrice(previousAmount)}，最新应付 ¥${formatPrice(latestAmount)}。是否按新金额创建订单？`,
+        confirmText: '确认下单',
+        cancelText: '暂不',
+        success: (res) => {
+          const decision = decidePriceChange(res.confirm, latestPreview)
+          preview.value = decision.preview
+          if (decision.retrySubmit) {
+            void submitOrder()
+          }
+        }
+      })
+      return
+    }
     uni.showToast({ title: e.message || '提交失败', icon: 'none' })
     submitted.value = false
   }
@@ -394,6 +454,12 @@ const formatSpec = (spec: string) => {
 
 .items-count {
   font-size: 24rpx;
+  color: #999999;
+}
+
+.items-loading {
+  padding: 32rpx 24rpx;
+  font-size: 26rpx;
   color: #999999;
 }
 
@@ -556,5 +622,9 @@ const formatSpec = (spec: string) => {
   border-radius: 40rpx;
   font-size: 28rpx;
   font-weight: 500;
+
+  &.disabled {
+    opacity: 0.55;
+  }
 }
 </style>

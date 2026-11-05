@@ -1,6 +1,8 @@
 package com.example.mystore.interceptor;
 
+import com.example.mystore.annotation.OptionalAuth;
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.util.JwtUtil;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.StringUtil;
@@ -8,6 +10,7 @@ import com.example.mystore.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,10 +26,19 @@ public class JwtInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
+
         String token = request.getHeader("Authorization");
         String uri = request.getRequestURI();
 
         if (StringUtil.isEmpty(token)) {
+            if (isOptionalAuth(handler)) {
+                UserContext.setLevelId(null);
+                log.debug("JWT拦截-匿名访问 | URI: {}", uri);
+                return true;
+            }
             log.warn("JWT拦截-Token为空 | URI: {}", uri);
             response.setStatus(401);
             response.setContentType("application/json;charset=UTF-8");
@@ -55,9 +67,19 @@ public class JwtInterceptor implements HandlerInterceptor {
             }
             Long userId = jwtUtil.getUserIdFromToken(token);
             Integer role = jwtUtil.getRoleFromToken(token);
+            Long levelId = jwtUtil.getLevelIdFromToken(token);
+            if (Integer.valueOf(StatusConstants.USER_ROLE_REGULAR).equals(role)
+                    && (levelId == null || levelId <= 0)) {
+                log.warn("JWT拦截-普通用户Token缺少有效等级 | URI: {}", uri);
+                response.setStatus(401);
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write("{\"code\":401,\"message\":\"登录状态已更新，请重新登录\"}");
+                return false;
+            }
             UserContext.setUserId(userId);
             UserContext.setRole(role);
-            log.debug("JWT验证通过 | URI: {} | userId: {} | role: {}", uri, userId, role);
+            UserContext.setLevelId(levelId);
+            log.debug("JWT验证通过 | URI: {} | userId: {} | role: {} | levelId: {}", uri, userId, role, levelId);
             return true;
         } catch (Exception e) {
             log.warn("JWT拦截-Token无效 | URI: {} | 原因: {}", uri, e.getMessage());
@@ -66,6 +88,14 @@ public class JwtInterceptor implements HandlerInterceptor {
             response.getWriter().write("{\"code\":401,\"message\":\"无效的认证信息\"}");
             return false;
         }
+    }
+
+    private boolean isOptionalAuth(Object handler) {
+        if (!(handler instanceof HandlerMethod handlerMethod)) {
+            return false;
+        }
+        return handlerMethod.getBeanType().isAnnotationPresent(OptionalAuth.class)
+                || handlerMethod.getMethodAnnotation(OptionalAuth.class) != null;
     }
 
     @Override

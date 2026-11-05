@@ -1,25 +1,48 @@
 name: deploy-prod
 
 on:
-  push:
+  workflow_run:
+    workflows: [pricing-release-gate]
+    types: [completed]
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      target:
-        description: 'Deploy target (staging|prod)'
-        required: true
-        default: 'prod'
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: hardware-mall-production-release
+  cancel-in-progress: false
 
 jobs:
   deploy:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
     env:
       DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
       DOCKER_NAMESPACE: ${{ secrets.DOCKER_NAMESPACE }}
-      IMAGE_BACKEND: ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-backend:${{ github.sha }}
-      IMAGE_ADMIN: ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-admin:${{ github.sha }}
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+      IMAGE_BACKEND: ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-backend:${{ github.event.workflow_run.head_sha }}
+      IMAGE_ADMIN: ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-admin:${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Verify release gate artifact
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id
+            });
+            if (run.data.conclusion !== 'success' || run.data.head_branch !== 'main') {
+              core.setFailed('Production deploy requires a successful main-branch release gate.');
+            }
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -31,61 +54,124 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build & push backend
-        uses: docker/build-push-action@v5
+      - name: Build and push immutable backend image
+        uses: docker/build-push-action@v6
         with:
           context: ./hardware-mall-backend
           push: true
           provenance: false
           sbom: false
-          tags: |
-            ${{ env.IMAGE_BACKEND }}
-            ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-backend:latest
+          tags: ${{ env.IMAGE_BACKEND }}
 
-      - name: Build & push admin
-        uses: docker/build-push-action@v5
+      - name: Build and push immutable admin image
+        uses: docker/build-push-action@v6
         with:
           context: ./hardware-mall-admin
           push: true
           provenance: false
           sbom: false
-          tags: |
-            ${{ env.IMAGE_ADMIN }}
-            ${{ secrets.DOCKER_REGISTRY }}/${{ secrets.DOCKER_NAMESPACE }}/hardware-mall-admin:latest
+          tags: ${{ env.IMAGE_ADMIN }}
 
-      - name: SCP compose file to server
+      - name: Package release kit
+        run: |
+          tar -czf release-kit.tgz \
+            docker-compose.prod.yml \
+            docs/pricing-release-runbook.md \
+            scripts/pricing-release.sh \
+            scripts/release/smoke.sh \
+            hardware-mall-backend/src/main/resources/db/migration_2026-11-02_multi_level_pricing_release.sql \
+            hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql
+
+      - name: Upload release kit
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          source: docker-compose.prod.yml
+          source: release-kit.tgz
           target: /opt/hardware-mall/
 
-      - name: SSH deploy to server
-        uses: appleboy/ssh-action@v1.0.0
+      - name: Stop writes, migrate, deploy, smoke and auto-rollback
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELEASE_TAG: ${{ github.event.workflow_run.head_sha }}
+          REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
+          NAMESPACE: ${{ secrets.DOCKER_NAMESPACE }}
+          REGISTRY_USER: ${{ secrets.DOCKER_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: RELEASE_TAG,REGISTRY,NAMESPACE,REGISTRY_USER,REGISTRY_PASSWORD
           script: |
-            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY }} -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+            set -euo pipefail
             cd /opt/hardware-mall
-            export IMAGE_TAG=${{ github.sha }}
-            export DOCKER_REGISTRY=${{ secrets.DOCKER_REGISTRY }}
-            export DOCKER_NAMESPACE=${{ secrets.DOCKER_NAMESPACE }}
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
-            sleep 5
-            docker compose -f docker-compose.prod.yml ps
-            for i in $(seq 1 30); do
-              if curl -sf http://localhost:8080/actuator/health; then
-                echo "healthy after ~$((i*5))s"
-                exit 0
+            tar -xzf release-kit.tgz
+            chmod +x scripts/pricing-release.sh scripts/release/smoke.sh
+
+            set -a
+            . ./.env
+            set +a
+
+            export DOCKER_REGISTRY="$REGISTRY"
+            export DOCKER_NAMESPACE="$NAMESPACE"
+            export DB_HOST="${DB_HOST:-127.0.0.1}"
+            export DB_PORT="${DB_PORT:-3306}"
+            export DB_NAME="${DB_NAME:-hardware_mall}"
+            export DB_USERNAME="${RELEASE_DB_USERNAME:-${DB_USERNAME:-hardware_mall}}"
+            export MYSQL_PWD="${RELEASE_MYSQL_PWD:-${MYSQL_PWD:-${DB_PASSWORD:-}}}"
+            export REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+            export REDIS_PORT="${REDIS_PORT:-6379}"
+
+            if [[ -z "${MYSQL_PWD:-}" ]]; then
+              echo "A dedicated release database password is required." >&2
+              exit 1
+            fi
+
+            previous_tag="$(cat .current-image-tag 2>/dev/null || true)"
+            if [[ -z "$previous_tag" ]]; then
+              echo "No previous image tag is recorded; rollback cannot be guaranteed." >&2
+              exit 1
+            fi
+            docker pull "$REGISTRY/$NAMESPACE/hardware-mall-backend:$previous_tag"
+            docker pull "$REGISTRY/$NAMESPACE/hardware-mall-admin:$previous_tag"
+
+            timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+            backup="/secure-backups/pricing-$RELEASE_TAG-$timestamp.sql"
+            rollback() {
+              set +e
+              echo "Release failed; rolling back database, cache and images." >&2
+              if [[ -s "$backup" ]]; then
+                bash scripts/pricing-release.sh restore "$backup"
               fi
-              echo "attempt $i/30: not ready, retry in 5s..."
-              sleep 5
-            done
-            echo "health check failed after 30 attempts"
-            docker compose -f docker-compose.prod.yml logs --tail 200 backend
-            exit 1
+              IMAGE_TAG="$previous_tag" docker compose -f docker-compose.prod.yml up -d backend admin
+              bash scripts/pricing-release.sh clean-cache
+              RELEASE_API_BASE="http://127.0.0.1:8080" RELEASE_ADMIN_BASE="http://127.0.0.1" \
+                bash scripts/release/smoke.sh
+            }
+            trap rollback ERR
+
+            echo "$REGISTRY/$NAMESPACE/hardware-mall-backend:$RELEASE_TAG" > /tmp/backend-image.txt
+            echo "$REGISTRY/$NAMESPACE/hardware-mall-admin:$RELEASE_TAG" > /tmp/admin-image.txt
+
+            docker compose -f docker-compose.prod.yml stop admin backend
+            bash scripts/pricing-release.sh backup "$backup"
+            bash scripts/pricing-release.sh migrate "$backup"
+            bash scripts/pricing-release.sh verify
+
+            IMAGE_TAG="$RELEASE_TAG" docker compose -f docker-compose.prod.yml pull backend admin
+            IMAGE_TAG="$RELEASE_TAG" docker compose -f docker-compose.prod.yml up -d backend admin
+            bash scripts/pricing-release.sh clean-cache
+            RELEASE_API_BASE="http://127.0.0.1:8080" RELEASE_ADMIN_BASE="http://127.0.0.1" \
+              bash scripts/release/smoke.sh
+
+            printf '%s\n' "$RELEASE_TAG" > .current-image-tag
+            {
+              echo "release_tag=$RELEASE_TAG"
+              echo "previous_tag=$previous_tag"
+              echo "backup=$backup"
+              echo "completed_at=$timestamp"
+            } > "release-evidence-$RELEASE_TAG.txt"
+            trap - ERR
+            echo "Production pricing release completed: $RELEASE_TAG"

@@ -46,6 +46,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest
+@org.junit.jupiter.api.Tag("h2")
 @ActiveProfiles("test")
 @Transactional
 @Sql(scripts = "/db/schema-test.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)

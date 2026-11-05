@@ -126,6 +126,24 @@ export interface OrderItem {
   subtotal: number
 }
 
+export interface CheckoutItem {
+  skuId: number
+  productId: number
+  productName: string
+  productImage?: string
+  spec?: string
+  price: number
+  quantity: number
+  subtotal: number
+}
+
+export interface CheckoutPreview {
+  items: CheckoutItem[]
+  goodsAmount: number
+  freightAmount: number
+  payAmount: number
+}
+
 export interface Order {
   id: number
   orderNo: string
@@ -160,4 +178,5 @@ export interface UserInfo {
   avatarUrl?: string
   phone?: string
   role: number
+  levelId?: number
 }
