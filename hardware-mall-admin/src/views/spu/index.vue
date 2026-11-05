@@ -514,7 +514,7 @@
             max-height="480"
             class="sku-table"
           >
-            <el-table-column label="保留" width="68" align="center">
+            <el-table-column label="保留" width="68" align="center" header-align="center">
               <template #default="{ row }">
                 <el-checkbox v-model="row.retained" aria-label="保留该组合" />
               </template>
@@ -534,7 +534,12 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="SKU图片" width="94">
+            <el-table-column
+              label="SKU图片"
+              width="94"
+              align="center"
+              header-align="center"
+            >
               <template #default="{ row }">
                 <div class="sku-image-wrapper" @click="handleSkuImageUpload(row)">
                   <el-image
@@ -549,42 +554,95 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="价格(元)" width="150">
+            <el-table-column
+              label="零售价(元)"
+              width="136"
+              align="center"
+              header-align="center"
+            >
               <template #default="{ row }">
-                <el-input-number
-                  v-model="row.price"
-                  :min="0"
-                  :precision="2"
-                  :controls="false"
-                  size="small"
-                  class="sku-price-input"
-                />
+                <div class="sku-number-field">
+                  <el-input-number
+                    v-model="row.price"
+                    :min="0"
+                    :precision="2"
+                    :controls="false"
+                    size="small"
+                    class="sku-price-input"
+                  />
+                </div>
               </template>
             </el-table-column>
-            <el-table-column label="库存" width="120">
+            <el-table-column
+              :label="skuLevelPriceColumnLabel"
+              width="124"
+              align="center"
+              header-align="center"
+            >
               <template #default="{ row }">
-                <el-input-number
-                  v-model="row.stock"
-                  :min="0"
-                  :controls="false"
-                  size="small"
-                  class="sku-stock-input"
-                />
+                <div class="sku-level-price-cell">
+                  <span class="sku-level-price">
+                    {{ formatCurrency(getSkuLevelPrice(row.price)) }}
+                  </span>
+                  <el-tag
+                    v-if="skuLevelPriceNotice"
+                    :type="skuLevelPriceNotice.type"
+                    size="small"
+                    effect="light"
+                    class="sku-level-note"
+                  >
+                    {{ skuLevelPriceNotice.text }}
+                  </el-tag>
+                </div>
               </template>
             </el-table-column>
-            <el-table-column label="状态" width="80">
+            <el-table-column
+              label="库存"
+              width="104"
+              align="center"
+              header-align="center"
+            >
+              <template #default="{ row }">
+                <div class="sku-number-field">
+                  <el-input-number
+                    v-model="row.stock"
+                    :min="0"
+                    :controls="false"
+                    size="small"
+                    class="sku-stock-input"
+                  />
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column
+              label="状态"
+              width="76"
+              align="center"
+              header-align="center"
+            >
               <template #default="{ row }">
                 <el-switch v-model="row.status" :active-value="1" :inactive-value="0" />
               </template>
             </el-table-column>
-            <el-table-column label="来源" width="82">
+            <el-table-column
+              label="来源"
+              width="78"
+              align="center"
+              header-align="center"
+            >
               <template #default="{ row }">
                 <el-tag :type="row.id ? 'success' : 'primary'" size="small" effect="light">
                   {{ row.id ? '已有' : '新增' }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="90" fixed="right">
+            <el-table-column
+              label="操作"
+              width="90"
+              fixed="right"
+              align="center"
+              header-align="center"
+            >
               <template #default="{ row }">
                 <el-button
                   link
@@ -617,7 +675,7 @@
       class="sku-batch-dialog"
     >
       <el-form label-width="90px">
-        <el-form-item :label="batchMode === 'price' ? '价格(元)' : '库存'">
+        <el-form-item :label="batchMode === 'price' ? '零售价(元)' : '库存'">
           <el-input-number
             v-model="batchValue"
             :min="0"
@@ -677,12 +735,16 @@ import {
 } from '@/constants/discount'
 import {
   RETAIL_PRICE_VIEW,
+  formatCurrency,
   formatPriceRange,
   formatRate,
   parsePriceView,
+  resolveUnitPrice,
   toPriceViewLevelId,
   type PriceView
 } from '@/utils/pricingView'
+
+type ProductPricingRow = AdminProductPricing & { categoryName: string }
 
 interface SkuConfigRow extends Sku {
   rowKey: string
@@ -704,7 +766,7 @@ const submitLoading = ref(false)
 const skuSubmitLoading = ref(false)
 const route = useRoute()
 const router = useRouter()
-const tableData = ref<Array<AdminProductPricing & { categoryName: string }>>([])
+const tableData = ref<ProductPricingRow[]>([])
 const skuList = ref<SkuConfigRow[]>([])
 const specSelections = ref<SpecSelection[]>([])
 const onlyRetained = ref(false)
@@ -715,7 +777,7 @@ const categoryList = ref<any[]>([])
 const levelList = ref<UserLevel[]>([])
 const priceView = ref<PriceView>(parsePriceView(route.query.levelId))
 const fullFields = ref(false)
-const currentSpu = ref<Spu | null>(null)
+const currentSpu = ref<ProductPricingRow | null>(null)
 const skuCountMap = ref<Record<number, number>>({})
 const previewVisible = ref(false)
 const previewImages = ref<string[]>([])
@@ -768,6 +830,32 @@ const priceViewLabel = computed(() => {
 const settlementRangeLabel = computed(() =>
   priceView.value === RETAIL_PRICE_VIEW ? '零售结算区间' : '等级结算区间'
 )
+
+const skuLevelPriceColumnLabel = computed(() =>
+  priceView.value === RETAIL_PRICE_VIEW ? '零售基准价' : `${priceViewLabel.value}价`
+)
+
+const currentSkuRate = computed(() => {
+  const row = currentSpu.value
+  if (!row || isDiscountExcluded(row.excludeDiscount)) return 1
+  const rate = Number(row.effectiveRate ?? row.discountRate ?? 1)
+  return Number.isFinite(rate) ? rate : 1
+})
+
+const skuLevelPriceNotice = computed<{ text: string; type: 'warning' | 'info' } | null>(() => {
+  const row = currentSpu.value
+  if (!row || priceView.value === RETAIL_PRICE_VIEW) return null
+  if (isDiscountExcluded(row.excludeDiscount)) {
+    return { text: '不参与折扣', type: 'info' }
+  }
+  if (row.rateMissing) {
+    return { text: '未配置，零售兜底', type: 'warning' }
+  }
+  return null
+})
+
+const getSkuLevelPrice = (retailPrice?: number | null) =>
+  resolveUnitPrice(retailPrice, currentSkuRate.value)
 
 const getSkuCount = (spuId: number) => {
   return skuCountMap.value[spuId] || 0
@@ -1009,7 +1097,7 @@ const visibleSkuRows = computed(() => {
   return onlyRetained.value ? skuList.value.filter(row => row.retained) : skuList.value
 })
 
-const handleConfigSku = async (row: any) => {
+const handleConfigSku = async (row: ProductPricingRow) => {
   currentSpu.value = row
   skuDialogVisible.value = true
   skuSubmitLoading.value = true
@@ -1705,6 +1793,7 @@ onMounted(async () => {
 .sku-image-wrapper {
   width: 50px;
   height: 50px;
+  margin: 0 auto;
   border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px dashed var(--border-color);
@@ -1728,6 +1817,50 @@ onMounted(async () => {
 .sku-price-input,
 .sku-stock-input {
   width: 100%;
+}
+
+.sku-number-field {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+}
+
+.sku-number-field :deep(.el-input-number) {
+  width: 100%;
+  max-width: 104px;
+}
+
+.sku-number-field :deep(.el-input__wrapper) {
+  box-sizing: border-box;
+  width: 100%;
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
+.sku-number-field :deep(.el-input__inner) {
+  width: 100%;
+  text-align: center;
+}
+
+.sku-level-price {
+  display: block;
+  width: 100%;
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.sku-level-price-cell {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.sku-level-note {
+  max-width: 100%;
+  padding: 0 4px;
+  font-size: 10px;
 }
 
 .batch-value-input {
