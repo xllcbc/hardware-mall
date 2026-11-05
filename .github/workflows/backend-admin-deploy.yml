@@ -129,6 +129,11 @@ jobs:
               exit 1
             fi
 
+            if [[ -e .current-image-tag ]] && [[ ! -w .current-image-tag ]]; then
+              echo ".current-image-tag must be writable by $(id -un)." >&2
+              exit 1
+            fi
+
             previous_tag="$(cat .current-image-tag 2>/dev/null || true)"
             if [[ -z "$previous_tag" ]]; then
               echo "No previous image tag is recorded; rollback cannot be guaranteed." >&2
@@ -140,6 +145,7 @@ jobs:
             timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
             backup="/secure-backups/pricing-$RELEASE_TAG-$timestamp.sql"
             rollback() {
+              trap - ERR
               set +e
               echo "Release failed; rolling back database, cache and images." >&2
               if [[ -s "$backup" ]]; then
@@ -149,6 +155,7 @@ jobs:
               bash scripts/pricing-release.sh clean-cache
               RELEASE_API_BASE="http://127.0.0.1:8080" RELEASE_ADMIN_BASE="http://127.0.0.1" \
                 bash scripts/release/smoke.sh
+              exit 1
             }
             trap rollback ERR
 
@@ -157,6 +164,7 @@ jobs:
 
             docker compose -f docker-compose.prod.yml stop admin backend
             bash scripts/pricing-release.sh backup "$backup"
+            bash scripts/pricing-release.sh preflight "$backup"
             bash scripts/pricing-release.sh migrate "$backup"
             bash scripts/pricing-release.sh verify
 
