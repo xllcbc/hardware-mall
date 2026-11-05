@@ -9,6 +9,8 @@
 hardware-mall-backend/src/main/resources/db/migration_2026-11-02_multi_level_pricing_release.sql
 hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql
 scripts/pricing-release.sh
+scripts/release/smoke.sh
+docs/release/pricing-release-evidence.md
 ```
 
 脚本依赖本机 `mysql`、`mysqldump`、`sha256sum` 和 `redis-cli`。数据库与 Redis
@@ -27,6 +29,21 @@ export REDIS_PASSWORD='<从密钥管理系统读取；无密码时留空>'
 
 `DB_USERNAME` 需要备份、建临时库、DDL 和恢复权限。发布前确认备份盘剩余空间
 至少为当前数据库大小的两倍。
+
+## 0.1 CI 发布门禁
+
+以下检查必须全部通过，`release-gate` 才允许作为合并和生产部署的前置条件：
+
+- `backend-unit`：纯单测，不启动 Spring、不连接任何外部服务；
+- `backend-h2`：H2 MySQL 兼容模式下的 Spring 集成测试，连接一次性 Redis；
+- `backend-acceptance`：Testcontainers MySQL 迁移和真实 Redis 失效/TTL/防击穿测试；
+- `admin-build`：管理端单测和生产构建；
+- `uniapp-h5-build`：H5 单测和生产构建；
+- `uniapp-mp-build`：微信小程序生产构建；
+- `browser-e2e`：管理端价格视角/矩阵/深链/1280px 布局和 H5 结算价格链路。
+
+生产部署使用不可变镜像标签，并在 GitHub `production` Environment 审批后执行。
+禁止用本地构建结果绕过 `release-gate` 直接部署 main。
 
 ## 1. 停止写入并备份
 
@@ -65,6 +82,21 @@ MySQL 8，然后依次执行：
 
 如果预检失败，停止发布。不得通过删除旧列、跳过预检或修改脚本来继续。
 
+维护窗口开始前必须用同一份备份完成一次回滚演练：
+
+```bash
+./scripts/pricing-release.sh rollback-drill \
+  /secure-backups/pricing-2026-11-02.sql \
+  registry.example.com/hardware-mall/hardware-mall-backend:<previous-sha>
+```
+
+成功输出必须包含：
+
+- `PASS: rollback backup restored`;
+- `PASS: previous release image present`。
+
+演练使用独立临时库，不得指向 production 库名。
+
 ## 3. Production 迁移
 
 确认维护窗口、备份校验、隔离预检和回滚镜像均已就绪后执行：
@@ -81,7 +113,10 @@ DDL，不执行第二次迁移。
 ## 4. 发布后冒烟
 
 只有数据库验证通过后才启动新版本后端、管理端和用户端。后端启动后先主动
-删除旧定价缓存；`clean-cache` 失败时必须停止发布，不能等待 TTL：
+删除旧定价缓存；`clean-cache` 会清理 `pricing:*`、`product:list:*`、
+`product:detail:*`、`product:recommend:*`、`product:search:*`、
+`product:cache:generation` 和 `sku:info:*`，但保留 `sku:stock:*`。
+`clean-cache` 失败时必须停止发布，不能等待 TTL：
 
 ```bash
 ./scripts/pricing-release.sh clean-cache
@@ -97,6 +132,17 @@ DDL，不执行第二次迁移。
 6. 新订单写入等级 ID、等级名称和倍率快照；
 7. 修改倍率后新请求生效，旧订单金额不变；
 8. 日志没有迁移、外键、缓存失效和价格异常。
+
+自动冒烟可执行：
+
+```bash
+RELEASE_API_BASE=http://127.0.0.1:8080 \
+RELEASE_ADMIN_BASE=http://127.0.0.1 \
+./scripts/release/smoke.sh
+```
+
+人工步骤和签字统一记录在 `docs/release/pricing-release-evidence.md` 的当次发布
+副本中，禁止只在聊天记录里确认。
 
 ## 5. 回滚
 

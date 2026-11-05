@@ -403,7 +403,7 @@ public class RedisUtil {
 
     private void alertRebuildTimeout(String key, int loops) {
         // 每 key 冷却 30s，防止持续异常时刷爆日志（与钉钉告警防抖同款写法）
-        String cooldownKey = "alert:cache:rebuild:" + key;
+        String cooldownKey = RedisConstants.PREFIX_ALERT_CACHE_REBUILD + key;
         try {
             boolean first = Boolean.TRUE.equals(
                     setIfAbsent(cooldownKey, "1", ALERT_COOLDOWN_SECONDS, TimeUnit.SECONDS));

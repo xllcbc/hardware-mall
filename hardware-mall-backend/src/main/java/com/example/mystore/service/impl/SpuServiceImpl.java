@@ -120,10 +120,11 @@ public class SpuServiceImpl implements SpuService {
             spu.setStatus(StatusConstants.PRODUCT_STATUS_ON_SHELF);
         }
         if (spu.getIsRecommend() == null) {
-            spu.setIsRecommend(0);
+            spu.setIsRecommend(StatusConstants.PRODUCT_RECOMMEND_NO);
         }
         spuMapper.insert(spu);
-        publishSpuChanged(spu.getId(), spu.getIsRecommend() == 1);
+        publishSpuChanged(spu.getId(),
+                Integer.valueOf(StatusConstants.PRODUCT_RECOMMEND_YES).equals(spu.getIsRecommend()));
         return spu;
     }
 
@@ -170,7 +171,8 @@ public class SpuServiceImpl implements SpuService {
 
         spuMapper.updateById(exist);
         publishSpuChanged(spu.getId(),
-                Integer.valueOf(1).equals(oldRecommend) || Integer.valueOf(1).equals(exist.getIsRecommend()));
+                Integer.valueOf(StatusConstants.PRODUCT_RECOMMEND_YES).equals(oldRecommend)
+                        || Integer.valueOf(StatusConstants.PRODUCT_RECOMMEND_YES).equals(exist.getIsRecommend()));
         return exist;
     }
 
@@ -183,7 +185,8 @@ public class SpuServiceImpl implements SpuService {
         }
         spu.setDeleteTime(System.currentTimeMillis());
         spuMapper.updateById(spu);
-        publishSpuChanged(id, Integer.valueOf(1).equals(spu.getIsRecommend()));
+        publishSpuChanged(id,
+                Integer.valueOf(StatusConstants.PRODUCT_RECOMMEND_YES).equals(spu.getIsRecommend()));
     }
 
     @Override
@@ -196,7 +199,8 @@ public class SpuServiceImpl implements SpuService {
         spu.setStatus(status);
         spu.setUpdateTime(LocalDateTime.now());
         spuMapper.updateById(spu);
-        publishSpuChanged(id, Integer.valueOf(1).equals(spu.getIsRecommend()));
+        publishSpuChanged(id,
+                Integer.valueOf(StatusConstants.PRODUCT_RECOMMEND_YES).equals(spu.getIsRecommend()));
     }
 
     @Override

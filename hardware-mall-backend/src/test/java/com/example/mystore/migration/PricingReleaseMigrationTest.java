@@ -2,6 +2,7 @@ package com.example.mystore.migration;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 import org.testcontainers.containers.Container.ExecResult;
@@ -22,7 +23,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
+@Tag("integration")
 class PricingReleaseMigrationTest {
 
     private static final String DATABASE = "hardware_mall";

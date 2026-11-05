@@ -52,6 +52,10 @@ public class StatusConstants {
     public static final int PRODUCT_STATUS_ON_SHELF = 1;
     /** 商品下架 */
     public static final int PRODUCT_STATUS_OFF_SHELF = 0;
+    /** 商品不推荐 */
+    public static final int PRODUCT_RECOMMEND_NO = 0;
+    /** 商品推荐 */
+    public static final int PRODUCT_RECOMMEND_YES = 1;
     
     // ==================== 分类状态 ====================
     /** 分类启用 */

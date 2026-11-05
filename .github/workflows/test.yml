@@ -1,28 +1,24 @@
-name: test-and-build
+name: pricing-release-gate
 
 on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, 'phase*']
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pricing-release-gate-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  backend-test:
+  backend-unit:
+    name: backend pure unit
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: hardware_mall_test
-        ports:
-          - 3306:3306
-        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=10
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -30,49 +26,186 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: maven
-      - name: Run tests
+      - name: Run pure unit tests
+        working-directory: hardware-mall-backend
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET_FOR_TEST || 'ci_test_jwt_secret_32_bytes_long' }}
+        run: mvn -B -Punit-tests test
+
+  backend-h2:
+    name: backend H2 integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+      - name: Run Spring H2 tests
         working-directory: hardware-mall-backend
         env:
           SPRING_PROFILES_ACTIVE: test
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_NAME: hardware_mall_test
-          DB_USERNAME: root
-          DB_PASSWORD: root
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: 6379
           JWT_SECRET: ${{ secrets.JWT_SECRET_FOR_TEST || 'ci_test_jwt_secret_32_bytes_long' }}
-        run: mvn -B clean test
+        run: mvn -B -Ph2-tests test
+
+  backend-acceptance:
+    name: backend MySQL + Redis acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+      - name: Run Testcontainers MySQL and real Redis tests
+        working-directory: hardware-mall-backend
+        env:
+          SPRING_PROFILES_ACTIVE: test
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          JWT_SECRET: ${{ secrets.JWT_SECRET_FOR_TEST || 'ci_test_jwt_secret_32_bytes_long' }}
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+        run: mvn -B -Pintegration-tests test
 
   admin-build:
+    name: admin test + build
     runs-on: ubuntu-latest
-    needs: backend-test
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           cache: npm
           cache-dependency-path: hardware-mall-admin/package-lock.json
-      - name: Test and build admin
+      - name: Test and build
         working-directory: hardware-mall-admin
         run: |
           npm ci
           npm test
           npm run build
 
-  uniapp-build:
+  uniapp-h5-build:
+    name: uni-app H5 test + build
     runs-on: ubuntu-latest
-    needs: backend-test
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           cache: npm
           cache-dependency-path: hardware-mall-uniapp/package-lock.json
-      - name: Build uniapp mp-weixin
+      - name: Test and build H5
         working-directory: hardware-mall-uniapp
+        env:
+          VITE_API_BASE_URL: /api
+        run: |
+          npm ci
+          npm test
+          npm run build:h5
+
+  uniapp-mp-build:
+    name: uni-app WeChat production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: hardware-mall-uniapp/package-lock.json
+      - name: Build mp-weixin
+        working-directory: hardware-mall-uniapp
+        env:
+          VITE_API_BASE_URL: https://release.invalid/api
         run: |
           npm ci
           npm run build:mp-weixin
+
+  browser-e2e:
+    name: isolated browser acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build admin and H5
+        run: |
+          npm ci --prefix hardware-mall-admin
+          npm run build --prefix hardware-mall-admin
+          npm ci --prefix hardware-mall-uniapp
+          VITE_API_BASE_URL=/api npm run build:h5 --prefix hardware-mall-uniapp
+      - name: Install Playwright
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Run browser acceptance
+        working-directory: e2e
+        env:
+          CI: "true"
+        run: npm test
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  release-gate:
+    name: release-gate
+    if: always()
+    needs:
+      - backend-unit
+      - backend-h2
+      - backend-acceptance
+      - admin-build
+      - uniapp-h5-build
+      - uniapp-mp-build
+      - browser-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every required gate passed
+        run: |
+          test "${{ needs.backend-unit.result }}" = "success"
+          test "${{ needs.backend-h2.result }}" = "success"
+          test "${{ needs.backend-acceptance.result }}" = "success"
+          test "${{ needs.admin-build.result }}" = "success"
+          test "${{ needs.uniapp-h5-build.result }}" = "success"
+          test "${{ needs.uniapp-mp-build.result }}" = "success"
+          test "${{ needs.browser-e2e.result }}" = "success"
+          echo "All pricing release gates passed."

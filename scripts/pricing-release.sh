@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DB_DIR="$ROOT_DIR/hardware-mall-backend/src/main/resources/db"
-MIGRATION="$DB_DIR/migration_2026-11-02_multi_level_pricing_release.sql"
-VERIFY="$DB_DIR/pricing_release_verify.sql"
+ROOT_DIR="${PRICING_RELEASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+DB_DIR="${PRICING_RELEASE_DB_DIR:-$ROOT_DIR/hardware-mall-backend/src/main/resources/db}"
+MIGRATION="${PRICING_RELEASE_MIGRATION:-$DB_DIR/migration_2026-11-02_multi_level_pricing_release.sql}"
+VERIFY="${PRICING_RELEASE_VERIFY:-$DB_DIR/pricing_release_verify.sql}"
 
 DB_PORT="${DB_PORT:-3306}"
 REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
@@ -24,6 +24,7 @@ Usage:
   pricing-release.sh migrate <backup.sql>
   pricing-release.sh verify
   pricing-release.sh restore <backup.sql>
+  pricing-release.sh rollback-drill <backup.sql> [previous-image]
   pricing-release.sh clean-cache
 EOF
 }
@@ -45,11 +46,11 @@ require_file() {
 
 verify_backup_checksum() {
   local backup="$1"
-  if [[ -f "$backup.sha256" ]]; then
-    sha256sum -c "$backup.sha256"
-  else
-    echo "Warning: checksum file not found: $backup.sha256" >&2
+  if [[ ! -s "$backup.sha256" ]]; then
+    echo "Required checksum file is missing or empty: $backup.sha256" >&2
+    exit 2
   fi
+  sha256sum -c "$backup.sha256"
 }
 
 case "${1:-}" in
@@ -92,6 +93,35 @@ case "${1:-}" in
     "${MYSQL[@]}" -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
     "${MYSQL[@]}" "$DB_NAME" < "$backup"
     ;;
+  rollback-drill)
+    require_db_env
+    backup="${2:?backup path required}"
+    previous_image="${3:-}"
+    require_file "$backup"
+    verify_backup_checksum "$backup"
+
+    if [[ -n "$previous_image" ]] && ! docker image inspect "$previous_image" >/dev/null 2>&1; then
+      echo "Previous release image is unavailable: $previous_image" >&2
+      exit 5
+    fi
+
+    scratch="${DB_NAME}_rollback_drill"
+    "${MYSQL[@]}" -e "DROP DATABASE IF EXISTS \`$scratch\`; CREATE DATABASE \`$scratch\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+    "${MYSQL[@]}" "$scratch" < "$backup"
+    mysqlcheck --protocol=TCP --default-character-set=utf8mb4 \
+      -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USERNAME" --check "$scratch" >/dev/null
+
+    table_count="$("${MYSQL[@]}" -N -B -e \
+      "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$scratch';")"
+    if [[ "${table_count:-0}" -lt 1 ]]; then
+      echo "Rollback drill restored no tables in $scratch" >&2
+      exit 6
+    fi
+    echo "PASS: rollback backup restored to $scratch (${table_count} tables)"
+    if [[ -n "$previous_image" ]]; then
+      echo "PASS: previous release image present: $previous_image"
+    fi
+    ;;
   clean-cache)
     redis_cli=(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" --no-auth-warning)
     if [[ -n "${REDIS_PASSWORD:-}" ]]; then
@@ -104,10 +134,15 @@ case "${1:-}" in
 
     scan_file="$(mktemp)"
     trap 'rm -f "$scan_file"' EXIT
-    if ! "${redis_cli[@]}" --scan --pattern 'pricing:*' > "$scan_file"; then
-      echo "Redis pricing cache scan failed" >&2
-      exit 4
-    fi
+    : > "$scan_file"
+    for pattern in 'pricing:*' 'product:list:*' 'product:detail:*' 'product:recommend:*' \
+      'product:search:*' 'product:cache:generation' 'sku:info:*'; do
+      if ! "${redis_cli[@]}" --scan --pattern "$pattern" >> "$scan_file"; then
+        echo "Redis cache scan failed for pattern: $pattern" >&2
+        exit 4
+      fi
+    done
+    sort -u "$scan_file" -o "$scan_file"
 
     deleted=0
     while IFS= read -r key; do
