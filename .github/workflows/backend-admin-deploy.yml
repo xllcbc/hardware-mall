@@ -181,11 +181,6 @@ jobs:
                           AND column_name IN ('level_id', 'level_name', 'discount_rate'))
                       ));
               ")"
-            if [[ "$target_structure" != "0" ]]; then
-              echo "Production database already contains partial target pricing schema." >&2
-              exit 1
-            fi
-
             legacy_fields="$(mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" \
               -u "$DB_USERNAME" -N -B "$DB_NAME" -e "
                 SELECT COUNT(*) FROM information_schema.columns
@@ -199,6 +194,18 @@ jobs:
             if [[ "$legacy_fields" != "0" ]]; then
               echo "Legacy wholesale pricing fields exist; migration cannot proceed." >&2
               exit 1
+            fi
+
+            # 目标定价结构完整时应为 7（user_level/level_category_discount 2 张表 +
+            # user.level_id、spu.exclude_discount、order_item 的 level_id/level_name/discount_rate 5 列）。
+            # 0 表示尚未迁移，7 表示已完成迁移，1..6 表示部分迁移必须拒绝。
+            if [[ "$target_structure" != "0" && "$target_structure" != "7" ]]; then
+              echo "Production database contains a partial target pricing schema ($target_structure/7); cannot proceed." >&2
+              exit 1
+            fi
+            migration_needed=0
+            if [[ "$target_structure" == "0" ]]; then
+              migration_needed=1
             fi
 
             docker pull "$REGISTRY/$NAMESPACE/hardware-mall-backend:$previous_tag"
@@ -226,8 +233,10 @@ jobs:
 
             docker compose -f docker-compose.prod.yml stop admin backend
             bash scripts/pricing-release.sh backup "$backup"
-            bash scripts/pricing-release.sh preflight "$backup"
-            bash scripts/pricing-release.sh migrate "$backup"
+            if [[ "$migration_needed" -eq 1 ]]; then
+              bash scripts/pricing-release.sh preflight "$backup"
+              bash scripts/pricing-release.sh migrate "$backup"
+            fi
             bash scripts/pricing-release.sh verify
 
             IMAGE_TAG="$RELEASE_TAG" docker compose -f docker-compose.prod.yml pull backend admin
