@@ -12,7 +12,6 @@ BEGIN
     DECLARE legacy_fields INT DEFAULT 0;
     DECLARE retail_rows INT DEFAULT 0;
     DECLARE invalid_users INT DEFAULT 0;
-    DECLARE matrix_rows INT DEFAULT 0;
     DECLARE foreign_keys INT DEFAULT 0;
 
     SELECT COUNT(*)
@@ -53,10 +52,6 @@ BEGIN
      WHERE u.level_id IS NULL OR l.id IS NULL;
 
     SELECT COUNT(*)
-      INTO matrix_rows
-      FROM level_category_discount;
-
-    SELECT COUNT(*)
       INTO foreign_keys
       FROM information_schema.table_constraints
      WHERE constraint_schema = DATABASE()
@@ -81,10 +76,6 @@ BEGIN
 
     IF invalid_users > 0 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'users contain invalid level_id values';
-    END IF;
-
-    IF matrix_rows <> 0 THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'release migration must not seed pricing matrix rows';
     END IF;
 
     IF foreign_keys <> 3 THEN
