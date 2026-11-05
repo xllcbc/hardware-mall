@@ -165,6 +165,42 @@ jobs:
               exit 1
             fi
 
+            target_structure="$(mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" \
+              -u "$DB_USERNAME" -N -B "$DB_NAME" -e "
+                SELECT
+                  (SELECT COUNT(*) FROM information_schema.tables
+                    WHERE table_schema = DATABASE()
+                      AND table_name IN ('user_level', 'level_category_discount'))
+                  +
+                  (SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_schema = DATABASE()
+                      AND (
+                        (table_name = 'user' AND column_name = 'level_id')
+                        OR (table_name = 'spu' AND column_name = 'exclude_discount')
+                        OR (table_name = 'order_item'
+                          AND column_name IN ('level_id', 'level_name', 'discount_rate'))
+                      ));
+              ")"
+            if [[ "$target_structure" != "0" ]]; then
+              echo "Production database already contains partial target pricing schema." >&2
+              exit 1
+            fi
+
+            legacy_fields="$(mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" \
+              -u "$DB_USERNAME" -N -B "$DB_NAME" -e "
+                SELECT COUNT(*) FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND (
+                    (table_name = 'user' AND column_name = 'user_group')
+                    OR (table_name = 'sku' AND column_name = 'wholesale_price')
+                    OR (table_name = 'order_item' AND column_name = 'price_type')
+                  );
+              ")"
+            if [[ "$legacy_fields" != "0" ]]; then
+              echo "Legacy wholesale pricing fields exist; migration cannot proceed." >&2
+              exit 1
+            fi
+
             docker pull "$REGISTRY/$NAMESPACE/hardware-mall-backend:$previous_tag"
             docker pull "$REGISTRY/$NAMESPACE/hardware-mall-admin:$previous_tag"
 
