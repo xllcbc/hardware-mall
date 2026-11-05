@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   RETAIL_PRICE_VIEW,
+  formatCurrency,
   formatPriceRange,
   formatRate,
   parsePriceView,
+  resolveUnitPrice,
   toPriceViewLevelId
 } from './pricingView'
 
@@ -27,5 +29,15 @@ describe('pricingView', () => {
     expect(formatPriceRange()).toBe('-')
     expect(formatRate(1)).toBe('1.0000')
     expect(formatRate(1, true)).toBe('未配置 / 零售兜底')
+  })
+
+  it('resolves and formats the settlement price with two-decimal rounding', () => {
+    expect(resolveUnitPrice(218, 0.7)).toBe(152.6)
+    expect(resolveUnitPrice(2.3, 0.95)).toBe(2.19)
+    expect(resolveUnitPrice(10.005, 1)).toBe(10.01)
+    expect(resolveUnitPrice(10.075, 1)).toBe(10.08)
+    expect(resolveUnitPrice(undefined, 0.7)).toBeNull()
+    expect(formatCurrency(152.6)).toBe('¥152.60')
+    expect(formatCurrency(null)).toBe('-')
   })
 })
