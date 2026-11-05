@@ -139,12 +139,32 @@ jobs:
               echo "Backup directory must be writable by $(id -un): $backup_root" >&2
               exit 1
             fi
+            backup_probe="$backup_root/.release-write-test-$$"
+            if ! : > "$backup_probe"; then
+              echo "Backup directory write test failed: $backup_root" >&2
+              exit 1
+            fi
+            rm -f "$backup_probe"
 
             previous_tag="$(cat .current-image-tag 2>/dev/null || true)"
             if [[ -z "$previous_tag" ]]; then
               echo "No previous image tag is recorded; rollback cannot be guaranteed." >&2
               exit 1
             fi
+
+            backend_image="$(docker inspect hw-backend --format '{{.Config.Image}}')"
+            admin_image="$(docker inspect hw-admin --format '{{.Config.Image}}')"
+            if [[ "${backend_image##*:}" != "$previous_tag" || "${admin_image##*:}" != "$previous_tag" ]]; then
+              echo "Running images do not match .current-image-tag=$previous_tag" >&2
+              exit 1
+            fi
+
+            if ! mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USERNAME" \
+              -e "SELECT 1" "$DB_NAME" >/dev/null; then
+              echo "Release database TCP login failed." >&2
+              exit 1
+            fi
+
             docker pull "$REGISTRY/$NAMESPACE/hardware-mall-backend:$previous_tag"
             docker pull "$REGISTRY/$NAMESPACE/hardware-mall-admin:$previous_tag"
 
