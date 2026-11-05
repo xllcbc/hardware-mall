@@ -107,7 +107,7 @@ class PricingReleaseMigrationTest {
         copyModifiedResource(INIT_RESOURCE, "/tmp/init-final.sql", DATABASE, initialized);
         copyModifiedResource(MIGRATION_RESOURCE, "/tmp/migration-final.sql", null, null);
 
-        assertThat(runSqlFile(initialized, "/tmp/init-final.sql").getExitCode()).isZero();
+        assertThat(runSqlFile(null, "/tmp/init-final.sql").getExitCode()).isZero();
         assertThat(runSqlFile(migrated, "/tmp/migration-final.sql").getExitCode()).isZero();
 
         assertThat(pricingModelDefinition(initialized))
@@ -178,6 +178,7 @@ class PricingReleaseMigrationTest {
     private static ExecResult mysql(String... args) throws Exception {
         List<String> command = new ArrayList<>();
         command.add("mysql");
+        command.add("--default-character-set=utf8mb4");
         command.add("-uroot");
         command.add("-p" + MYSQL.getPassword());
         command.addAll(List.of(args));
