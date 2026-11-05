@@ -106,6 +106,16 @@ pricing:
     # 定价缓存失效与重建共用的有限锁等待上限
     lock-wait-ms: 500
 
+product:
+  cache:
+    # 商品缓存失效、重建和批量 SKU 抢锁共用的有限等待上限
+    lock-wait-ms: 500
+
+stock:
+  cache:
+    # 单 SKU 库存缓存失效与重建共用的有限等待上限
+    lock-wait-ms: 500
+
 order:
   auto-receive:
     # 自动确认收货周期(天): 同城配送/自提 对齐微信 T+2; 快递预留 T+10

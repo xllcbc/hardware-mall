@@ -1,6 +1,9 @@
 package com.example.mystore.service.impl;
 
+import com.example.mystore.common.constant.ProductCacheConstants;
 import com.example.mystore.common.constant.RedisConstants;
+import com.example.mystore.common.exception.ProductCacheInvalidationException;
+import com.example.mystore.common.metrics.ProductCacheMetrics;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.vo.ProductDetailCache;
 import com.example.mystore.entity.vo.ProductListResult;
@@ -9,6 +12,7 @@ import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -19,10 +23,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -36,13 +42,16 @@ public class ProductCacheServiceImpl implements ProductCacheService {
     private final RedisUtil redisUtil;
     private final RedisLockUtil redisLockUtil;
 
+    @Value("${product.cache.lock-wait-ms:500}")
+    private long lockWaitMillis = ProductCacheConstants.DEFAULT_LOCK_WAIT_MILLIS;
+
     @Override
     public ProductListResult getProductList(Long categoryId, int page, int limit, int status,
                                             Supplier<ProductListResult> loader) {
         String key = productCacheKey(RedisConstants.PREFIX_PRODUCT_LIST)
                 + (categoryId == null ? "all" : categoryId)
                 + ":" + page + ":" + limit + ":" + status;
-        return redisUtil.queryWithCache(key, ProductListResult.class, RedisConstants.CACHE_TTL_HOUR, loader);
+        return queryProductList(key, loader);
     }
 
     @Override
@@ -52,13 +61,7 @@ public class ProductCacheServiceImpl implements ProductCacheService {
                 + sha256Hex(normalizeKeyword(keyword))
                 + ":" + (categoryId == null ? "all" : categoryId)
                 + ":" + page + ":" + limit + ":" + status;
-        return redisUtil.queryWithCache(
-                key,
-                ProductListResult.class,
-                RedisConstants.PRODUCT_SEARCH_TTL_SECONDS,
-                RedisConstants.CACHE_NULL_TTL,
-                RedisConstants.PRODUCT_SEARCH_JITTER_SECONDS,
-                loader);
+        return queryProductList(key, loader);
     }
 
     @Override
@@ -70,6 +73,7 @@ public class ProductCacheServiceImpl implements ProductCacheService {
     public void invalidateAfterSkuBatchChange(Long spuId, Collection<Long> skuIds) {
         String previousGeneration = productCacheGeneration();
         rotateProductCacheGeneration();
+        List<ProductCacheInvalidationException.Failure> failures = new ArrayList<>();
         if (skuIds != null && !skuIds.isEmpty()) {
             List<String> skuInfoKeys = skuIds.stream()
                     .filter(Objects::nonNull)
@@ -77,29 +81,33 @@ public class ProductCacheServiceImpl implements ProductCacheService {
                     .map(id -> productCacheKey(RedisConstants.PREFIX_SKU_INFO, previousGeneration) + id)
                     .toList();
             for (String key : skuInfoKeys) {
-                redisUtil.evictWithLock(key);
+                evictKey(key, failures);
             }
         }
-        invalidateProductAggregates(spuId, true, previousGeneration);
+        invalidateProductAggregates(spuId, true, previousGeneration, failures);
+        throwIfInvalidationFailed(failures);
     }
 
     @Override
     public void invalidateAfterSpuChange(Long spuId, boolean recommendChanged) {
         String previousGeneration = productCacheGeneration();
         rotateProductCacheGeneration();
-        invalidateProductAggregates(spuId, recommendChanged, previousGeneration);
+        List<ProductCacheInvalidationException.Failure> failures = new ArrayList<>();
+        invalidateProductAggregates(spuId, recommendChanged, previousGeneration, failures);
+        throwIfInvalidationFailed(failures);
     }
 
     private void invalidateProductAggregates(Long spuId, boolean recommendChanged,
-                                             String previousGeneration) {
-        redisUtil.evictWithLock(
-                productCacheKey(RedisConstants.PREFIX_PRODUCT_DETAIL, previousGeneration) + spuId);
+                                             String previousGeneration,
+                                             List<ProductCacheInvalidationException.Failure> failures) {
+        evictKey(productCacheKey(RedisConstants.PREFIX_PRODUCT_DETAIL, previousGeneration) + spuId,
+                failures);
         if (recommendChanged) {
-            redisUtil.evictWithLock(
-                    productCacheKey(RedisConstants.PREFIX_PRODUCT_RECOMMEND, previousGeneration));
+            evictKey(productCacheKey(RedisConstants.PREFIX_PRODUCT_RECOMMEND, previousGeneration),
+                    failures);
         }
-        redisUtil.evictByPatternWithLock(RedisConstants.PREFIX_PRODUCT_LIST + "*");
-        redisUtil.evictByPatternWithLock(RedisConstants.PREFIX_PRODUCT_SEARCH + "*");
+        evictByPattern(RedisConstants.PREFIX_PRODUCT_LIST + "*", failures);
+        evictByPattern(RedisConstants.PREFIX_PRODUCT_SEARCH + "*", failures);
     }
 
     @Override
@@ -107,7 +115,10 @@ public class ProductCacheServiceImpl implements ProductCacheService {
         return redisUtil.queryWithCache(
                 productCacheKey(RedisConstants.PREFIX_PRODUCT_DETAIL) + spuId,
                 ProductDetailCache.class,
-                RedisConstants.CACHE_TTL_HOUR,
+                ProductCacheConstants.TTL_SECONDS,
+                RedisConstants.CACHE_NULL_TTL,
+                ProductCacheConstants.JITTER_SECONDS,
+                lockWaitMillis,
                 loader);
     }
 
@@ -116,7 +127,10 @@ public class ProductCacheServiceImpl implements ProductCacheService {
         return redisUtil.queryWithCache(
                 productCacheKey(RedisConstants.PREFIX_PRODUCT_RECOMMEND),
                 ProductListResult.class,
-                RedisConstants.CACHE_TTL_HOUR,
+                ProductCacheConstants.TTL_SECONDS,
+                RedisConstants.CACHE_NULL_TTL,
+                ProductCacheConstants.JITTER_SECONDS,
+                lockWaitMillis,
                 loader);
     }
 
@@ -125,46 +139,102 @@ public class ProductCacheServiceImpl implements ProductCacheService {
         if (skuIds == null || skuIds.isEmpty()) {
             return Collections.emptyList();
         }
+        List<Long> requestedIds = skuIds.stream()
+                .filter(Objects::nonNull)
+                .toList();
+        if (requestedIds.isEmpty()) {
+            return new ArrayList<>(Collections.nCopies(skuIds.size(), null));
+        }
         String generation = productCacheGeneration();
-        List<String> keys = skuIds.stream()
+        List<String> keys = requestedIds.stream()
                 .map(id -> productCacheKey(RedisConstants.PREFIX_SKU_INFO, generation) + id)
                 .toList();
         List<Object> cachedValues = redisUtil.multiGet(keys);
-        List<Sku> result = new ArrayList<>(Collections.nCopies(skuIds.size(), null));
-        List<Long> missingIds = new ArrayList<>();
-        for (int i = 0; i < skuIds.size(); i++) {
-            Object value = cachedValues.get(i);
+        List<Sku> result = new ArrayList<>(Collections.nCopies(requestedIds.size(), null));
+        Set<Long> unresolvedIds = new LinkedHashSet<>();
+        for (int i = 0; i < requestedIds.size(); i++) {
+            Object value = cachedValues == null ? null : cachedValues.get(i);
             if (redisUtil.isNull(value)) {
                 continue;
             }
             if (value instanceof Sku sku) {
                 result.set(i, sku);
             } else {
-                missingIds.add(skuIds.get(i));
+                unresolvedIds.add(requestedIds.get(i));
             }
         }
-        if (!missingIds.isEmpty()) {
-            List<String> acquiredLockKeys = new ArrayList<>();
-            try {
-                for (Long id : missingIds.stream().sorted().toList()) {
-                    String key = productCacheKey(RedisConstants.PREFIX_SKU_INFO, generation) + id;
-                    if (!redisLockUtil.tryLock(key)) {
-                        log.warn("批量 SKU 缓存回源抢锁失败, skuId={}, 本次不写缓存", id);
-                        mergeLoadedSkus(skuIds, result, loader.apply(missingIds),
-                                false, generation);
-                        return result;
-                    }
-                    acquiredLockKeys.add(key);
-                }
+        if (unresolvedIds.isEmpty()) {
+            return result;
+        }
 
-                mergeLoadedSkus(skuIds, result, loader.apply(missingIds), true, generation);
-            } finally {
-                for (int i = acquiredLockKeys.size() - 1; i >= 0; i--) {
-                    redisLockUtil.unlock(acquiredLockKeys.get(i));
+        List<Long> missingIds = unresolvedIds.stream().sorted().toList();
+        List<String> acquiredLockKeys = new ArrayList<>();
+        long deadline = deadline(lockWaitMillis);
+        try {
+            for (Long id : missingIds) {
+                String key = productCacheKey(RedisConstants.PREFIX_SKU_INFO, generation) + id;
+                if (!redisLockUtil.tryLock(key, remainingMillis(deadline))) {
+                    log.warn("批量 SKU 缓存回源等锁超时, skuId={}, maxWaitMs={}, 直接查库且不写缓存",
+                            id, lockWaitMillis);
+                    mergeLoadedSkus(requestedIds, result, loader.apply(missingIds),
+                            false, generation);
+                    return result;
                 }
+                acquiredLockKeys.add(key);
+            }
+
+            List<Long> stillMissing = recheckSkusAfterLock(
+                    requestedIds, result, missingIds, generation);
+            if (!stillMissing.isEmpty()) {
+                mergeLoadedSkus(requestedIds, result, loader.apply(stillMissing), true, generation);
+            }
+            return result;
+        } finally {
+            for (int i = acquiredLockKeys.size() - 1; i >= 0; i--) {
+                redisLockUtil.unlock(acquiredLockKeys.get(i));
             }
         }
-        return result;
+    }
+
+    private ProductListResult queryProductList(String key, Supplier<ProductListResult> loader) {
+        return redisUtil.queryWithCache(
+                key,
+                ProductListResult.class,
+                ProductCacheConstants.TTL_SECONDS,
+                RedisConstants.CACHE_NULL_TTL,
+                ProductCacheConstants.JITTER_SECONDS,
+                lockWaitMillis,
+                loader);
+    }
+
+    private List<Long> recheckSkusAfterLock(List<Long> requestedIds, List<Sku> result,
+                                            List<Long> missingIds, String generation) {
+        List<String> keys = missingIds.stream()
+                .map(id -> productCacheKey(RedisConstants.PREFIX_SKU_INFO, generation) + id)
+                .toList();
+        List<Object> cachedValues = redisUtil.multiGet(keys);
+        List<Long> stillMissing = new ArrayList<>();
+        for (int i = 0; i < missingIds.size(); i++) {
+            Long id = missingIds.get(i);
+            Object value = cachedValues == null ? null : cachedValues.get(i);
+            if (redisUtil.isNull(value)) {
+                continue;
+            }
+            if (value instanceof Sku sku) {
+                fillResultById(requestedIds, result, sku);
+            } else {
+                stillMissing.add(id);
+            }
+        }
+        return stillMissing;
+    }
+
+    private void fillResultById(List<Long> requestedIds, List<Sku> result, Sku sku) {
+        for (int i = 0; i < requestedIds.size(); i++) {
+            if (Objects.equals(requestedIds.get(i), sku.getId())) {
+                result.set(i, sku);
+            }
+        }
     }
 
     private void mergeLoadedSkus(List<Long> requestedIds, List<Sku> result,
@@ -182,11 +252,12 @@ public class ProductCacheServiceImpl implements ProductCacheService {
             if (loadedSku != null) {
                 result.set(i, loadedSku);
                 if (writeCache) {
-                    redisUtil.set(
-                                productCacheKey(RedisConstants.PREFIX_SKU_INFO, generation) + id,
+                    redisUtil.setWithJitter(
+                            productCacheKey(RedisConstants.PREFIX_SKU_INFO, generation) + id,
                             loadedSku,
-                            RedisConstants.CACHE_TTL_HOUR,
-                            TimeUnit.SECONDS);
+                            ProductCacheConstants.TTL_SECONDS,
+                            TimeUnit.SECONDS,
+                            ProductCacheConstants.JITTER_SECONDS);
                 }
             }
         }
@@ -203,6 +274,52 @@ public class ProductCacheServiceImpl implements ProductCacheService {
                         TimeUnit.SECONDS);
             }
         }
+    }
+
+    private void evictKey(String key, List<ProductCacheInvalidationException.Failure> failures) {
+        try {
+            if (!redisUtil.evictWithLock(key, lockWaitMillis)) {
+                failures.add(new ProductCacheInvalidationException.Failure(
+                        key, ProductCacheMetrics.CAUSE_LOCK_TIMEOUT));
+            }
+        } catch (RuntimeException e) {
+            log.warn("商品缓存 key 失效异常, key={}", key, e);
+            failures.add(new ProductCacheInvalidationException.Failure(
+                    key, ProductCacheMetrics.CAUSE_REDIS_ERROR));
+        }
+    }
+
+    private void evictByPattern(String pattern,
+                                List<ProductCacheInvalidationException.Failure> failures) {
+        try {
+            RedisUtil.PatternEvictionResult result =
+                    redisUtil.evictByPatternWithLockDetailed(pattern, lockWaitMillis);
+            result.failedKeys().forEach(key -> failures.add(
+                    new ProductCacheInvalidationException.Failure(
+                            key, ProductCacheMetrics.CAUSE_LOCK_TIMEOUT)));
+        } catch (RuntimeException e) {
+            log.warn("商品缓存 pattern 失效异常, pattern={}", pattern, e);
+            failures.add(new ProductCacheInvalidationException.Failure(
+                    pattern, ProductCacheMetrics.CAUSE_REDIS_ERROR));
+        }
+    }
+
+    private void throwIfInvalidationFailed(List<ProductCacheInvalidationException.Failure> failures) {
+        if (!failures.isEmpty()) {
+            throw new ProductCacheInvalidationException(failures);
+        }
+    }
+
+    private long deadline(long maxWaitMillis) {
+        return System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0L, maxWaitMillis));
+    }
+
+    private long remainingMillis(long deadline) {
+        long remainingNanos = deadline - System.nanoTime();
+        if (remainingNanos <= 0) {
+            return 0L;
+        }
+        return Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
     }
 
     private String productCacheKey(String prefix) {

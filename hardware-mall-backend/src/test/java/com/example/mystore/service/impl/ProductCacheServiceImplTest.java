@@ -1,5 +1,6 @@
 package com.example.mystore.service.impl;
 
+import com.example.mystore.common.constant.ProductCacheConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.vo.ProductDetailCache;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Collections;
 import java.util.List;
@@ -23,6 +25,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
@@ -44,12 +47,23 @@ class ProductCacheServiceImplTest {
     void setUp() {
         when(redisUtil.get(RedisConstants.PREFIX_PRODUCT_CACHE_GENERATION))
                 .thenReturn(GENERATION);
+        ReflectionTestUtils.setField(productCacheService, "lockWaitMillis", 100L);
+        lenient().when(redisUtil.evictWithLock(any(), eq(100L))).thenReturn(true);
+        lenient().when(redisUtil.evictByPatternWithLockDetailed(any(), eq(100L)))
+                .thenReturn(new RedisUtil.PatternEvictionResult(0, List.of()));
     }
 
     @Test
     void getProductList_usesSharedListCacheKey() {
         ProductListResult expected = new ProductListResult(Collections.emptyList(), 0);
-        when(redisUtil.queryWithCache(any(), eq(ProductListResult.class), eq(RedisConstants.CACHE_TTL_HOUR), any()))
+        when(redisUtil.queryWithCache(
+                any(),
+                eq(ProductListResult.class),
+                eq(ProductCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(ProductCacheConstants.JITTER_SECONDS),
+                eq(100L),
+                any()))
                 .thenReturn(expected);
 
         ProductListResult result = productCacheService.getProductList(7L, 2, 20, 1, () -> expected);
@@ -58,7 +72,10 @@ class ProductCacheServiceImplTest {
         verify(redisUtil).queryWithCache(
                 eq(RedisConstants.PREFIX_PRODUCT_LIST + GENERATION + ":7:2:20:1"),
                 eq(ProductListResult.class),
-                eq(RedisConstants.CACHE_TTL_HOUR),
+                eq(ProductCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(ProductCacheConstants.JITTER_SECONDS),
+                eq(100L),
                 any());
     }
 
@@ -68,9 +85,10 @@ class ProductCacheServiceImplTest {
         when(redisUtil.queryWithCache(
                 any(),
                 eq(ProductListResult.class),
-                eq(RedisConstants.PRODUCT_SEARCH_TTL_SECONDS),
+                eq(ProductCacheConstants.TTL_SECONDS),
                 eq(RedisConstants.CACHE_NULL_TTL),
-                eq(RedisConstants.PRODUCT_SEARCH_JITTER_SECONDS),
+                eq(ProductCacheConstants.JITTER_SECONDS),
+                eq(100L),
                 any())).thenReturn(expected);
 
         ProductListResult result = productCacheService.searchProducts(
@@ -82,9 +100,10 @@ class ProductCacheServiceImplTest {
                         + "343fa871f168dcb21aed1b140a969348b311c4e065854277095ecf8765c77a20"
                         + ":7:2:20:1"),
                 eq(ProductListResult.class),
-                eq(RedisConstants.PRODUCT_SEARCH_TTL_SECONDS),
+                eq(ProductCacheConstants.TTL_SECONDS),
                 eq(RedisConstants.CACHE_NULL_TTL),
-                eq(RedisConstants.PRODUCT_SEARCH_JITTER_SECONDS),
+                eq(ProductCacheConstants.JITTER_SECONDS),
+                eq(100L),
                 any());
     }
 
@@ -93,13 +112,15 @@ class ProductCacheServiceImplTest {
         productCacheService.invalidateAfterSkuChange(11L, 22L);
 
         verify(redisUtil).evictWithLock(
-                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":22");
+                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":22", 100L);
         verify(redisUtil).evictWithLock(
-                RedisConstants.PREFIX_PRODUCT_DETAIL + GENERATION + ":11");
+                RedisConstants.PREFIX_PRODUCT_DETAIL + GENERATION + ":11", 100L);
         verify(redisUtil).evictWithLock(
-                RedisConstants.PREFIX_PRODUCT_RECOMMEND + GENERATION + ":");
-        verify(redisUtil).evictByPatternWithLock(RedisConstants.PREFIX_PRODUCT_LIST + "*");
-        verify(redisUtil).evictByPatternWithLock(RedisConstants.PREFIX_PRODUCT_SEARCH + "*");
+                RedisConstants.PREFIX_PRODUCT_RECOMMEND + GENERATION + ":", 100L);
+        verify(redisUtil).evictByPatternWithLockDetailed(
+                RedisConstants.PREFIX_PRODUCT_LIST + "*", 100L);
+        verify(redisUtil).evictByPatternWithLockDetailed(
+                RedisConstants.PREFIX_PRODUCT_SEARCH + "*", 100L);
     }
 
     @Test
@@ -107,15 +128,17 @@ class ProductCacheServiceImplTest {
         productCacheService.invalidateAfterSkuBatchChange(11L, List.of(22L, 23L, 22L));
 
         verify(redisUtil).evictWithLock(
-                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":22");
+                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":22", 100L);
         verify(redisUtil).evictWithLock(
-                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":23");
+                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":23", 100L);
         verify(redisUtil).evictWithLock(
-                RedisConstants.PREFIX_PRODUCT_DETAIL + GENERATION + ":11");
+                RedisConstants.PREFIX_PRODUCT_DETAIL + GENERATION + ":11", 100L);
         verify(redisUtil).evictWithLock(
-                RedisConstants.PREFIX_PRODUCT_RECOMMEND + GENERATION + ":");
-        verify(redisUtil).evictByPatternWithLock(RedisConstants.PREFIX_PRODUCT_LIST + "*");
-        verify(redisUtil).evictByPatternWithLock(RedisConstants.PREFIX_PRODUCT_SEARCH + "*");
+                RedisConstants.PREFIX_PRODUCT_RECOMMEND + GENERATION + ":", 100L);
+        verify(redisUtil).evictByPatternWithLockDetailed(
+                RedisConstants.PREFIX_PRODUCT_LIST + "*", 100L);
+        verify(redisUtil).evictByPatternWithLockDetailed(
+                RedisConstants.PREFIX_PRODUCT_SEARCH + "*", 100L);
     }
 
     @Test
@@ -123,11 +146,13 @@ class ProductCacheServiceImplTest {
         productCacheService.invalidateAfterSpuChange(11L, false);
 
         verify(redisUtil).evictWithLock(
-                RedisConstants.PREFIX_PRODUCT_DETAIL + GENERATION + ":11");
-        verify(redisUtil).evictByPatternWithLock(RedisConstants.PREFIX_PRODUCT_LIST + "*");
-        verify(redisUtil).evictByPatternWithLock(RedisConstants.PREFIX_PRODUCT_SEARCH + "*");
+                RedisConstants.PREFIX_PRODUCT_DETAIL + GENERATION + ":11", 100L);
+        verify(redisUtil).evictByPatternWithLockDetailed(
+                RedisConstants.PREFIX_PRODUCT_LIST + "*", 100L);
+        verify(redisUtil).evictByPatternWithLockDetailed(
+                RedisConstants.PREFIX_PRODUCT_SEARCH + "*", 100L);
         verify(redisUtil, never()).evictWithLock(
-                RedisConstants.PREFIX_PRODUCT_RECOMMEND + GENERATION + ":");
+                RedisConstants.PREFIX_PRODUCT_RECOMMEND + GENERATION + ":", 100L);
     }
 
     @Test
@@ -135,7 +160,7 @@ class ProductCacheServiceImplTest {
         productCacheService.invalidateAfterSpuChange(11L, true);
 
         verify(redisUtil).evictWithLock(
-                RedisConstants.PREFIX_PRODUCT_RECOMMEND + GENERATION + ":");
+                RedisConstants.PREFIX_PRODUCT_RECOMMEND + GENERATION + ":", 100L);
     }
 
     @Test
@@ -144,7 +169,10 @@ class ProductCacheServiceImplTest {
         when(redisUtil.queryWithCache(
                 eq(RedisConstants.PREFIX_PRODUCT_DETAIL + GENERATION + ":11"),
                 eq(ProductDetailCache.class),
-                eq(RedisConstants.CACHE_TTL_HOUR),
+                eq(ProductCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(ProductCacheConstants.JITTER_SECONDS),
+                eq(100L),
                 any())).thenReturn(expected);
 
         ProductDetailCache result = productCacheService.getProductDetail(11L, () -> expected);
@@ -158,7 +186,10 @@ class ProductCacheServiceImplTest {
         when(redisUtil.queryWithCache(
                 eq(RedisConstants.PREFIX_PRODUCT_RECOMMEND + GENERATION + ":"),
                 eq(ProductListResult.class),
-                eq(RedisConstants.CACHE_TTL_HOUR),
+                eq(ProductCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(ProductCacheConstants.JITTER_SECONDS),
+                eq(100L),
                 any())).thenReturn(expected);
 
         ProductListResult result = productCacheService.getRecommend(() -> expected);
@@ -192,7 +223,10 @@ class ProductCacheServiceImplTest {
                 RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2",
                 RedisConstants.PREFIX_SKU_INFO + GENERATION + ":3")))
                 .thenReturn(java.util.Arrays.asList(first, null, third));
-        when(redisLockUtil.tryLock(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2"))
+        when(redisUtil.multiGet(List.of(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2")))
+                .thenReturn(Collections.singletonList(null));
+        when(redisLockUtil.tryLock(
+                eq(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2"), anyLong()))
                 .thenReturn(true);
 
         List<Sku> result = productCacheService.getSkusByIds(
@@ -203,19 +237,21 @@ class ProductCacheServiceImplTest {
                 });
 
         assertThat(result).containsExactly(first, second, third);
-        verify(redisUtil).set(
+        verify(redisUtil).setWithJitter(
                 RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2",
                 second,
-                RedisConstants.CACHE_TTL_HOUR,
-                TimeUnit.SECONDS);
+                ProductCacheConstants.TTL_SECONDS,
+                TimeUnit.SECONDS,
+                ProductCacheConstants.JITTER_SECONDS);
         verify(redisLockUtil).unlock(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2");
     }
 
     @Test
     void getSkusByIds_cachesNullSentinelForMissingIds() {
         when(redisUtil.multiGet(List.of(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9")))
-                .thenReturn(Collections.singletonList(null));
-        when(redisLockUtil.tryLock(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9"))
+                .thenReturn(Collections.singletonList(null), Collections.singletonList(null));
+        when(redisLockUtil.tryLock(
+                eq(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9"), anyLong()))
                 .thenReturn(true);
 
         List<Sku> result = productCacheService.getSkusByIds(
@@ -249,7 +285,8 @@ class ProductCacheServiceImplTest {
     void getSkusByIds_lockUnavailable_returnsDbDataWithoutWritingCache() {
         when(redisUtil.multiGet(List.of(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9")))
                 .thenReturn(Collections.singletonList(null));
-        when(redisLockUtil.tryLock(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9"))
+        when(redisLockUtil.tryLock(
+                eq(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9"), anyLong()))
                 .thenReturn(false);
         Sku loaded = sku(9L);
 

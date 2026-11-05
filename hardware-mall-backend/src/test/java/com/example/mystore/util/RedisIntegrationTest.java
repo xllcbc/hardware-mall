@@ -1,13 +1,19 @@
 package com.example.mystore.util;
 
 import com.example.mystore.common.constant.PricingCacheConstants;
+import com.example.mystore.common.constant.ProductCacheConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.vo.PricingLevelCache;
+import com.example.mystore.entity.vo.ProductDetailCache;
+import com.example.mystore.event.ProductCacheInvalidationEvent;
+import com.example.mystore.event.ProductCacheInvalidationListener;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.event.StockCacheEventListener;
 import com.example.mystore.service.ProductCacheService;
 import com.example.mystore.service.SkuService;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 
@@ -50,6 +57,12 @@ class RedisIntegrationTest {
 
     @Autowired
     private ProductCacheService productCacheService;
+
+    @Autowired
+    private ProductCacheInvalidationListener productCacheInvalidationListener;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
@@ -291,9 +304,10 @@ class RedisIntegrationTest {
         try {
             assertThat(loaderStarted.await(5, TimeUnit.SECONDS)).isTrue();
             long startedAt = System.nanoTime();
-            productCacheService.invalidateAfterSkuChange(1L, skuId);
+            assertThatThrownBy(() -> productCacheService.invalidateAfterSkuChange(1L, skuId))
+                    .hasMessageContaining("lock_timeout");
             long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
-            assertThat(elapsedMillis).isBetween(900L, 1400L);
+            assertThat(elapsedMillis).isBetween(50L, 1000L);
 
             assertThat(staleRead.get(5, TimeUnit.SECONDS).getPrice())
                     .isEqualByComparingTo("1.00");
@@ -310,6 +324,193 @@ class RedisIntegrationTest {
             assertThat(redisUtil.hasKey(
                     RedisConstants.PREFIX_SKU_INFO + currentGeneration + ":" + skuId)).isTrue();
         } finally {
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void batchSkuReadReloadsCacheAfterLockAndOnlyQueriesStillMissingSkus() throws Exception {
+        Long skuId = 91L;
+        String key = RedisConstants.PREFIX_SKU_INFO + PRODUCT_GENERATION + ":" + skuId;
+        CountDownLatch lockAcquired = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        AtomicInteger loaderCalls = new AtomicInteger();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<?> holder = executor.submit(() -> {
+            assertThat(redisLockUtil.tryLock(key)).isTrue();
+            lockAcquired.countDown();
+            await(releaseLock);
+            redisLockUtil.unlock(key);
+        });
+
+        try {
+            assertThat(lockAcquired.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<List<Sku>> reader = executor.submit(() ->
+                    productCacheService.getSkusByIds(List.of(skuId), ids -> {
+                        loaderCalls.incrementAndGet();
+                        return List.of(sku(skuId, "1.00"));
+                    }));
+
+            Thread.sleep(50);
+            Sku cachedByOtherRequest = sku(skuId, "2.00");
+            redisUtil.set(key, cachedByOtherRequest, 60, TimeUnit.SECONDS);
+            releaseLock.countDown();
+
+            assertThat(reader.get(5, TimeUnit.SECONDS).get(0).getPrice())
+                    .isEqualByComparingTo("2.00");
+            assertThat(loaderCalls).hasValue(0);
+        } finally {
+            releaseLock.countDown();
+            holder.get(5, TimeUnit.SECONDS);
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void batchSkuReadTimesOutBoundedAndDoesNotWriteCache() throws Exception {
+        Long skuId = 92L;
+        String key = RedisConstants.PREFIX_SKU_INFO + PRODUCT_GENERATION + ":" + skuId;
+        CountDownLatch lockAcquired = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> holder = executor.submit(() -> {
+            assertThat(redisLockUtil.tryLock(key)).isTrue();
+            lockAcquired.countDown();
+            await(releaseLock);
+            redisLockUtil.unlock(key);
+        });
+
+        try {
+            assertThat(lockAcquired.await(5, TimeUnit.SECONDS)).isTrue();
+            long startedAt = System.nanoTime();
+            List<Sku> result = productCacheService.getSkusByIds(
+                    List.of(skuId), ids -> List.of(sku(skuId, "3.00")));
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+            assertThat(result.get(0).getPrice()).isEqualByComparingTo("3.00");
+            assertThat(elapsedMillis).isBetween(50L, 1000L);
+            assertThat(redisUtil.hasKey(key)).isFalse();
+        } finally {
+            releaseLock.countDown();
+            holder.get(5, TimeUnit.SECONDS);
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void productQueryLockTimeoutFallsBackToDatabaseWithoutCaching() throws Exception {
+        String cacheKey = RedisConstants.PREFIX_PRODUCT_LIST + PRODUCT_GENERATION + ":all:1:20:1";
+        CountDownLatch lockAcquired = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> holder = executor.submit(() -> {
+            assertThat(redisLockUtil.tryLock(cacheKey)).isTrue();
+            lockAcquired.countDown();
+            await(releaseLock);
+            redisLockUtil.unlock(cacheKey);
+        });
+
+        try {
+            assertThat(lockAcquired.await(5, TimeUnit.SECONDS)).isTrue();
+            AtomicInteger loaderCalls = new AtomicInteger();
+            long startedAt = System.nanoTime();
+            var result = productCacheService.getProductList(
+                    null, 1, 20, 1, () -> {
+                        loaderCalls.incrementAndGet();
+                        return new com.example.mystore.entity.vo.ProductListResult(List.of(), 0);
+                    });
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+            assertThat(result.getTotal()).isZero();
+            assertThat(loaderCalls).hasValue(1);
+            assertThat(elapsedMillis).isBetween(50L, 1000L);
+            assertThat(redisUtil.hasKey(cacheKey)).isFalse();
+        } finally {
+            releaseLock.countDown();
+            holder.get(5, TimeUnit.SECONDS);
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void priceRelatedProductCachesStayBelowFiveMinuteHardLimit() {
+        productCacheService.getProductList(
+                null, 1, 20, 1,
+                () -> new com.example.mystore.entity.vo.ProductListResult(List.of(), 0));
+        productCacheService.getProductDetail(1L, ProductDetailCache::new);
+        productCacheService.getRecommend(
+                () -> new com.example.mystore.entity.vo.ProductListResult(List.of(), 0));
+        productCacheService.searchProducts(
+                "drill", null, 1, 20, 1,
+                () -> new com.example.mystore.entity.vo.ProductListResult(List.of(), 0));
+        productCacheService.getSkusByIds(List.of(93L), ids -> List.of(sku(93L, "4.00")));
+
+        assertThat(redisUtil.getExpire(
+                RedisConstants.PREFIX_PRODUCT_LIST + PRODUCT_GENERATION + ":all:1:20:1"))
+                .isBetween(ProductCacheConstants.TTL_SECONDS - 5,
+                        ProductCacheConstants.MAX_STALE_SECONDS);
+        assertThat(redisUtil.getExpire(
+                RedisConstants.PREFIX_PRODUCT_DETAIL + PRODUCT_GENERATION + ":1"))
+                .isBetween(ProductCacheConstants.TTL_SECONDS - 5,
+                        ProductCacheConstants.MAX_STALE_SECONDS);
+        assertThat(redisUtil.getExpire(
+                RedisConstants.PREFIX_PRODUCT_RECOMMEND + PRODUCT_GENERATION + ":"))
+                .isBetween(ProductCacheConstants.TTL_SECONDS - 5,
+                        ProductCacheConstants.MAX_STALE_SECONDS);
+        assertThat(redisUtil.getExpire(
+                RedisConstants.PREFIX_PRODUCT_SEARCH + PRODUCT_GENERATION + ":"
+                        + "b76419d9ad059fdfdc06637cb4db8ac93be25deb5bdf3cd2a7bbedaffe99d014"
+                        + ":all:1:20:1"))
+                .isBetween(ProductCacheConstants.TTL_SECONDS - 5,
+                        ProductCacheConstants.MAX_STALE_SECONDS);
+        assertThat(redisUtil.getExpire(
+                RedisConstants.PREFIX_SKU_INFO + PRODUCT_GENERATION + ":93"))
+                .isBetween(ProductCacheConstants.TTL_SECONDS - 5,
+                        ProductCacheConstants.MAX_STALE_SECONDS);
+        assertThat(ProductCacheConstants.MAX_STALE_SECONDS).isEqualTo(300L);
+    }
+
+    @Test
+    void productInvalidationFailureRecordsMetricWithoutFailingCaller() throws Exception {
+        Long skuId = 94L;
+        String skuKey = RedisConstants.PREFIX_SKU_INFO + PRODUCT_GENERATION + ":" + skuId;
+        CountDownLatch lockAcquired = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> holder = executor.submit(() -> {
+            assertThat(redisLockUtil.tryLock(skuKey)).isTrue();
+            lockAcquired.countDown();
+            await(releaseLock);
+            redisLockUtil.unlock(skuKey);
+        });
+
+        try {
+            assertThat(lockAcquired.await(5, TimeUnit.SECONDS)).isTrue();
+            Counter before = meterRegistry.find("product.cache.invalidation")
+                    .tags("result", "failure", "cause", "lock_timeout")
+                    .counter();
+            double beforeCount = before == null ? 0.0 : before.count();
+
+            assertThatCode(() -> productCacheInvalidationListener.onProductCacheInvalidation(
+                    new ProductCacheInvalidationEvent(
+                            ProductCacheInvalidationEvent.Type.SKU_CHANGED,
+                            1L,
+                            skuId,
+                            false)))
+                    .doesNotThrowAnyException();
+
+            Counter after = meterRegistry.find("product.cache.invalidation")
+                    .tags("result", "failure", "cause", "lock_timeout")
+                    .counter();
+            assertThat(after).isNotNull();
+            assertThat(after.count()).isGreaterThan(beforeCount);
+        } finally {
+            releaseLock.countDown();
+            holder.get(5, TimeUnit.SECONDS);
             executor.shutdownNow();
             executor.awaitTermination(5, TimeUnit.SECONDS);
         }
@@ -433,6 +634,13 @@ class RedisIntegrationTest {
         PricingLevelCache cache = new PricingLevelCache();
         cache.setRates(Map.of(9L, new BigDecimal(rate)));
         return cache;
+    }
+
+    private Sku sku(Long id, String price) {
+        Sku sku = new Sku();
+        sku.setId(id);
+        sku.setPrice(new BigDecimal(price));
+        return sku;
     }
 
     private static void await(CountDownLatch latch) {

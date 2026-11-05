@@ -91,6 +91,14 @@ aliyun:
 cors:
   allowed-origins: http://localhost:*
 
+product:
+  cache:
+    lock-wait-ms: 500
+
+stock:
+  cache:
+    lock-wait-ms: 100
+
 dingtalk:
   webhook: ""
   secret: ""

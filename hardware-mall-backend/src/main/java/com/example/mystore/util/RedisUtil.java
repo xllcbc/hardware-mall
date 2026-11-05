@@ -9,6 +9,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -128,6 +129,13 @@ public class RedisUtil {
     }
 
     public long evictByPatternWithLock(String pattern, long maxWaitMillis) {
+        return evictByPatternWithLockDetailed(pattern, maxWaitMillis).deletedCount();
+    }
+
+    /**
+     * 按模式删除缓存，并返回未能取得锁的 key，供失效调用方记录指标与告警。
+     */
+    public PatternEvictionResult evictByPatternWithLockDetailed(String pattern, long maxWaitMillis) {
         Set<String> keys = scanByPattern(pattern);
         Set<String> lockKeys = scanByPattern(RedisConstants.PREFIX_CACHE_LOCK + pattern);
         for (String lockKey : lockKeys) {
@@ -135,12 +143,15 @@ public class RedisUtil {
         }
 
         long deleted = 0;
+        List<String> failedKeys = new ArrayList<>();
         for (String key : keys) {
             if (evictWithLock(key, maxWaitMillis)) {
                 deleted++;
+            } else {
+                failedKeys.add(key);
             }
         }
-        return deleted;
+        return new PatternEvictionResult(deleted, List.copyOf(failedKeys));
     }
 
     /**
@@ -430,4 +441,6 @@ public class RedisUtil {
         this.lockSleepMs = lockSleepMs;
     }
 
+    public record PatternEvictionResult(long deletedCount, List<String> failedKeys) {
+    }
 }
