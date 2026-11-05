@@ -120,7 +120,7 @@ jobs:
             export DB_PORT="${DB_PORT:-3306}"
             export DB_NAME="${DB_NAME:-hardware_mall}"
             export DB_USERNAME="${RELEASE_DB_USERNAME:-${DB_USERNAME:-hardware_mall}}"
-            export MYSQL_PWD="${RELEASE_MYSQL_PWD:-${MYSQL_PWD:-}}"
+            export MYSQL_PWD="${RELEASE_MYSQL_PWD:-${MYSQL_PWD:-${DB_PASSWORD:-}}}"
             export REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
             export REDIS_PORT="${REDIS_PORT:-6379}"
 
