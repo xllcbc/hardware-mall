@@ -134,6 +134,12 @@ jobs:
               exit 1
             fi
 
+            backup_root="${RELEASE_BACKUP_ROOT:-/secure-backups}"
+            if ! mkdir -p "$backup_root" 2>/dev/null || [[ ! -w "$backup_root" ]]; then
+              echo "Backup directory must be writable by $(id -un): $backup_root" >&2
+              exit 1
+            fi
+
             previous_tag="$(cat .current-image-tag 2>/dev/null || true)"
             if [[ -z "$previous_tag" ]]; then
               echo "No previous image tag is recorded; rollback cannot be guaranteed." >&2
@@ -143,7 +149,7 @@ jobs:
             docker pull "$REGISTRY/$NAMESPACE/hardware-mall-admin:$previous_tag"
 
             timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-            backup="/secure-backups/pricing-$RELEASE_TAG-$timestamp.sql"
+            backup="$backup_root/pricing-$RELEASE_TAG-$timestamp.sql"
             rollback() {
               trap - ERR
               set +e

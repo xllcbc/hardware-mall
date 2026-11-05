@@ -34,6 +34,10 @@ export REDIS_PASSWORD='<从密钥管理系统读取；无密码时留空>'
 上一版镜像标签。若文件由 root 创建，需要把属主改为 `DEPLOY_USER`，否则部署
 在更新回滚指针时会失败。
 
+`RELEASE_BACKUP_ROOT` 默认是 `/secure-backups`，目录也必须由 `DEPLOY_USER`
+可写。部署脚本会在停止任何服务之前检查该目录；权限不足时直接失败，不会进入
+维护窗口。
+
 ## 0.1 CI 发布门禁
 
 以下检查必须全部通过，`release-gate` 才允许作为合并和生产部署的前置条件：
