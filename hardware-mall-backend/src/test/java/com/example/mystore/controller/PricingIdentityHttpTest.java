@@ -8,7 +8,7 @@ import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.entity.db.Address;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Category;
-import com.example.mystore.entity.db.LevelCategoryDiscount;
+import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
@@ -20,7 +20,7 @@ import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.mapper.CategoryMapper;
 import com.example.mystore.mapper.AddressMapper;
 import com.example.mystore.mapper.CartMapper;
-import com.example.mystore.mapper.LevelCategoryDiscountMapper;
+import com.example.mystore.mapper.LevelCategoryRateMapper;
 import com.example.mystore.mapper.LogisticsMapper;
 import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
@@ -86,7 +86,7 @@ class PricingIdentityHttpTest {
     @Autowired
     private UserLevelMapper userLevelMapper;
     @Autowired
-    private LevelCategoryDiscountMapper levelCategoryDiscountMapper;
+    private LevelCategoryRateMapper levelCategoryRateMapper;
     @Autowired
     private LogisticsMapper logisticsMapper;
     @Autowired
@@ -134,11 +134,11 @@ class PricingIdentityHttpTest {
         level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
         userLevelMapper.insert(level);
 
-        LevelCategoryDiscount discount = new LevelCategoryDiscount();
+        LevelCategoryRate discount = new LevelCategoryRate();
         discount.setLevelId(CUSTOM_LEVEL_ID);
         discount.setCategoryId(CATEGORY_ID);
         discount.setRate(new BigDecimal("0.8000"));
-        levelCategoryDiscountMapper.insert(discount);
+        levelCategoryRateMapper.insert(discount);
 
         Spu spu = new Spu();
         spu.setId(PRODUCT_ID);
@@ -240,7 +240,7 @@ class PricingIdentityHttpTest {
         assertThat(items).hasSize(1);
         assertThat(items.get(0).getLevelId()).isEqualTo(CUSTOM_LEVEL_ID);
         assertThat(items.get(0).getLevelName()).isEqualTo("身份链工程客户");
-        assertThat(items.get(0).getDiscountRate()).isEqualByComparingTo("0.8000");
+        assertThat(items.get(0).getPricingRate()).isEqualByComparingTo("0.8000");
 
         Cart cart = new Cart();
         cart.setUserId(session.userId());
@@ -249,12 +249,12 @@ class PricingIdentityHttpTest {
         cart.setDeleteTime(0L);
         cartMapper.insert(cart);
 
-        LevelCategoryDiscount changed = levelCategoryDiscountMapper.selectOne(
-                new LambdaQueryWrapper<LevelCategoryDiscount>()
-                        .eq(LevelCategoryDiscount::getLevelId, CUSTOM_LEVEL_ID)
-                        .eq(LevelCategoryDiscount::getCategoryId, CATEGORY_ID));
+        LevelCategoryRate changed = levelCategoryRateMapper.selectOne(
+                new LambdaQueryWrapper<LevelCategoryRate>()
+                        .eq(LevelCategoryRate::getLevelId, CUSTOM_LEVEL_ID)
+                        .eq(LevelCategoryRate::getCategoryId, CATEGORY_ID));
         changed.setRate(new BigDecimal("0.7000"));
-        levelCategoryDiscountMapper.updateById(changed);
+        levelCategoryRateMapper.updateById(changed);
         redisUtil.delete(RedisConstants.PREFIX_PRICING_LEVEL + CUSTOM_LEVEL_ID);
 
         JsonNode changedResponse = postJson(
@@ -426,8 +426,8 @@ class PricingIdentityHttpTest {
         logisticsMapper.deleteById(LOGISTICS_ID);
         skuMapper.deleteById(9301L);
         spuMapper.deleteById(PRODUCT_ID);
-        levelCategoryDiscountMapper.delete(new LambdaQueryWrapper<LevelCategoryDiscount>()
-                .eq(LevelCategoryDiscount::getLevelId, CUSTOM_LEVEL_ID));
+        levelCategoryRateMapper.delete(new LambdaQueryWrapper<LevelCategoryRate>()
+                .eq(LevelCategoryRate::getLevelId, CUSTOM_LEVEL_ID));
         userLevelMapper.deleteById(CUSTOM_LEVEL_ID);
         categoryMapper.deleteById(CATEGORY_ID);
     }

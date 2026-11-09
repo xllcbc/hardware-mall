@@ -4,11 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.entity.db.Category;
-import com.example.mystore.entity.db.LevelCategoryDiscount;
+import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.UserLevel;
-import com.example.mystore.entity.vo.LevelDiscountVO;
+import com.example.mystore.entity.vo.LevelRateVO;
 import com.example.mystore.mapper.CategoryMapper;
-import com.example.mystore.mapper.LevelCategoryDiscountMapper;
+import com.example.mystore.mapper.LevelCategoryRateMapper;
 import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.service.PricingRuleService;
 import org.junit.jupiter.api.Test;
@@ -41,10 +41,10 @@ class PricingRuleServiceCopyMatrixTest {
     private CategoryMapper categoryMapper;
 
     @Autowired
-    private LevelCategoryDiscountMapper levelCategoryDiscountMapper;
+    private LevelCategoryRateMapper levelCategoryRateMapper;
 
     @Test
-    void copyDiscounts_replacesTargetMatrixAndPreservesSourceGap() {
+    void copyRates_replacesTargetMatrixAndPreservesSourceGap() {
         Long targetLevelId = createLevel("复制目标等级");
         Long sourceLevelId = createLevel("复制来源等级");
         Long configuredCategoryId = createCategory("来源已配置分类");
@@ -55,11 +55,11 @@ class PricingRuleServiceCopyMatrixTest {
         insertDiscount(targetLevelId, configuredCategoryId, "0.9000");
         insertDiscount(targetLevelId, targetOnlyCategoryId, "0.8000");
 
-        pricingRuleService.copyDiscounts(targetLevelId, sourceLevelId);
+        pricingRuleService.copyRates(targetLevelId, sourceLevelId);
 
-        List<LevelCategoryDiscount> targetRows = levelCategoryDiscountMapper.selectList(
-                new LambdaQueryWrapper<LevelCategoryDiscount>()
-                        .eq(LevelCategoryDiscount::getLevelId, targetLevelId));
+        List<LevelCategoryRate> targetRows = levelCategoryRateMapper.selectList(
+                new LambdaQueryWrapper<LevelCategoryRate>()
+                        .eq(LevelCategoryRate::getLevelId, targetLevelId));
         assertThat(targetRows)
                 .singleElement()
                 .satisfies(row -> {
@@ -67,7 +67,7 @@ class PricingRuleServiceCopyMatrixTest {
                     assertThat(row.getRate()).isEqualByComparingTo("0.6000");
                 });
 
-        List<LevelDiscountVO> matrix = pricingRuleService.getDiscounts(targetLevelId);
+        List<LevelRateVO> matrix = pricingRuleService.getRates(targetLevelId);
         assertThat(matrix)
                 .filteredOn(item -> item.getCategoryId().equals(configuredCategoryId))
                 .singleElement()
@@ -92,7 +92,7 @@ class PricingRuleServiceCopyMatrixTest {
     }
 
     @Test
-    void copyDiscounts_rejectsIncompleteSourceForEnabledTargetWithoutChangingTarget() {
+    void copyRates_rejectsIncompleteSourceForEnabledTargetWithoutChangingTarget() {
         Long targetLevelId = createLevel("启用复制目标等级");
         Long sourceLevelId = createLevel("不完整复制来源等级");
         Long configuredCategoryId = createCategory("已配置分类");
@@ -103,15 +103,15 @@ class PricingRuleServiceCopyMatrixTest {
         insertDiscount(targetLevelId, gapCategoryId, "0.8500");
         insertDiscount(sourceLevelId, configuredCategoryId, "0.6000");
 
-        assertThatThrownBy(() -> pricingRuleService.copyDiscounts(targetLevelId, sourceLevelId))
+        assertThatThrownBy(() -> pricingRuleService.copyRates(targetLevelId, sourceLevelId))
                 .hasMessage("来源等级倍率矩阵未填满，不能复制到已启用等级");
 
-        List<LevelCategoryDiscount> targetRows = levelCategoryDiscountMapper.selectList(
-                new LambdaQueryWrapper<LevelCategoryDiscount>()
-                        .eq(LevelCategoryDiscount::getLevelId, targetLevelId)
-                        .orderByAsc(LevelCategoryDiscount::getCategoryId));
+        List<LevelCategoryRate> targetRows = levelCategoryRateMapper.selectList(
+                new LambdaQueryWrapper<LevelCategoryRate>()
+                        .eq(LevelCategoryRate::getLevelId, targetLevelId)
+                        .orderByAsc(LevelCategoryRate::getCategoryId));
         assertThat(targetRows)
-                .extracting(LevelCategoryDiscount::getRate)
+                .extracting(LevelCategoryRate::getRate)
                 .containsExactly(new BigDecimal("0.9000"), new BigDecimal("0.8500"));
     }
 
@@ -121,7 +121,7 @@ class PricingRuleServiceCopyMatrixTest {
         Long originalCategoryId = createCategory("原分类");
         insertDiscount(levelId, originalCategoryId, "1.0000");
 
-        assertThat(pricingRuleService.getDiscounts(levelId))
+        assertThat(pricingRuleService.getRates(levelId))
                 .singleElement()
                 .satisfies(item -> {
                     assertThat(item.isMissing()).isFalse();
@@ -129,7 +129,7 @@ class PricingRuleServiceCopyMatrixTest {
                 });
 
         Long newCategoryId = createCategory("新增分类");
-        List<LevelDiscountVO> matrix = pricingRuleService.getDiscounts(levelId);
+        List<LevelRateVO> matrix = pricingRuleService.getRates(levelId);
 
         assertThat(matrix)
                 .filteredOn(item -> item.getCategoryId().equals(originalCategoryId))
@@ -172,10 +172,10 @@ class PricingRuleServiceCopyMatrixTest {
     }
 
     private void insertDiscount(Long levelId, Long categoryId, String rate) {
-        LevelCategoryDiscount discount = new LevelCategoryDiscount();
+        LevelCategoryRate discount = new LevelCategoryRate();
         discount.setLevelId(levelId);
         discount.setCategoryId(categoryId);
         discount.setRate(new BigDecimal(rate));
-        levelCategoryDiscountMapper.insert(discount);
+        levelCategoryRateMapper.insert(discount);
     }
 }

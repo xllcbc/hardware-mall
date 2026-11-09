@@ -15,7 +15,7 @@ public class UserLevelProductPreviewVO implements Serializable {
     private BigDecimal originalPrice;
     private BigDecimal retailMinPrice;
     private BigDecimal retailMaxPrice;
-    private BigDecimal discountRate;
+    private BigDecimal pricingRate;
     private BigDecimal minPrice;
     private BigDecimal maxPrice;
     private Integer excludeDiscount;

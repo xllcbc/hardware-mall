@@ -7,6 +7,7 @@
 
 ```text
 hardware-mall-backend/src/main/resources/db/migration_2026-11-02_multi_level_pricing_release.sql
+hardware-mall-backend/src/main/resources/db/migration_2026-11-09_level_category_rate.sql
 hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql
 scripts/pricing-release.sh
 scripts/release/smoke.sh
@@ -79,14 +80,16 @@ MySQL 8，然后依次执行：
 ./scripts/pricing-release.sh verify
 ```
 
-`preflight` 会创建 `hardware_mall_pricing_preflight`，恢复备份，再执行完整迁移。
+`preflight` 会创建 `hardware_mall_pricing_preflight`，恢复备份，再按当前 schema
+执行完整迁移：原始 schema 连续执行两个迁移文件，2026-11-02 schema 只执行
+`level_category_rate` 命名迁移。
 成功条件：
 
 - 脚本退出码为 0；
 - 迁移没有输出 `legacy wholesale pricing fields detected`；
 - `verify` 的最终输出为 `PASS: pricing release schema`；
 - 迁移前后用户、分类、SPU、SKU 和订单行数一致；
-- `level_category_discount` 行数为 0。
+- `level_category_rate` 行数为 0。
 
 如果预检失败，停止发布。不得通过删除旧列、跳过预检或修改脚本来继续。
 

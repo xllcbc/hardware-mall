@@ -220,9 +220,9 @@
             <span>{{ row.levelName || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="discountRate" label="倍率" width="90">
+        <el-table-column prop="pricingRate" label="倍率" width="90">
           <template #default="{ row }">
-            <span>{{ row.discountRate != null ? Number(row.discountRate).toFixed(4) : '-' }}</span>
+            <span>{{ row.pricingRate != null ? Number(row.pricingRate).toFixed(4) : '-' }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="quantity" label="数量" width="80" />

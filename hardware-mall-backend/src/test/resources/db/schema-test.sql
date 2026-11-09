@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS `category` (
     `delete_time` BIGINT DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS `level_category_discount` (
+CREATE TABLE IF NOT EXISTS `level_category_rate` (
     `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `level_id` BIGINT NOT NULL,
     `category_id` BIGINT NOT NULL,
@@ -202,7 +202,7 @@ CREATE TABLE IF NOT EXISTS `order_item` (
     `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `level_id` BIGINT DEFAULT NULL,
     `level_name` VARCHAR(50) DEFAULT NULL,
-    `discount_rate` DECIMAL(6,4) DEFAULT NULL,
+    `pricing_rate` DECIMAL(6,4) DEFAULT NULL,
     `quantity` INT NOT NULL DEFAULT 1,
     `subtotal` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

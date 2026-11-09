@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS `category` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='商品分类表';
 
 -- 等级分类倍率表
-CREATE TABLE IF NOT EXISTS `level_category_discount` (
+CREATE TABLE IF NOT EXISTS `level_category_rate` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
     `level_id` BIGINT UNSIGNED NOT NULL COMMENT '用户等级ID',
     `category_id` BIGINT UNSIGNED NOT NULL COMMENT '商品分类ID',
@@ -98,8 +98,8 @@ CREATE TABLE IF NOT EXISTS `level_category_discount` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_level_category` (`level_id`, `category_id`),
     KEY `idx_category_id` (`category_id`),
-    CONSTRAINT `fk_lcd_level` FOREIGN KEY (`level_id`) REFERENCES `user_level` (`id`),
-    CONSTRAINT `fk_lcd_category` FOREIGN KEY (`category_id`) REFERENCES `category` (`id`)
+    CONSTRAINT `fk_lcr_level` FOREIGN KEY (`level_id`) REFERENCES `user_level` (`id`),
+    CONSTRAINT `fk_lcr_category` FOREIGN KEY (`category_id`) REFERENCES `category` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='等级分类倍率表';
 
 -- SPU商品型号表
@@ -270,7 +270,7 @@ CREATE TABLE IF NOT EXISTS `order_item` (
     `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '商品单价快照',
     `level_id` BIGINT UNSIGNED NULL COMMENT '下单时用户等级ID快照',
     `level_name` VARCHAR(50) NULL COMMENT '下单时用户等级名称快照',
-    `discount_rate` DECIMAL(6,4) NULL COMMENT '下单时适用倍率快照',
+    `pricing_rate` DECIMAL(6,4) NULL COMMENT '下单时适用倍率快照',
     `quantity` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '购买数量',
     `subtotal` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '小计金额',
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',

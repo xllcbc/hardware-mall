@@ -21,7 +21,7 @@ public class AdminProductPricingVO implements Serializable {
     private BigDecimal weight;
     private BigDecimal retailMinPrice;
     private BigDecimal retailMaxPrice;
-    private BigDecimal discountRate;
+    private BigDecimal pricingRate;
     private BigDecimal effectiveRate;
     private BigDecimal settlementMinPrice;
     private BigDecimal settlementMaxPrice;

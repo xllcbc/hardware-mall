@@ -164,7 +164,7 @@
           <template #default="{ row }">
             <div class="rate-cell">
               <span :class="['rate-value', { 'is-missing': row.rateMissing }]">
-                {{ formatRate(row.discountRate, row.rateMissing) }}
+                {{ formatRate(row.pricingRate, row.rateMissing) }}
               </span>
               <el-tag
                 v-if="isDiscountExcluded(row.excludeDiscount)"
@@ -838,7 +838,7 @@ const skuLevelPriceColumnLabel = computed(() =>
 const currentSkuRate = computed(() => {
   const row = currentSpu.value
   if (!row || isDiscountExcluded(row.excludeDiscount)) return 1
-  const rate = Number(row.effectiveRate ?? row.discountRate ?? 1)
+  const rate = Number(row.effectiveRate ?? row.pricingRate ?? 1)
   return Number.isFinite(rate) ? rate : 1
 })
 

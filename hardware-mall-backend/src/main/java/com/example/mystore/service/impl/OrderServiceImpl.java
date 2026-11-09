@@ -223,7 +223,7 @@ public class OrderServiceImpl implements OrderService {
             item.setPrice(unitPrice);
             item.setLevelId(levelId);
             item.setLevelName(userLevelService.getName(levelId));
-            item.setDiscountRate(rate);
+            item.setPricingRate(rate);
             item.setQuantity(cartItem.getQuantity());
             item.setSubtotal(subtotal);
             item.setCreateTime(LocalDateTime.now());
@@ -935,7 +935,7 @@ public class OrderServiceImpl implements OrderService {
         if (includePricingSnapshot) {
             vo.setLevelId(item.getLevelId());
             vo.setLevelName(item.getLevelName());
-            vo.setDiscountRate(item.getDiscountRate());
+            vo.setPricingRate(item.getPricingRate());
         }
         return vo;
     }

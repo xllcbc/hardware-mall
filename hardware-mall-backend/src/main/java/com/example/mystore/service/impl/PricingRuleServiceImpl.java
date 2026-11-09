@@ -6,14 +6,14 @@ import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Category;
-import com.example.mystore.entity.db.LevelCategoryDiscount;
+import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.UserLevel;
-import com.example.mystore.entity.dto.LevelDiscountItemRequest;
-import com.example.mystore.entity.vo.LevelDiscountVO;
+import com.example.mystore.entity.dto.LevelRateItemRequest;
+import com.example.mystore.entity.vo.LevelRateVO;
 import com.example.mystore.entity.vo.PricingLevelCache;
 import com.example.mystore.event.PricingCacheInvalidationEvent;
 import com.example.mystore.mapper.CategoryMapper;
-import com.example.mystore.mapper.LevelCategoryDiscountMapper;
+import com.example.mystore.mapper.LevelCategoryRateMapper;
 import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.util.RedisUtil;
@@ -37,7 +37,7 @@ import java.util.Set;
 public class PricingRuleServiceImpl implements PricingRuleService {
 
     private final UserLevelMapper userLevelMapper;
-    private final LevelCategoryDiscountMapper levelCategoryDiscountMapper;
+    private final LevelCategoryRateMapper levelCategoryRateMapper;
     private final CategoryMapper categoryMapper;
     private final RedisUtil redisUtil;
     private final ApplicationEventPublisher eventPublisher;
@@ -80,7 +80,7 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     }
 
     @Override
-    public List<LevelDiscountVO> getDiscounts(Long levelId) {
+    public List<LevelRateVO> getRates(Long levelId) {
         UserLevel level = requireLevel(levelId);
         if (Integer.valueOf(UserLevelStatusConstants.IS_RETAIL).equals(level.getIsRetail())) {
             return List.of();
@@ -90,10 +90,10 @@ public class PricingRuleServiceImpl implements PricingRuleService {
                 .orderByDesc(Category::getSortOrder)
                 .orderByAsc(Category::getId));
         Map<Long, BigDecimal> rates = loadRates(levelId);
-        List<LevelDiscountVO> result = new ArrayList<>(categories.size());
+        List<LevelRateVO> result = new ArrayList<>(categories.size());
         for (Category category : categories) {
             BigDecimal rate = rates.get(category.getId());
-            LevelDiscountVO vo = new LevelDiscountVO();
+            LevelRateVO vo = new LevelRateVO();
             vo.setCategoryId(category.getId());
             vo.setCategoryName(category.getName());
             vo.setRate(rate);
@@ -105,14 +105,14 @@ public class PricingRuleServiceImpl implements PricingRuleService {
 
     @Override
     @Transactional
-    public void saveDiscounts(Long levelId, List<LevelDiscountItemRequest> items) {
+    public void saveRates(Long levelId, List<LevelRateItemRequest> items) {
         UserLevel level = requireLevel(levelId);
         rejectRetail(level);
         if (items == null || items.isEmpty()) {
             throw new BusinessException("倍率明细不能为空");
         }
         Set<Long> seen = new HashSet<>();
-        for (LevelDiscountItemRequest item : items) {
+        for (LevelRateItemRequest item : items) {
             if (item == null || item.getCategoryId() == null) {
                 throw new BusinessException("分类不能为空");
             }
@@ -129,7 +129,7 @@ public class PricingRuleServiceImpl implements PricingRuleService {
 
     @Override
     @Transactional
-    public void fillDiscounts(Long levelId, BigDecimal rate) {
+    public void fillRates(Long levelId, BigDecimal rate) {
         UserLevel level = requireLevel(levelId);
         rejectRetail(level);
         validateRate(rate);
@@ -144,7 +144,7 @@ public class PricingRuleServiceImpl implements PricingRuleService {
 
     @Override
     @Transactional
-    public void copyDiscounts(Long levelId, Long sourceLevelId) {
+    public void copyRates(Long levelId, Long sourceLevelId) {
         UserLevel target = requireLevel(levelId);
         rejectRetail(target);
         if (sourceLevelId == null) {
@@ -162,8 +162,8 @@ public class PricingRuleServiceImpl implements PricingRuleService {
             throw new BusinessException("来源等级倍率矩阵未填满，不能复制到已启用等级");
         }
         Map<Long, BigDecimal> sourceRates = loadRates(sourceLevelId);
-        levelCategoryDiscountMapper.delete(new LambdaQueryWrapper<LevelCategoryDiscount>()
-                .eq(LevelCategoryDiscount::getLevelId, levelId));
+        levelCategoryRateMapper.delete(new LambdaQueryWrapper<LevelCategoryRate>()
+                .eq(LevelCategoryRate::getLevelId, levelId));
         for (Map.Entry<Long, BigDecimal> entry : sourceRates.entrySet()) {
             insertRate(levelId, entry.getKey(), entry.getValue());
         }
@@ -202,11 +202,11 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     }
 
     private Map<Long, BigDecimal> loadRates(Long levelId) {
-        List<LevelCategoryDiscount> rows = levelCategoryDiscountMapper.selectList(
-                new LambdaQueryWrapper<LevelCategoryDiscount>()
-                        .eq(LevelCategoryDiscount::getLevelId, levelId));
+        List<LevelCategoryRate> rows = levelCategoryRateMapper.selectList(
+                new LambdaQueryWrapper<LevelCategoryRate>()
+                        .eq(LevelCategoryRate::getLevelId, levelId));
         Map<Long, BigDecimal> rates = new HashMap<>();
-        for (LevelCategoryDiscount row : rows) {
+        for (LevelCategoryRate row : rows) {
             if (row.getCategoryId() != null && row.getRate() != null) {
                 rates.put(row.getCategoryId(), row.getRate());
             }
@@ -215,10 +215,10 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     }
 
     private void upsertRate(Long levelId, Long categoryId, BigDecimal rate) {
-        LevelCategoryDiscount existing = levelCategoryDiscountMapper.selectOne(
-                new LambdaQueryWrapper<LevelCategoryDiscount>()
-                        .eq(LevelCategoryDiscount::getLevelId, levelId)
-                        .eq(LevelCategoryDiscount::getCategoryId, categoryId)
+        LevelCategoryRate existing = levelCategoryRateMapper.selectOne(
+                new LambdaQueryWrapper<LevelCategoryRate>()
+                        .eq(LevelCategoryRate::getLevelId, levelId)
+                        .eq(LevelCategoryRate::getCategoryId, categoryId)
                         .last("LIMIT 1"));
         if (existing == null) {
             insertRate(levelId, categoryId, rate);
@@ -226,17 +226,17 @@ public class PricingRuleServiceImpl implements PricingRuleService {
         }
         existing.setRate(rate);
         existing.setUpdateTime(LocalDateTime.now());
-        levelCategoryDiscountMapper.updateById(existing);
+        levelCategoryRateMapper.updateById(existing);
     }
 
     private void insertRate(Long levelId, Long categoryId, BigDecimal rate) {
-        LevelCategoryDiscount row = new LevelCategoryDiscount();
+        LevelCategoryRate row = new LevelCategoryRate();
         row.setLevelId(levelId);
         row.setCategoryId(categoryId);
         row.setRate(rate);
         row.setCreateTime(LocalDateTime.now());
         row.setUpdateTime(LocalDateTime.now());
-        levelCategoryDiscountMapper.insert(row);
+        levelCategoryRateMapper.insert(row);
     }
 
     private UserLevel requireLevel(Long levelId) {

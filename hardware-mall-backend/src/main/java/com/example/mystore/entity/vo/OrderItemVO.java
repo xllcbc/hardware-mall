@@ -20,7 +20,7 @@ public class OrderItemVO implements Serializable {
     private BigDecimal price;
     private Long levelId;
     private String levelName;
-    private BigDecimal discountRate;
+    private BigDecimal pricingRate;
     private Integer quantity;
     private BigDecimal subtotal;
     private LocalDateTime createTime;

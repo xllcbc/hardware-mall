@@ -5,7 +5,7 @@ import lombok.Data;
 import java.math.BigDecimal;
 
 @Data
-public class LevelDiscountItemRequest {
+public class LevelRateItemRequest {
     private Long categoryId;
     private BigDecimal rate;
 }

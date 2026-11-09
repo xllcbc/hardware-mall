@@ -794,7 +794,7 @@ class OrderServiceImplTest {
             OrderItem item = captor.getValue().get(0);
             assertThat(item.getPrice()).isEqualByComparingTo("20.00");
             assertThat(item.getLevelId()).isEqualTo(2L);
-            assertThat(item.getDiscountRate()).isEqualByComparingTo("0.8000");
+            assertThat(item.getPricingRate()).isEqualByComparingTo("0.8000");
             assertThat(item.getSubtotal()).isEqualByComparingTo("40.00");
 
             ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
@@ -863,7 +863,7 @@ class OrderServiceImplTest {
             OrderItem item = captor.getValue().get(0);
             assertThat(item.getPrice()).isEqualByComparingTo("25.00");
             assertThat(item.getLevelId()).isEqualTo(1L);
-            assertThat(item.getDiscountRate()).isEqualByComparingTo("1.0000");
+            assertThat(item.getPricingRate()).isEqualByComparingTo("1.0000");
             assertThat(item.getSubtotal()).isEqualByComparingTo("50.00");
 
             ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
@@ -898,7 +898,7 @@ class OrderServiceImplTest {
         item.setPrice(new BigDecimal("20.00"));
         item.setLevelId(2L);
         item.setLevelName("批发A");
-        item.setDiscountRate(new BigDecimal("0.8000"));
+        item.setPricingRate(new BigDecimal("0.8000"));
         item.setQuantity(1);
         item.setSubtotal(new BigDecimal("20.00"));
         when(orderItemMapper.selectList(any())).thenReturn(List.of(item));
@@ -906,12 +906,12 @@ class OrderServiceImplTest {
         OrderVO userView = orderService.getOrderByOrderNo("SO-SNAPSHOT");
         assertThat(userView.getItems().get(0).getLevelId()).isNull();
         assertThat(userView.getItems().get(0).getLevelName()).isNull();
-        assertThat(userView.getItems().get(0).getDiscountRate()).isNull();
+        assertThat(userView.getItems().get(0).getPricingRate()).isNull();
 
         OrderVO adminView = orderService.getAdminOrderById(100L);
         assertThat(adminView.getItems().get(0).getLevelId()).isEqualTo(2L);
         assertThat(adminView.getItems().get(0).getLevelName()).isEqualTo("批发A");
-        assertThat(adminView.getItems().get(0).getDiscountRate()).isEqualByComparingTo("0.8000");
+        assertThat(adminView.getItems().get(0).getPricingRate()).isEqualByComparingTo("0.8000");
     }
 
     @Test

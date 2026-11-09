@@ -4,7 +4,7 @@ import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.event.PricingCacheInvalidationEvent;
-import com.example.mystore.mapper.LevelCategoryDiscountMapper;
+import com.example.mystore.mapper.LevelCategoryRateMapper;
 import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.PricingRuleService;
@@ -25,7 +25,7 @@ class UserLevelServiceImplTest {
     @Mock
     private UserLevelMapper userLevelMapper;
     @Mock
-    private LevelCategoryDiscountMapper levelCategoryDiscountMapper;
+    private LevelCategoryRateMapper levelCategoryRateMapper;
     @Mock
     private UserMapper userMapper;
     @Mock

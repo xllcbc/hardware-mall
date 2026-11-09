@@ -3,12 +3,12 @@ package com.example.mystore.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.common.exception.BusinessException;
-import com.example.mystore.entity.db.LevelCategoryDiscount;
+import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.User;
 import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.entity.vo.UserLevelVO;
 import com.example.mystore.event.PricingCacheInvalidationEvent;
-import com.example.mystore.mapper.LevelCategoryDiscountMapper;
+import com.example.mystore.mapper.LevelCategoryRateMapper;
 import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.PricingRuleService;
@@ -28,7 +28,7 @@ import java.util.List;
 public class UserLevelServiceImpl implements UserLevelService {
 
     private final UserLevelMapper userLevelMapper;
-    private final LevelCategoryDiscountMapper levelCategoryDiscountMapper;
+    private final LevelCategoryRateMapper levelCategoryRateMapper;
     private final UserMapper userMapper;
     private final PricingRuleService pricingRuleService;
     private final ApplicationEventPublisher eventPublisher;
@@ -143,8 +143,8 @@ public class UserLevelServiceImpl implements UserLevelService {
         if (users != null && users > 0) {
             throw new BusinessException("该等级仍有关联用户，不能删除");
         }
-        levelCategoryDiscountMapper.delete(new LambdaQueryWrapper<LevelCategoryDiscount>()
-                .eq(LevelCategoryDiscount::getLevelId, id));
+        levelCategoryRateMapper.delete(new LambdaQueryWrapper<LevelCategoryRate>()
+                .eq(LevelCategoryRate::getLevelId, id));
         userLevelMapper.deleteById(id);
         eventPublisher.publishEvent(new PricingCacheInvalidationEvent(
                 PricingCacheInvalidationEvent.Type.LEVEL_AVAILABILITY_CHANGED, id));

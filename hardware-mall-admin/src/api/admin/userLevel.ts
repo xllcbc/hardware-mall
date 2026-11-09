@@ -9,7 +9,7 @@ export interface UserLevel {
   userCount?: number
 }
 
-export interface LevelDiscount {
+export interface LevelRate {
   categoryId: number
   categoryName: string
   rate?: number
@@ -36,21 +36,21 @@ export const deleteUserLevel = (id: number) => {
   return request.delete(`/admin/user-level/${id}`)
 }
 
-export const getUserLevelDiscounts = (id: number) => {
-  return request.get<LevelDiscount[]>(`/admin/user-level/${id}/discounts`)
+export const getUserLevelRates = (id: number) => {
+  return request.get<LevelRate[]>(`/admin/user-level/${id}/rates`)
 }
 
-export const saveUserLevelDiscounts = (
+export const saveUserLevelRates = (
   id: number,
   items: Array<{ categoryId: number; rate: number }>
 ) => {
-  return request.put(`/admin/user-level/${id}/discounts`, { items })
+  return request.put(`/admin/user-level/${id}/rates`, { items })
 }
 
-export const fillUserLevelDiscounts = (id: number, rate: number) => {
-  return request.post(`/admin/user-level/${id}/discounts/fill`, { rate })
+export const fillUserLevelRates = (id: number, rate: number) => {
+  return request.post(`/admin/user-level/${id}/rates/fill`, { rate })
 }
 
-export const copyUserLevelDiscounts = (id: number, sourceLevelId: number) => {
-  return request.post(`/admin/user-level/${id}/discounts/copy`, { sourceLevelId })
+export const copyUserLevelRates = (id: number, sourceLevelId: number) => {
+  return request.post(`/admin/user-level/${id}/rates/copy`, { sourceLevelId })
 }

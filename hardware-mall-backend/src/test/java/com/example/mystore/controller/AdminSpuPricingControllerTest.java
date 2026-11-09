@@ -4,12 +4,12 @@ import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.entity.db.Category;
-import com.example.mystore.entity.db.LevelCategoryDiscount;
+import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.mapper.CategoryMapper;
-import com.example.mystore.mapper.LevelCategoryDiscountMapper;
+import com.example.mystore.mapper.LevelCategoryRateMapper;
 import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.mapper.UserLevelMapper;
@@ -48,7 +48,7 @@ class AdminSpuPricingControllerTest {
     @Autowired
     private UserLevelMapper userLevelMapper;
     @Autowired
-    private LevelCategoryDiscountMapper discountMapper;
+    private LevelCategoryRateMapper discountMapper;
     @Autowired
     private SpuMapper spuMapper;
     @Autowired
@@ -75,7 +75,7 @@ class AdminSpuPricingControllerTest {
         level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
         userLevelMapper.insert(level);
 
-        LevelCategoryDiscount discount = new LevelCategoryDiscount();
+        LevelCategoryRate discount = new LevelCategoryRate();
         discount.setLevelId(level.getId());
         discount.setCategoryId(category.getId());
         discount.setRate(new BigDecimal("0.8000"));
@@ -109,7 +109,7 @@ class AdminSpuPricingControllerTest {
                 .andExpect(jsonPath("$.data.total").value(2))
                 .andExpect(jsonPath("$.data.records[0].retailMinPrice").value(10.0))
                 .andExpect(jsonPath("$.data.records[0].retailMaxPrice").value(20.0))
-                .andExpect(jsonPath("$.data.records[0].discountRate").value(0.8))
+                .andExpect(jsonPath("$.data.records[0].pricingRate").value(0.8))
                 .andExpect(jsonPath("$.data.records[0].effectiveRate").value(0.8))
                 .andExpect(jsonPath("$.data.records[0].settlementMinPrice").value(8.0))
                 .andExpect(jsonPath("$.data.records[0].settlementMaxPrice").value(16.0))
@@ -131,7 +131,7 @@ class AdminSpuPricingControllerTest {
                         .param("categoryId", String.valueOf(gapCategory.getId())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
-                .andExpect(jsonPath("$.data.records[0].discountRate").value(1.0))
+                .andExpect(jsonPath("$.data.records[0].pricingRate").value(1.0))
                 .andExpect(jsonPath("$.data.records[0].effectiveRate").value(1.0))
                 .andExpect(jsonPath("$.data.records[0].rateMissing").value(true));
     }
@@ -144,7 +144,7 @@ class AdminSpuPricingControllerTest {
                         .param("keyword", "八折锁具"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
-                .andExpect(jsonPath("$.data.records[0].discountRate").value(1.0))
+                .andExpect(jsonPath("$.data.records[0].pricingRate").value(1.0))
                 .andExpect(jsonPath("$.data.records[0].effectiveRate").value(1.0))
                 .andExpect(jsonPath("$.data.records[0].settlementMinPrice").value(10.0))
                 .andExpect(jsonPath("$.data.records[0].settlementMaxPrice").value(20.0))
