@@ -34,10 +34,9 @@
             :image="product.images?.[0]"
             :name="product.name"
             :subtitle="product.subtitle"
-            :price="product.price"
-            :original-price="product.originalPrice"
             :min-price="product.minPrice"
             :max-price="product.maxPrice"
+            :sellable="product.sellable"
             @click="goProductDetail"
           />
         </view>

@@ -17,7 +17,8 @@ export interface Sku {
   id: number
   spuId: number
   specs: SpecVO[]
-  price: number
+  price: number | null
+  sellable?: boolean
   stock: number
   image?: string
   status: number
@@ -46,7 +47,7 @@ export interface Spu {
   subtitle?: string
   description?: string
   images?: string[]
-  originalPrice?: number
+  originalPrice?: number | null
   weight?: number
   status: number
   isRecommend: number
@@ -58,9 +59,10 @@ export interface ProductListVO {
   name: string
   subtitle?: string
   images?: string[]
-  originalPrice?: number
-  minPrice?: number
-  maxPrice?: number
+  originalPrice?: number | null
+  minPrice?: number | null
+  maxPrice?: number | null
+  sellable?: boolean
   status: number
 }
 
@@ -71,8 +73,9 @@ export interface ProductDetail {
   skus: Sku[]
   specTemplates: SpecTemplate[]
   specItemsMap: Record<number, SpecItem[]>
-  minPrice?: number
-  maxPrice?: number
+  minPrice?: number | null
+  maxPrice?: number | null
+  sellable?: boolean
 }
 
 export interface Address {

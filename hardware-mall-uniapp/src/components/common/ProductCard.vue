@@ -7,7 +7,8 @@
       <text class="product-name">{{ name }}</text>
       <text v-if="subtitle" class="product-subtitle">{{ subtitle }}</text>
       <view class="product-bottom">
-        <view class="price-wrap">
+        <text v-if="showUnsellable" class="unsellable-text">暂不可售</text>
+        <view v-else class="price-wrap">
           <text class="price-symbol">¥</text>
           <text class="price-value">{{ displayPrice }}</text>
         </view>
@@ -24,10 +25,9 @@ interface Props {
   image?: string
   name: string
   subtitle?: string
-  price?: number | string
-  originalPrice?: number | string
-  minPrice?: number | string
-  maxPrice?: number | string
+  minPrice?: number | string | null
+  maxPrice?: number | string | null
+  sellable?: boolean
 }
 
 const props = defineProps<Props>()
@@ -35,21 +35,21 @@ const emit = defineEmits<{
   click: [id: number | string]
 }>()
 
-const formatPrice = (price: number | string | undefined) => {
-  if (!price) return '0.00'
+const formatPrice = (price: number | string) => {
   const num = typeof price === 'string' ? parseFloat(price) : price
   return isNaN(num) ? '0.00' : num.toFixed(2)
 }
 
-const displayPrice = computed(() => {
-  if (props.minPrice != null) {
-    if (props.maxPrice != null && props.maxPrice !== props.minPrice) {
-      return formatPrice(props.minPrice) + '起'
-    }
-    return formatPrice(props.minPrice)
+// 只展示后端已解析的最终售价(minPrice/maxPrice); 无最终价时按不可售处理, 绝不回落到批发基价
+const displayPrice = computed<string | null>(() => {
+  if (props.minPrice == null) return null
+  if (props.maxPrice != null && props.maxPrice !== props.minPrice) {
+    return formatPrice(props.minPrice) + '起'
   }
-  return formatPrice(props.price ?? props.originalPrice)
+  return formatPrice(props.minPrice)
 })
+
+const showUnsellable = computed(() => props.sellable === false || displayPrice.value === null)
 
 const onClick = () => {
   const id = props.id
@@ -151,6 +151,12 @@ const onClick = () => {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+}
+
+.unsellable-text {
+  font-size: 26rpx;
+  color: #999999;
+  font-weight: 500;
 }
 
 </style>

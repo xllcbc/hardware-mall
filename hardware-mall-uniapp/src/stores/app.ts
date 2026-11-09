@@ -5,8 +5,8 @@ export interface FavoriteItem {
   id: number
   name: string
   image: string
-  minPrice: number
-  originalPrice?: number
+  minPrice: number | null
+  originalPrice?: number | null
   addTime: number
 }
 
@@ -14,7 +14,7 @@ export interface FootprintItem {
   id: number
   name: string
   image: string
-  price: number
+  price: number | null
   viewTime: number
 }
 
