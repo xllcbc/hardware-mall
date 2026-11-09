@@ -28,6 +28,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -161,6 +163,86 @@ class CartServiceImplTest {
             assertThatThrownBy(() -> cartService.getCartList(1L))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("商品暂不可售");
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void addToCart_gapIsRejected() {
+        UserContext.setLevelId(2L);
+        try {
+            when(skuService.getSkuById(1L)).thenReturn(sku());
+            when(spuMapper.selectById(1L)).thenReturn(spu());
+            when(pricingRuleService.rateFor(2L, 1L, false))
+                    .thenReturn(PricingRateResolution.missing(2L));
+
+            assertThatThrownBy(() -> cartService.addToCart(1L, 1L, 2))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("商品暂不可售");
+            verify(cartMapper, never()).insertOrUpdateQuantity(anyLong(), anyLong(), anyInt());
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void addToCart_excludeDiscountResolvesRetailPricing() {
+        UserContext.setLevelId(2L);
+        try {
+            Spu excluded = spu();
+            excluded.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
+            when(skuService.getSkuById(1L)).thenReturn(sku());
+            when(spuMapper.selectById(1L)).thenReturn(excluded);
+            when(pricingRuleService.rateFor(2L, 1L, true))
+                    .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
+            when(cartMapper.selectOne(any())).thenReturn(cart());
+
+            Cart result = cartService.addToCart(1L, 1L, 2);
+
+            assertThat(result).isNotNull();
+            verify(cartMapper).insertOrUpdateQuantity(1L, 1L, 2);
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void updateQuantity_gapIsRejected() {
+        UserContext.setLevelId(2L);
+        try {
+            when(cartMapper.selectById(1L)).thenReturn(cart());
+            when(skuService.getSkuById(1L)).thenReturn(sku());
+            when(spuMapper.selectById(1L)).thenReturn(spu());
+            when(pricingRuleService.rateFor(2L, 1L, false))
+                    .thenReturn(PricingRateResolution.missing(2L));
+
+            assertThatThrownBy(() -> cartService.updateQuantity(1L, 1L, 3))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("商品暂不可售");
+            verify(cartMapper, never()).updateById(any(Cart.class));
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void retailUser_excludeDiscountCartUsesRetailRate() {
+        UserContext.setLevelId(2L);
+        try {
+            Spu excluded = spu();
+            excluded.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
+            when(cartMapper.selectList(any())).thenReturn(List.of(cart()));
+            when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
+            when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(excluded));
+            when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(sku()));
+            when(pricingRuleService.rateFor(2L, 1L, true))
+                    .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
+
+            List<CartItemVO> result = cartService.getCartList(1L);
+
+            assertThat(result.get(0).getPrice()).isEqualByComparingTo("25.00");
+            assertThat(result.get(0).getSubtotal()).isEqualByComparingTo("50.00");
         } finally {
             UserContext.clear();
         }

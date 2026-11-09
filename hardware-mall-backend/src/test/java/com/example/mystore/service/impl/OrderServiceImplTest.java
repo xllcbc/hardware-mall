@@ -339,6 +339,117 @@ class OrderServiceImplTest {
     }
 
     @Test
+    void previewOrder_excludeDiscountResolvesRetailRate() {
+        UserContext.setLevelId(2L);
+        try {
+            spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
+            when(pricingRuleService.rateFor(2L, 1L, true))
+                    .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+            CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+            line.setSkuId(5L);
+            line.setQuantity(2);
+            CheckoutPreviewRequest request = new CheckoutPreviewRequest();
+            request.setItems(List.of(line));
+
+            CheckoutPreviewVO preview = orderService.previewOrder(request);
+
+            assertThat(preview.getItems().get(0).getPrice()).isEqualByComparingTo("219.00");
+            assertThat(preview.getPayAmount()).isEqualByComparingTo("438.00");
+            verify(pricingRuleService).rateFor(2L, 1L, true);
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void createOrder_gapIsRejectedBeforeWriting() {
+        UserContext.setLevelId(2L);
+        try {
+            when(pricingRuleService.rateFor(2L, 1L, false))
+                    .thenReturn(PricingRateResolution.missing(2L));
+            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+            CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+            line.setSkuId(5L);
+            line.setQuantity(2);
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setItems(List.of(line));
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+
+            assertThatThrownBy(() -> orderService.createOrder(2L, request, "gap-key"))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("商品暂不可售");
+
+            verify(orderMapper, never()).insert(any(Order.class));
+            verify(skuService, never()).deductStock(anyLong(), anyInt());
+            verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "gap-key");
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void createOrder_excludeDiscountSnapshotsRetailLevel() {
+        UserContext.setLevelId(2L);
+        try {
+            spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
+            when(pricingRuleService.rateFor(2L, 1L, true))
+                    .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
+            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+                inv.getArgument(0, Order.class).setId(100L);
+                return 1;
+            });
+            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
+                Order o = new Order();
+                o.setId(100L);
+                o.setUserId(2L);
+                o.setOrderNo("SO1");
+                o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+                o.setAddressId(1L);
+                o.setLogisticsId(1L);
+                return o;
+            });
+            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+            CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+            line.setSkuId(5L);
+            line.setQuantity(2);
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+            request.setItems(List.of(line));
+            request.setExpectedPayAmount(new BigDecimal("438.00"));
+
+            orderService.createOrder(2L, request, "excluded-key");
+
+            ArgumentCaptor<List<OrderItem>> captor = ArgumentCaptor.forClass(List.class);
+            verify(orderItemMapper).insertBatch(captor.capture());
+            OrderItem item = captor.getValue().get(0);
+            assertThat(item.getLevelId()).isEqualTo(1L);
+            assertThat(item.getLevelName()).isEqualTo("零售");
+            assertThat(item.getPricingRate()).isEqualByComparingTo("1.0000");
+            assertThat(item.getPrice()).isEqualByComparingTo("219.00");
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
     void createOrder_priceChanged_returnsLatestPreviewAndReleasesIdempotencyKey() {
         UserContext.setLevelId(2L);
         try {

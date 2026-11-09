@@ -17,15 +17,17 @@ public class ProductDetailVO implements Serializable {
     private Map<Long, List<SpecItem>> specItemsMap;
     private BigDecimal minPrice;
     private BigDecimal maxPrice;
+    private boolean sellable;
 
     public ProductDetailVO() {}
 
-    public ProductDetailVO(Spu spu, List<ProductSkuVO> skus, List<SpecTemplate> specTemplates, Map<Long, List<SpecItem>> specItemsMap, BigDecimal minPrice, BigDecimal maxPrice) {
+    public ProductDetailVO(Spu spu, List<ProductSkuVO> skus, List<SpecTemplate> specTemplates, Map<Long, List<SpecItem>> specItemsMap, BigDecimal minPrice, BigDecimal maxPrice, boolean sellable) {
         this.spu = spu;
         this.skus = skus;
         this.specTemplates = specTemplates;
         this.specItemsMap = specItemsMap;
         this.minPrice = minPrice;
         this.maxPrice = maxPrice;
+        this.sellable = sellable;
     }
 }
