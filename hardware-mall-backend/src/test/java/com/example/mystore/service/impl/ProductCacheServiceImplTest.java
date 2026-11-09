@@ -69,8 +69,9 @@ class ProductCacheServiceImplTest {
         ProductListResult result = productCacheService.getProductList(7L, 2, 20, 1, () -> expected);
 
         assertThat(result).isSameAs(expected);
+        // 用字面量断言缓存 key 版本，避免引用常量导致版本契约断言退化为恒真
         verify(redisUtil).queryWithCache(
-                eq(RedisConstants.PREFIX_PRODUCT_LIST + GENERATION + ":7:2:20:1"),
+                eq("product:list:v5:" + GENERATION + ":7:2:20:1"),
                 eq(ProductListResult.class),
                 eq(ProductCacheConstants.TTL_SECONDS),
                 eq(RedisConstants.CACHE_NULL_TTL),
@@ -96,7 +97,7 @@ class ProductCacheServiceImplTest {
 
         assertThat(result).isSameAs(expected);
         verify(redisUtil).queryWithCache(
-                eq(RedisConstants.PREFIX_PRODUCT_SEARCH + GENERATION + ":"
+                eq("product:search:v3:" + GENERATION + ":"
                         + "343fa871f168dcb21aed1b140a969348b311c4e065854277095ecf8765c77a20"
                         + ":7:2:20:1"),
                 eq(ProductListResult.class),
@@ -167,7 +168,7 @@ class ProductCacheServiceImplTest {
     void getProductDetail_usesSharedDetailCacheKey() {
         ProductDetailCache expected = new ProductDetailCache();
         when(redisUtil.queryWithCache(
-                eq(RedisConstants.PREFIX_PRODUCT_DETAIL + GENERATION + ":11"),
+                eq("product:detail:v5:" + GENERATION + ":11"),
                 eq(ProductDetailCache.class),
                 eq(ProductCacheConstants.TTL_SECONDS),
                 eq(RedisConstants.CACHE_NULL_TTL),
@@ -184,7 +185,7 @@ class ProductCacheServiceImplTest {
     void getRecommend_usesSharedRecommendCacheKey() {
         ProductListResult expected = new ProductListResult(Collections.emptyList(), 0);
         when(redisUtil.queryWithCache(
-                eq(RedisConstants.PREFIX_PRODUCT_RECOMMEND + GENERATION + ":"),
+                eq("product:recommend:v5" + GENERATION + ":"),
                 eq(ProductListResult.class),
                 eq(ProductCacheConstants.TTL_SECONDS),
                 eq(RedisConstants.CACHE_NULL_TTL),
