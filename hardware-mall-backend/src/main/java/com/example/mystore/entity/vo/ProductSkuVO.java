@@ -12,6 +12,7 @@ public class ProductSkuVO implements Serializable {
     private Long spuId;
     private List<SpecVO> specs;
     private BigDecimal price;
+    private boolean sellable;
     private Integer stock;
     private String image;
     private Integer status;

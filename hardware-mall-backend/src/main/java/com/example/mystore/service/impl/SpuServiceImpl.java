@@ -31,6 +31,7 @@ import com.example.mystore.service.SpecItemService;
 import com.example.mystore.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanUtils;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -401,8 +402,17 @@ public class SpuServiceImpl implements SpuService {
             minPrice = priceService.resolveUnitPrice(cache.getSpu().getOriginalPrice(), pricing.rate());
             maxPrice = minPrice;
         }
-        return new ProductDetailVO(cache.getSpu(), skus, cache.getSpecTemplates(),
-                cache.getSpecItemsMap(), minPrice, maxPrice);
+        boolean sellable = !pricing.isMissing();
+        Spu spu = sellable ? cache.getSpu() : hideBasePrice(cache.getSpu());
+        return new ProductDetailVO(spu, skus, cache.getSpecTemplates(),
+                cache.getSpecItemsMap(), minPrice, maxPrice, sellable);
+    }
+
+    private Spu hideBasePrice(Spu spu) {
+        Spu copy = new Spu();
+        BeanUtils.copyProperties(spu, copy);
+        copy.setOriginalPrice(null);
+        return copy;
     }
 
     private List<ProductSkuVO> toProductSkuVOs(List<Sku> skus, PricingRateResolution pricing) {
@@ -416,6 +426,7 @@ public class SpuServiceImpl implements SpuService {
             vo.setSpecs(sku.getSpecs());
             vo.setPrice(sku.getPrice() == null || pricing.isMissing()
                     ? null : priceService.resolveUnitPrice(sku.getPrice(), pricing.rate()));
+            vo.setSellable(!pricing.isMissing());
             vo.setStock(skuService.getStockById(sku.getId()));
             vo.setImage(sku.getImage());
             vo.setStatus(sku.getStatus());
@@ -467,7 +478,12 @@ public class SpuServiceImpl implements SpuService {
             PriceRange range = resolvePriceRange(source.getRetailMinPrice(), source.getRetailMaxPrice(), pricing);
             target.setMinPrice(range.min());
             target.setMaxPrice(range.max());
-            return target;        }).collect(Collectors.toList());
+            target.setSellable(!pricing.isMissing());
+            if (pricing.isMissing()) {
+                target.setOriginalPrice(null);
+            }
+            return target;
+        }).collect(Collectors.toList());
     }
 
     @Override

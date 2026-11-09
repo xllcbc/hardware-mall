@@ -2,6 +2,7 @@ package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.constant.DiscountConstants;
+import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Sku;
@@ -64,7 +65,7 @@ public class CartServiceImpl implements CartService {
                 continue;
             }
             Spu spu = spuMap.get(sku.getSpuId());
-            if (spu != null && spu.getStatus() == 1 && spu.getDeleteTime() == 0) {
+            if (isOnShelf(spu)) {
                 CartItemVO vo = new CartItemVO();
                 vo.setCartId(cart.getId());
                 vo.setProductId(sku.getSpuId());
@@ -80,13 +81,7 @@ public class CartServiceImpl implements CartService {
 
                 List<Sku> allSkus = skusBySpu.computeIfAbsent(
                         spu.getId(), id -> skuService.getSkusBySpu(id, 1));
-                PricingRateResolution pricing = pricingRuleService.rateFor(
-                        UserContext.getLevelId(),
-                        spu.getCategoryId(),
-                        DiscountConstants.isExcluded(spu.getExcludeDiscount()));
-                if (pricing.isMissing()) {
-                    throw new BusinessException("商品暂不可售: " + spu.getName());
-                }
+                PricingRateResolution pricing = requireSellable(spu);
                 BigDecimal rate = pricing.rate();
                 BigDecimal unitPrice = priceService.resolveUnitPrice(sku.getPrice(), rate);
                 vo.setPrice(unitPrice);
@@ -118,6 +113,7 @@ public class CartServiceImpl implements CartService {
         if (sku == null || sku.getStatus() != 1) {
             throw new BusinessException("商品不存在或已下架");
         }
+        requireSellable(requireOnShelfSpu(sku));
 
         if (sku.getStock() < quantity) {
             throw new BusinessException("库存不足");
@@ -147,6 +143,7 @@ public class CartServiceImpl implements CartService {
         }
 
         Sku sku = skuService.getSkuById(cart.getSkuId());
+        requireSellable(requireOnShelfSpu(sku));
         if (sku.getStock() < quantity) {
             throw new BusinessException("库存不足");
         }
@@ -176,6 +173,34 @@ public class CartServiceImpl implements CartService {
             cart.setDeleteTime(System.currentTimeMillis());
             cartMapper.updateById(cart);
         }
+    }
+
+    private Spu requireOnShelfSpu(Sku sku) {
+        if (sku == null) {
+            throw new BusinessException("商品不存在或已下架");
+        }
+        Spu spu = spuMapper.selectById(sku.getSpuId());
+        if (!isOnShelf(spu)) {
+            throw new BusinessException("商品不存在或已下架");
+        }
+        return spu;
+    }
+
+    private boolean isOnShelf(Spu spu) {
+        return spu != null
+                && Integer.valueOf(StatusConstants.PRODUCT_STATUS_ON_SHELF).equals(spu.getStatus())
+                && (spu.getDeleteTime() == null || spu.getDeleteTime() == 0L);
+    }
+
+    private PricingRateResolution requireSellable(Spu spu) {
+        PricingRateResolution pricing = pricingRuleService.rateFor(
+                UserContext.getLevelId(),
+                spu.getCategoryId(),
+                DiscountConstants.isExcluded(spu.getExcludeDiscount()));
+        if (pricing.isMissing()) {
+            throw new BusinessException("商品暂不可售: " + spu.getName());
+        }
+        return pricing;
     }
 
     private String getFirstImage(List<String> images) {

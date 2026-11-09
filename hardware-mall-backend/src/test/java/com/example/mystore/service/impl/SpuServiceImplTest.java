@@ -82,6 +82,8 @@ class SpuServiceImplTest {
         ProductListVO vo = result.getRecords().get(0);
         assertThat(vo.getMinPrice()).isEqualByComparingTo("80.00");
         assertThat(vo.getMaxPrice()).isEqualByComparingTo("160.00");
+        assertThat(vo.isSellable()).isTrue();
+        assertThat(vo.getOriginalPrice()).isEqualByComparingTo("300.00");
     }
 
     @Test
@@ -116,6 +118,8 @@ class SpuServiceImplTest {
 
         assertThat(vo.getMinPrice()).isNull();
         assertThat(vo.getMaxPrice()).isNull();
+        assertThat(vo.isSellable()).isFalse();
+        assertThat(vo.getOriginalPrice()).isNull();
     }
 
     @Test
@@ -132,8 +136,10 @@ class SpuServiceImplTest {
         ProductDetailVO detail = spuService.getProductDetailVO(1L);
 
         assertThat(detail.getSkus().get(0).getPrice()).isEqualByComparingTo("8.00");
+        assertThat(detail.getSkus().get(0).isSellable()).isTrue();
         assertThat(detail.getSkus().get(0).getStock()).isEqualTo(7);
         assertThat(detail.getMinPrice()).isEqualByComparingTo("8.00");
+        assertThat(detail.isSellable()).isTrue();
     }
 
     @Test
@@ -150,8 +156,12 @@ class SpuServiceImplTest {
         ProductDetailVO detail = spuService.getProductDetailVO(1L);
 
         assertThat(detail.getSkus().get(0).getPrice()).isNull();
+        assertThat(detail.getSkus().get(0).isSellable()).isFalse();
         assertThat(detail.getMinPrice()).isNull();
         assertThat(detail.getMaxPrice()).isNull();
+        assertThat(detail.isSellable()).isFalse();
+        assertThat(detail.getSpu().getOriginalPrice()).isNull();
+        assertThat(spu.getOriginalPrice()).isEqualByComparingTo("100.00");
     }
 
     @Test
@@ -234,6 +244,7 @@ class SpuServiceImplTest {
         item.setName("商品");
         item.setRetailMinPrice(new BigDecimal(min));
         item.setRetailMaxPrice(new BigDecimal(max));
+        item.setOriginalPrice(new BigDecimal("300.00"));
         item.setExcludeDiscount(excludeDiscount);
         item.setStatus(StatusConstants.PRODUCT_STATUS_ON_SHELF);
         return item;
