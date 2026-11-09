@@ -34,6 +34,7 @@ class PricingReleaseMigrationTest {
     private static final String RATE_MIGRATION_RESOURCE =
             "db/migration_2026-11-09_level_category_rate.sql";
     private static final String INIT_RESOURCE = "db/init.sql";
+    private static final String VERIFY_RESOURCE = "db/pricing_release_verify.sql";
 
     @Container
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.36")
@@ -47,6 +48,7 @@ class PricingReleaseMigrationTest {
         copyResource(BASE_MIGRATION_RESOURCE, "/tmp/pricing-release.sql");
         copyResource(RATE_MIGRATION_RESOURCE, "/tmp/pricing-rate-rename.sql");
         copyResource(INIT_RESOURCE, "/tmp/init.sql");
+        copyResource(VERIFY_RESOURCE, "/tmp/pricing-verify.sql");
     }
 
     @BeforeEach
@@ -67,6 +69,24 @@ class PricingReleaseMigrationTest {
                 .containsExactly("0");
         assertThat(queryStrings(DATABASE, "SELECT CAST(COUNT(*) AS CHAR) FROM user WHERE level_id = 1"))
                 .containsExactly(queryStrings(DATABASE, "SELECT CAST(COUNT(*) AS CHAR) FROM user").get(0));
+        runMigrationVerify(DATABASE);
+    }
+
+    @Test
+    void migrationVerifyRejectsNonEmptyRateMatrix() throws Exception {
+        loadSnapshot(DATABASE);
+        runMigrations(DATABASE);
+        execute(DATABASE,
+                "INSERT INTO category (id, parent_id, name, sort_order, status) " +
+                        "VALUES (1, 0, '测试分类', 0, 1)",
+                "INSERT INTO level_category_rate (level_id, category_id, rate) " +
+                        "VALUES (1, 1, 0.8000)");
+
+        ExecResult verification = runVerify(DATABASE, true);
+
+        assertThat(verification.getExitCode()).isNotZero();
+        assertThat(verification.getStdout() + verification.getStderr())
+                .contains("level_category_rate must be empty after migration");
     }
 
     @Test
@@ -116,6 +136,7 @@ class PricingReleaseMigrationTest {
                 .isEqualTo(pricingModelDefinition(migrated));
         assertFinalPricingModel(initialized);
         assertFinalPricingModel(migrated);
+        runMigrationVerify(migrated);
     }
 
     @Test
@@ -154,6 +175,7 @@ class PricingReleaseMigrationTest {
         assertThat(columnExists(DATABASE, "order_item", "pricing_rate")).isTrue();
         assertThat(queryStrings(DATABASE, "SELECT CAST(COUNT(*) AS CHAR) FROM level_category_rate"))
                 .containsExactly("0");
+        runMigrationVerify(DATABASE);
     }
 
     private static void assertFinalPricingModel(String schema) throws SQLException {
@@ -220,6 +242,21 @@ class PricingReleaseMigrationTest {
         assertThat(rateMigration.getExitCode())
                 .as(rateMigration.getStdout() + rateMigration.getStderr())
                 .isZero();
+    }
+
+    private static void runMigrationVerify(String schema) throws Exception {
+        ExecResult verification = runVerify(schema, true);
+        assertThat(verification.getExitCode())
+                .as(verification.getStdout() + verification.getStderr())
+                .isZero();
+    }
+
+    private static ExecResult runVerify(String schema, boolean expectEmptyRateTable) throws Exception {
+        return mysql(
+                schema,
+                "--init-command=SET @expect_empty_level_category_rate = " + (expectEmptyRateTable ? "1" : "0"),
+                "-e",
+                "SOURCE /tmp/pricing-verify.sql");
     }
 
     private static ExecResult runSqlFile(String schema, String path) throws Exception {

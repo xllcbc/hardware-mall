@@ -51,9 +51,9 @@ class PricingRuleServiceCopyMatrixTest {
         Long sourceGapCategoryId = createCategory("来源缺失分类");
         Long targetOnlyCategoryId = createCategory("目标旧配置分类");
 
-        insertDiscount(sourceLevelId, configuredCategoryId, "0.6000");
-        insertDiscount(targetLevelId, configuredCategoryId, "0.9000");
-        insertDiscount(targetLevelId, targetOnlyCategoryId, "0.8000");
+        insertRate(sourceLevelId, configuredCategoryId, "0.6000");
+        insertRate(targetLevelId, configuredCategoryId, "0.9000");
+        insertRate(targetLevelId, targetOnlyCategoryId, "0.8000");
 
         pricingRuleService.copyRates(targetLevelId, sourceLevelId);
 
@@ -99,9 +99,9 @@ class PricingRuleServiceCopyMatrixTest {
         Long gapCategoryId = createCategory("缺口分类");
 
         setLevelStatus(targetLevelId, UserLevelStatusConstants.STATUS_ENABLED);
-        insertDiscount(targetLevelId, configuredCategoryId, "0.9000");
-        insertDiscount(targetLevelId, gapCategoryId, "0.8500");
-        insertDiscount(sourceLevelId, configuredCategoryId, "0.6000");
+        insertRate(targetLevelId, configuredCategoryId, "0.9000");
+        insertRate(targetLevelId, gapCategoryId, "0.8500");
+        insertRate(sourceLevelId, configuredCategoryId, "0.6000");
 
         assertThatThrownBy(() -> pricingRuleService.copyRates(targetLevelId, sourceLevelId))
                 .hasMessage("来源等级倍率矩阵未填满，不能复制到已启用等级");
@@ -119,7 +119,7 @@ class PricingRuleServiceCopyMatrixTest {
     void explicitOneRateStaysConfiguredWhenNewCategoryCreatesGap() {
         Long levelId = createLevel("显式一比一等级");
         Long originalCategoryId = createCategory("原分类");
-        insertDiscount(levelId, originalCategoryId, "1.0000");
+        insertRate(levelId, originalCategoryId, "1.0000");
 
         assertThat(pricingRuleService.getRates(levelId))
                 .singleElement()
@@ -171,11 +171,11 @@ class PricingRuleServiceCopyMatrixTest {
         userLevelMapper.updateById(level);
     }
 
-    private void insertDiscount(Long levelId, Long categoryId, String rate) {
-        LevelCategoryRate discount = new LevelCategoryRate();
-        discount.setLevelId(levelId);
-        discount.setCategoryId(categoryId);
-        discount.setRate(new BigDecimal(rate));
-        levelCategoryRateMapper.insert(discount);
+    private void insertRate(Long levelId, Long categoryId, String rateValue) {
+        LevelCategoryRate row = new LevelCategoryRate();
+        row.setLevelId(levelId);
+        row.setCategoryId(categoryId);
+        row.setRate(new BigDecimal(rateValue));
+        levelCategoryRateMapper.insert(row);
     }
 }

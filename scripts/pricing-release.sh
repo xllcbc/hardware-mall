@@ -23,6 +23,7 @@ Usage:
   pricing-release.sh backup <backup.sql>
   pricing-release.sh preflight <backup.sql>
   pricing-release.sh migrate <backup.sql>
+  pricing-release.sh schema-state
   pricing-release.sh verify
   pricing-release.sh restore <backup.sql>
   pricing-release.sh rollback-drill <backup.sql> [previous-image]
@@ -48,6 +49,7 @@ require_file() {
 schema_state() {
   local schema="$1"
   local counts new_tables new_columns legacy_tables legacy_columns
+  # Legacy shares four common pricing columns; discount_rate is its only distinguishing column.
   counts="$("${MYSQL[@]}" -N -B "$schema" -e "
     SELECT CONCAT(
       (SELECT COUNT(*) FROM information_schema.tables
@@ -67,12 +69,8 @@ schema_state() {
       ':',
       (SELECT COUNT(*) FROM information_schema.columns
         WHERE table_schema = DATABASE()
-          AND (
-            (table_name = 'user' AND column_name = 'level_id')
-            OR (table_name = 'spu' AND column_name = 'exclude_discount')
-            OR (table_name = 'order_item'
-              AND column_name IN ('level_id', 'level_name', 'discount_rate'))
-          ))
+          AND table_name = 'order_item'
+          AND column_name = 'discount_rate')
     );
   ")"
   IFS=':' read -r new_tables new_columns legacy_tables legacy_columns <<< "$counts"
@@ -80,8 +78,8 @@ schema_state() {
   if [[ "$new_tables" == "1" && "$new_columns" == "5" &&
         "$legacy_tables" == "0" && "$legacy_columns" == "0" ]]; then
     echo "target"
-  elif [[ "$new_tables" == "0" && "$new_columns" == "0" &&
-          "$legacy_tables" == "1" && "$legacy_columns" == "5" ]]; then
+  elif [[ "$new_tables" == "0" && "$new_columns" == "4" &&
+          "$legacy_tables" == "1" && "$legacy_columns" == "1" ]]; then
     echo "legacy"
   elif [[ "$new_tables" == "0" && "$new_columns" == "0" &&
           "$legacy_tables" == "0" && "$legacy_columns" == "0" ]]; then
@@ -99,9 +97,13 @@ apply_pricing_migrations() {
     original)
       "${MYSQL[@]}" "$schema" < "$BASE_MIGRATION"
       "${MYSQL[@]}" "$schema" < "$RATE_MIGRATION"
+      "${MYSQL[@]}" --init-command="SET @expect_empty_level_category_rate = 1" \
+        "$schema" < "$VERIFY"
       ;;
     legacy)
       "${MYSQL[@]}" "$schema" < "$RATE_MIGRATION"
+      "${MYSQL[@]}" --init-command="SET @expect_empty_level_category_rate = 1" \
+        "$schema" < "$VERIFY"
       ;;
     target)
       echo "Pricing schema already uses level_category_rate and pricing_rate."
@@ -155,6 +157,10 @@ case "${1:-}" in
     require_file "$VERIFY"
     verify_backup_checksum "$backup"
     apply_pricing_migrations "$DB_NAME"
+    ;;
+  schema-state)
+    require_db_env
+    schema_state "$DB_NAME"
     ;;
   verify)
     require_db_env

@@ -100,11 +100,11 @@ class PricingRuleServiceImplTest {
         Category category = new Category();
         category.setId(9L);
         when(categoryMapper.selectList(any())).thenReturn(List.of(category));
-        LevelCategoryRate discount = new LevelCategoryRate();
-        discount.setLevelId(2L);
-        discount.setCategoryId(9L);
-        discount.setRate(new BigDecimal("0.8000"));
-        when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of(discount));
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(2L);
+        rate.setCategoryId(9L);
+        rate.setRate(new BigDecimal("0.8000"));
+        when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of(rate));
 
         assertThat(pricingRuleService.isComplete(2L)).isTrue();
     }
@@ -124,11 +124,11 @@ class PricingRuleServiceImplTest {
                     Supplier<PricingLevelCache> loader = invocation.getArgument(6);
                     return loader.get();
                 });
-        LevelCategoryRate discount = new LevelCategoryRate();
-        discount.setLevelId(2L);
-        discount.setCategoryId(9L);
-        discount.setRate(new BigDecimal("0.7500"));
-        when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of(discount));
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(2L);
+        rate.setCategoryId(9L);
+        rate.setRate(new BigDecimal("0.7500"));
+        when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of(rate));
 
         assertThat(pricingRuleService.rateFor(2L, 9L, false))
                 .isEqualByComparingTo("0.7500");

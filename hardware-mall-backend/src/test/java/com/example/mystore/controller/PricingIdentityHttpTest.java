@@ -134,11 +134,11 @@ class PricingIdentityHttpTest {
         level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
         userLevelMapper.insert(level);
 
-        LevelCategoryRate discount = new LevelCategoryRate();
-        discount.setLevelId(CUSTOM_LEVEL_ID);
-        discount.setCategoryId(CATEGORY_ID);
-        discount.setRate(new BigDecimal("0.8000"));
-        levelCategoryRateMapper.insert(discount);
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(CUSTOM_LEVEL_ID);
+        rate.setCategoryId(CATEGORY_ID);
+        rate.setRate(new BigDecimal("0.8000"));
+        levelCategoryRateMapper.insert(rate);
 
         Spu spu = new Spu();
         spu.setId(PRODUCT_ID);

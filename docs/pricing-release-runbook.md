@@ -187,3 +187,15 @@ mysql --protocol=TCP --default-character-set=utf8mb4 \
 ```
 
 必须看到 `PASS: pricing release schema`。任何 `SIGNAL` 错误都表示发布未通过。
+
+刚执行完 2026-11-09 重命名迁移时，还要强制验证新倍率矩阵为空：
+
+```bash
+mysql --protocol=TCP --default-character-set=utf8mb4 \
+  --init-command="SET @expect_empty_level_category_rate = 1" \
+  -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USERNAME" "$DB_NAME" \
+  < hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql
+```
+
+`pricing-release.sh preflight` 和 `migrate` 已自动带上该空矩阵门禁；手工执行
+SQL 时必须显式设置。

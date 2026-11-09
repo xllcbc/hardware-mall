@@ -166,34 +166,7 @@ jobs:
               exit 1
             fi
 
-            pricing_structure="$(mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" \
-              -u "$DB_USERNAME" -N -B "$DB_NAME" -e "
-                SELECT CONCAT(
-                  (SELECT COUNT(*) FROM information_schema.tables
-                    WHERE table_schema = DATABASE() AND table_name = 'level_category_rate'),
-                  ':',
-                  (SELECT COUNT(*) FROM information_schema.columns
-                    WHERE table_schema = DATABASE()
-                      AND (
-                        (table_name = 'user' AND column_name = 'level_id')
-                        OR (table_name = 'spu' AND column_name = 'exclude_discount')
-                        OR (table_name = 'order_item'
-                          AND column_name IN ('level_id', 'level_name', 'pricing_rate'))
-                      )),
-                  ':',
-                  (SELECT COUNT(*) FROM information_schema.tables
-                    WHERE table_schema = DATABASE() AND table_name = 'level_category_discount'),
-                  ':',
-                  (SELECT COUNT(*) FROM information_schema.columns
-                    WHERE table_schema = DATABASE()
-                      AND (
-                        (table_name = 'user' AND column_name = 'level_id')
-                        OR (table_name = 'spu' AND column_name = 'exclude_discount')
-                        OR (table_name = 'order_item'
-                          AND column_name IN ('level_id', 'level_name', 'discount_rate'))
-                      ))
-                );
-              ")"
+            pricing_structure="$(bash scripts/pricing-release.sh schema-state)"
             legacy_fields="$(mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" \
               -u "$DB_USERNAME" -N -B "$DB_NAME" -e "
                 SELECT COUNT(*) FROM information_schema.columns
@@ -209,13 +182,11 @@ jobs:
               exit 1
             fi
 
-            # 0:0:0:0 原始 schema；0:0:1:5 2026-11-02 schema；1:5:0:0 最终 schema。
-            # 其他组合均为部分迁移，必须拒绝。
             migration_needed=0
             case "$pricing_structure" in
-              "1:5:0:0")
+              target)
                 ;;
-              "0:0:1:5"|"0:0:0:0")
+              legacy|original)
                 migration_needed=1
                 ;;
               *)

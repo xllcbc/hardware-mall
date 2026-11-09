@@ -14,6 +14,10 @@ BEGIN
     DECLARE retail_rows INT DEFAULT 0;
     DECLARE invalid_users INT DEFAULT 0;
     DECLARE foreign_keys INT DEFAULT 0;
+    DECLARE rate_rows INT DEFAULT 0;
+    DECLARE expect_empty_rate_table INT DEFAULT 0;
+
+    SET expect_empty_rate_table = COALESCE(@expect_empty_level_category_rate, 0);
 
     SELECT COUNT(*)
       INTO target_tables
@@ -70,6 +74,10 @@ BEGIN
        AND constraint_name IN ('fk_lcr_level', 'fk_lcr_category', 'fk_user_level')
        AND constraint_type = 'FOREIGN KEY';
 
+    SELECT COUNT(*)
+      INTO rate_rows
+      FROM `level_category_rate`;
+
     IF target_tables <> 2 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'missing user_level or level_category_rate table';
     END IF;
@@ -96,6 +104,10 @@ BEGIN
 
     IF foreign_keys <> 3 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'pricing foreign keys are incomplete';
+    END IF;
+
+    IF expect_empty_rate_table = 1 AND rate_rows <> 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'level_category_rate must be empty after migration';
     END IF;
 END$$
 

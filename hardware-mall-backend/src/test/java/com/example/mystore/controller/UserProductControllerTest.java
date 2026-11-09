@@ -74,11 +74,11 @@ class UserProductControllerTest {
         level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
         userLevelMapper.insert(level);
 
-        LevelCategoryRate discount = new LevelCategoryRate();
-        discount.setLevelId(2L);
-        discount.setCategoryId(1L);
-        discount.setRate(new BigDecimal("0.8000"));
-        levelCategoryRateMapper.insert(discount);
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(2L);
+        rate.setCategoryId(1L);
+        rate.setRate(new BigDecimal("0.8000"));
+        levelCategoryRateMapper.insert(rate);
 
         Spu spu = new Spu();
         spu.setId(9001L);

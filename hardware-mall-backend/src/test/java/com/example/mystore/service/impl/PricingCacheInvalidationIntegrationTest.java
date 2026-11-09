@@ -109,7 +109,7 @@ class PricingCacheInvalidationIntegrationTest {
 
         transactionTemplate.executeWithoutResult(status -> {
             pricingRuleService.saveRates(fixture.levelId(),
-                    List.of(discountRequest(fixture.categoryId(), "0.6200")));
+                    List.of(rateRequest(fixture.categoryId(), "0.6200")));
             assertThat(redisUtil.hasKey(cacheKey)).isTrue();
         });
 
@@ -125,7 +125,7 @@ class PricingCacheInvalidationIntegrationTest {
 
         transactionTemplate.executeWithoutResult(status -> {
             pricingRuleService.saveRates(fixture.levelId(),
-                    List.of(discountRequest(fixture.categoryId(), "0.6200")));
+                    List.of(rateRequest(fixture.categoryId(), "0.6200")));
             status.setRollbackOnly();
         });
 
@@ -263,15 +263,15 @@ class PricingCacheInvalidationIntegrationTest {
         categoryMapper.insert(category);
         createdCategoryIds.add(category.getId());
 
-        LevelCategoryRate discount = new LevelCategoryRate();
-        discount.setLevelId(level.getId());
-        discount.setCategoryId(category.getId());
-        discount.setRate(new BigDecimal("0.8800"));
-        levelCategoryRateMapper.insert(discount);
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(level.getId());
+        rate.setCategoryId(category.getId());
+        rate.setRate(new BigDecimal("0.8800"));
+        levelCategoryRateMapper.insert(rate);
         return new PricingFixture(level.getId(), category.getId());
     }
 
-    private LevelRateItemRequest discountRequest(Long categoryId, String rate) {
+    private LevelRateItemRequest rateRequest(Long categoryId, String rate) {
         LevelRateItemRequest request = new LevelRateItemRequest();
         request.setCategoryId(categoryId);
         request.setRate(new BigDecimal(rate));

@@ -48,7 +48,7 @@ class AdminSpuPricingControllerTest {
     @Autowired
     private UserLevelMapper userLevelMapper;
     @Autowired
-    private LevelCategoryRateMapper discountMapper;
+    private LevelCategoryRateMapper rateMapper;
     @Autowired
     private SpuMapper spuMapper;
     @Autowired
@@ -75,13 +75,13 @@ class AdminSpuPricingControllerTest {
         level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
         userLevelMapper.insert(level);
 
-        LevelCategoryRate discount = new LevelCategoryRate();
-        discount.setLevelId(level.getId());
-        discount.setCategoryId(category.getId());
-        discount.setRate(new BigDecimal("0.8000"));
-        discount.setCreateTime(LocalDateTime.now());
-        discount.setUpdateTime(LocalDateTime.now());
-        discountMapper.insert(discount);
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(level.getId());
+        rate.setCategoryId(category.getId());
+        rate.setRate(new BigDecimal("0.8000"));
+        rate.setCreateTime(LocalDateTime.now());
+        rate.setUpdateTime(LocalDateTime.now());
+        rateMapper.insert(rate);
 
         Spu visible = spu(category.getId(), "八折锁具", 1, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         sku(visible.getId(), "10.00");
