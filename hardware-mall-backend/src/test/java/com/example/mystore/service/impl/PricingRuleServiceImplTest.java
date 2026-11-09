@@ -9,6 +9,7 @@ import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.entity.dto.LevelRateItemRequest;
 import com.example.mystore.entity.vo.PricingLevelCache;
+import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.event.PricingCacheInvalidationEvent;
 import com.example.mystore.mapper.CategoryMapper;
 import com.example.mystore.mapper.LevelCategoryRateMapper;
@@ -23,6 +24,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -51,39 +53,123 @@ class PricingRuleServiceImplTest {
 
     @Test
     void retailLevelUsesItsOwnMatrix() {
-        PricingLevelCache cache = new PricingLevelCache();
-        cache.setRates(Map.of(9L, new BigDecimal("1.5000")));
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_LEVEL + 1L),
-                eq(PricingLevelCache.class), eq(PricingCacheConstants.TTL_SECONDS),
-                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
-                eq(500L), any()))
-                .thenReturn(cache);
+        stubLevelCache(1L, true, Map.of(9L, new BigDecimal("1.5000")));
 
-        assertThat(pricingRuleService.rateFor(1L, 9L, false))
-                .isEqualByComparingTo("1.5000");
+        PricingRateResolution result = pricingRuleService.rateFor(1L, 9L, false);
+
+        assertThat(result.levelId()).isEqualTo(1L);
+        assertThat(result.isMissing()).isFalse();
+        assertThat(result.rate()).isEqualByComparingTo("1.5000");
     }
 
     @Test
     void customLevelUsesCachedCategoryRate() {
-        PricingLevelCache cache = new PricingLevelCache();
-        cache.setRates(Map.of(9L, new BigDecimal("0.7000")));
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_LEVEL + 2L),
-                eq(PricingLevelCache.class), eq(PricingCacheConstants.TTL_SECONDS),
-                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
-                eq(500L), any()))
-                .thenReturn(cache);
+        stubLevelCache(2L, true, Map.of(9L, new BigDecimal("0.7000")));
 
-        assertThat(pricingRuleService.rateFor(2L, 9L, false))
-                .isEqualByComparingTo("0.7000");
-        assertThat(pricingRuleService.rateFor(2L, 10L, false))
-                .isEqualByComparingTo("1.0000");
+        PricingRateResolution configured = pricingRuleService.rateFor(2L, 9L, false);
+        PricingRateResolution gap = pricingRuleService.rateFor(2L, 10L, false);
+
+        assertThat(configured.levelId()).isEqualTo(2L);
+        assertThat(configured.rate()).isEqualByComparingTo("0.7000");
+        assertThat(gap.levelId()).isEqualTo(2L);
+        assertThat(gap.isMissing()).isTrue();
+        assertThat(gap.rate()).isNull();
+    }
+
+    @Test
+    void explicitOneIsNotAGap() {
+        stubLevelCache(2L, true, Map.of(9L, new BigDecimal("1.0000")));
+
+        PricingRateResolution result = pricingRuleService.rateFor(2L, 9L, false);
+
+        assertThat(result.isMissing()).isFalse();
+        assertThat(result.rate()).isEqualByComparingTo("1.0000");
+    }
+
+    @Test
+    void retailGapIsMissingAndNeverFallsBackToOne() {
+        stubLevelCache(1L, true, Map.of());
+
+        PricingRateResolution result = pricingRuleService.rateFor(1L, 9L, false);
+
+        assertThat(result.isMissing()).isTrue();
+        assertThat(result.rate()).isNull();
+    }
+
+    @Test
+    void anonymousGuestUsesRetailMatrix() {
+        stubRetailLevelId(1L);
+        stubLevelCache(1L, true, Map.of(9L, new BigDecimal("1.2000")));
+
+        PricingRateResolution result = pricingRuleService.rateFor(null, 9L, false);
+
+        assertThat(result.levelId()).isEqualTo(1L);
+        assertThat(result.isMissing()).isFalse();
+        assertThat(result.rate()).isEqualByComparingTo("1.2000");
+    }
+
+    @Test
+    void nonexistentLevelFallsBackToRetail() {
+        stubLoadingLevelCache(88L);
+        when(userLevelMapper.selectById(88L)).thenReturn(null);
+        stubRetailLevelId(1L);
+        stubLevelCache(1L, true, Map.of(9L, new BigDecimal("1.1000")));
+
+        PricingRateResolution result = pricingRuleService.rateFor(88L, 9L, false);
+
+        assertThat(result.levelId()).isEqualTo(1L);
+        assertThat(result.rate()).isEqualByComparingTo("1.1000");
+    }
+
+    @Test
+    void disabledLevelKeepsItsOwnRateOnCacheMiss() {
+        UserLevel disabled = customLevel(3L);
+        disabled.setStatus(UserLevelStatusConstants.STATUS_DISABLED);
+        when(userLevelMapper.selectById(3L)).thenReturn(disabled);
+        stubLoadingLevelCache(3L);
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(3L);
+        rate.setCategoryId(9L);
+        rate.setRate(new BigDecimal("0.6000"));
+        when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of(rate));
+
+        PricingRateResolution result = pricingRuleService.rateFor(3L, 9L, false);
+
+        assertThat(result.levelId()).isEqualTo(3L);
+        assertThat(result.rate()).isEqualByComparingTo("0.6000");
     }
 
     @Test
     void excludeDiscountAlwaysUsesRetailRate() {
-        assertThat(pricingRuleService.rateFor(2L, 9L, true))
-                .isEqualByComparingTo("1.0000");
-        verifyNoInteractions(redisUtil);
+        stubRetailLevelId(1L);
+        stubLevelCache(1L, true, Map.of(9L, new BigDecimal("1.2000")));
+
+        PricingRateResolution result = pricingRuleService.rateFor(2L, 9L, true);
+
+        assertThat(result.levelId()).isEqualTo(1L);
+        assertThat(result.isMissing()).isFalse();
+        assertThat(result.rate()).isEqualByComparingTo("1.2000");
+    }
+
+    @Test
+    void excludeDiscountWithRetailGapIsMissing() {
+        stubRetailLevelId(1L);
+        stubLevelCache(1L, true, Map.of());
+
+        PricingRateResolution result = pricingRuleService.rateFor(2L, 9L, true);
+
+        assertThat(result.isMissing()).isTrue();
+        assertThat(result.rate()).isNull();
+    }
+
+    @Test
+    void legacyCacheWithoutExistenceFlagIsTreatedAsExistingLevel() {
+        stubLevelCache(2L, null, Map.of(9L, new BigDecimal("0.9000")));
+
+        PricingRateResolution result = pricingRuleService.rateFor(2L, 9L, false);
+
+        assertThat(result.levelId()).isEqualTo(2L);
+        assertThat(result.rate()).isEqualByComparingTo("0.9000");
     }
 
     @Test
@@ -106,22 +192,17 @@ class PricingRuleServiceImplTest {
 
     @Test
     void customLevelCacheMissLoadsRatesFromDatabase() {
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_LEVEL + 2L),
-                eq(PricingLevelCache.class), eq(PricingCacheConstants.TTL_SECONDS),
-                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
-                eq(500L), any()))
-                .thenAnswer(invocation -> {
-                    Supplier<PricingLevelCache> loader = invocation.getArgument(6);
-                    return loader.get();
-                });
+        stubLoadingLevelCache(2L);
+        when(userLevelMapper.selectById(2L)).thenReturn(customLevel(2L));
         LevelCategoryRate rate = new LevelCategoryRate();
         rate.setLevelId(2L);
         rate.setCategoryId(9L);
         rate.setRate(new BigDecimal("0.7500"));
         when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of(rate));
 
-        assertThat(pricingRuleService.rateFor(2L, 9L, false))
-                .isEqualByComparingTo("0.7500");
+        PricingRateResolution result = pricingRuleService.rateFor(2L, 9L, false);
+
+        assertThat(result.rate()).isEqualByComparingTo("0.7500");
         verify(levelCategoryRateMapper).selectList(any());
     }
 
@@ -304,6 +385,46 @@ class PricingRuleServiceImplTest {
         verify(levelCategoryRateMapper).insert(copied.capture());
         assertThat(copied.getValue().getLevelId()).isEqualTo(2L);
         assertThat(copied.getValue().getRate()).isEqualByComparingTo("2.5000");
+    }
+
+    private void stubRetailLevelId(Long retailId) {
+        when(redisUtil.queryWithCache(
+                eq(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID),
+                eq(Long.class),
+                eq(PricingCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(PricingCacheConstants.JITTER_SECONDS),
+                eq(500L),
+                any())).thenReturn(retailId);
+    }
+
+    private void stubLoadingLevelCache(Long levelId) {
+        when(redisUtil.queryWithCache(
+                eq(RedisConstants.PREFIX_PRICING_LEVEL + levelId),
+                eq(PricingLevelCache.class),
+                eq(PricingCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(PricingCacheConstants.JITTER_SECONDS),
+                eq(500L),
+                any()))
+                .thenAnswer(invocation -> {
+                    Supplier<PricingLevelCache> loader = invocation.getArgument(6);
+                    return loader.get();
+                });
+    }
+
+    private void stubLevelCache(Long levelId, Boolean levelExists, Map<Long, BigDecimal> rates) {
+        PricingLevelCache cache = new PricingLevelCache();
+        cache.setLevelExists(levelExists);
+        cache.setRates(new HashMap<>(rates));
+        when(redisUtil.queryWithCache(
+                eq(RedisConstants.PREFIX_PRICING_LEVEL + levelId),
+                eq(PricingLevelCache.class),
+                eq(PricingCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(PricingCacheConstants.JITTER_SECONDS),
+                eq(500L),
+                any())).thenReturn(cache);
     }
 
     private UserLevel customLevel(Long id) {

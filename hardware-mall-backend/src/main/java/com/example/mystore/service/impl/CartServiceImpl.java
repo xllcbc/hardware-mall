@@ -8,6 +8,7 @@ import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.entity.vo.CartItemVO;
+import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.mapper.CartMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.CartService;
@@ -79,10 +80,14 @@ public class CartServiceImpl implements CartService {
 
                 List<Sku> allSkus = skusBySpu.computeIfAbsent(
                         spu.getId(), id -> skuService.getSkusBySpu(id, 1));
-                BigDecimal rate = pricingRuleService.rateFor(
+                PricingRateResolution pricing = pricingRuleService.rateFor(
                         UserContext.getLevelId(),
                         spu.getCategoryId(),
                         DiscountConstants.isExcluded(spu.getExcludeDiscount()));
+                if (pricing.isMissing()) {
+                    throw new BusinessException("商品暂不可售: " + spu.getName());
+                }
+                BigDecimal rate = pricing.rate();
                 BigDecimal unitPrice = priceService.resolveUnitPrice(sku.getPrice(), rate);
                 vo.setPrice(unitPrice);
                 BigDecimal retailMin = allSkus.stream()

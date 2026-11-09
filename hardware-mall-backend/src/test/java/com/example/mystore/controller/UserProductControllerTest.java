@@ -80,6 +80,12 @@ class UserProductControllerTest {
         rate.setRate(new BigDecimal("0.8000"));
         levelCategoryRateMapper.insert(rate);
 
+        LevelCategoryRate retailRate = new LevelCategoryRate();
+        retailRate.setLevelId(UserLevelStatusConstants.RETAIL_LEVEL_ID);
+        retailRate.setCategoryId(1L);
+        retailRate.setRate(new BigDecimal("1.0000"));
+        levelCategoryRateMapper.insert(retailRate);
+
         Spu spu = new Spu();
         spu.setId(9001L);
         spu.setCategoryId(1L);

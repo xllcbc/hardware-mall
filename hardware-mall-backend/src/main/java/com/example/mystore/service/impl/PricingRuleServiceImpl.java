@@ -11,6 +11,7 @@ import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.entity.dto.LevelRateItemRequest;
 import com.example.mystore.entity.vo.LevelRateVO;
 import com.example.mystore.entity.vo.PricingLevelCache;
+import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.event.PricingCacheInvalidationEvent;
 import com.example.mystore.mapper.CategoryMapper;
 import com.example.mystore.mapper.LevelCategoryRateMapper;
@@ -46,15 +47,30 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     private long cacheLockWaitMs = 500L;
 
     @Override
-    public BigDecimal rateFor(Long levelId, Long categoryId, boolean excludeDiscount) {
-        if (excludeDiscount || levelId == null || categoryId == null) {
-            return UserLevelStatusConstants.DEFAULT_RATE;
+    public PricingRateResolution rateFor(Long levelId, Long categoryId, boolean excludeDiscount) {
+        PricingLevelCache cache;
+        Long effectiveLevelId;
+        if (excludeDiscount || levelId == null) {
+            effectiveLevelId = resolveRetailLevelId();
+            cache = getLevelCache(effectiveLevelId);
+        } else {
+            cache = getLevelCache(levelId);
+            if (levelExists(cache)) {
+                effectiveLevelId = levelId;
+            } else {
+                effectiveLevelId = resolveRetailLevelId();
+                cache = getLevelCache(effectiveLevelId);
+            }
         }
-        PricingLevelCache cache = getLevelCache(levelId);
-        if (cache == null || cache.getRates() == null) {
-            return UserLevelStatusConstants.DEFAULT_RATE;
-        }
-        return cache.getRates().getOrDefault(categoryId, UserLevelStatusConstants.DEFAULT_RATE);
+        BigDecimal rate = categoryId == null || cache == null || cache.getRates() == null
+                ? null : cache.getRates().get(categoryId);
+        return rate == null
+                ? PricingRateResolution.missing(effectiveLevelId)
+                : PricingRateResolution.resolved(effectiveLevelId, rate);
+    }
+
+    private boolean levelExists(PricingLevelCache cache) {
+        return cache != null && (cache.getLevelExists() == null || cache.getLevelExists());
     }
 
     @Override
@@ -180,7 +196,9 @@ public class PricingRuleServiceImpl implements PricingRuleService {
                 cacheLockWaitMs,
                 () -> {
                     PricingLevelCache cache = new PricingLevelCache();
-                    cache.setRates(loadRates(levelId));
+                    UserLevel level = userLevelMapper.selectById(levelId);
+                    cache.setLevelExists(level != null);
+                    cache.setRates(level == null ? new HashMap<>() : loadRates(levelId));
                     return cache;
                 });
     }

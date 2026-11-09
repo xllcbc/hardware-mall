@@ -17,6 +17,7 @@ import com.example.mystore.entity.vo.ProductDetailCache;
 import com.example.mystore.entity.vo.ProductListCacheItem;
 import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.entity.vo.ProductSkuVO;
+import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
@@ -380,27 +381,31 @@ public class SpuServiceImpl implements SpuService {
     }
 
     private ProductDetailVO toProductDetailView(ProductDetailCache cache) {
-        BigDecimal rate = pricingRuleService.rateFor(
+        PricingRateResolution pricing = pricingRuleService.rateFor(
                 UserContext.getLevelId(),
                 cache.getSpu().getCategoryId(),
                 DiscountConstants.isExcluded(cache.getSpu().getExcludeDiscount()));
-        List<ProductSkuVO> skus = toProductSkuVOs(cache.getSkus(), rate);
+        List<ProductSkuVO> skus = toProductSkuVOs(cache.getSkus(), pricing);
         BigDecimal minPrice = null;
         BigDecimal maxPrice = null;
         if (!skus.isEmpty()) {
-            minPrice = skus.stream().map(ProductSkuVO::getPrice).min(BigDecimal::compareTo)
-                    .orElse(cache.getSpu().getOriginalPrice());
-            maxPrice = skus.stream().map(ProductSkuVO::getPrice).max(BigDecimal::compareTo)
-                    .orElse(cache.getSpu().getOriginalPrice());
-        } else if (cache.getSpu().getOriginalPrice() != null) {
-            minPrice = priceService.resolveUnitPrice(cache.getSpu().getOriginalPrice(), rate);
+            minPrice = skus.stream().map(ProductSkuVO::getPrice)
+                    .filter(price -> price != null)
+                    .min(BigDecimal::compareTo)
+                    .orElse(null);
+            maxPrice = skus.stream().map(ProductSkuVO::getPrice)
+                    .filter(price -> price != null)
+                    .max(BigDecimal::compareTo)
+                    .orElse(null);
+        } else if (!pricing.isMissing() && cache.getSpu().getOriginalPrice() != null) {
+            minPrice = priceService.resolveUnitPrice(cache.getSpu().getOriginalPrice(), pricing.rate());
             maxPrice = minPrice;
         }
         return new ProductDetailVO(cache.getSpu(), skus, cache.getSpecTemplates(),
                 cache.getSpecItemsMap(), minPrice, maxPrice);
     }
 
-    private List<ProductSkuVO> toProductSkuVOs(List<Sku> skus, BigDecimal rate) {
+    private List<ProductSkuVO> toProductSkuVOs(List<Sku> skus, PricingRateResolution pricing) {
         if (skus == null || skus.isEmpty()) {
             return Collections.emptyList();
         }
@@ -409,12 +414,23 @@ public class SpuServiceImpl implements SpuService {
             vo.setId(sku.getId());
             vo.setSpuId(sku.getSpuId());
             vo.setSpecs(sku.getSpecs());
-            vo.setPrice(sku.getPrice() == null ? null : priceService.resolveUnitPrice(sku.getPrice(), rate));
+            vo.setPrice(sku.getPrice() == null || pricing.isMissing()
+                    ? null : priceService.resolveUnitPrice(sku.getPrice(), pricing.rate()));
             vo.setStock(skuService.getStockById(sku.getId()));
             vo.setImage(sku.getImage());
             vo.setStatus(sku.getStatus());
             return vo;
         }).collect(Collectors.toList());
+    }
+
+    private PriceRange resolvePriceRange(BigDecimal retailMin, BigDecimal retailMax, PricingRateResolution pricing) {
+        if (pricing.isMissing()) {
+            return new PriceRange(null, null);
+        }
+        BigDecimal rate = pricing.rate();
+        return new PriceRange(
+                retailMin == null ? null : priceService.resolveUnitPrice(retailMin, rate),
+                retailMax == null ? null : priceService.resolveUnitPrice(retailMax, rate));
     }
 
     private ProductListCacheItem convertToProductListCacheItem(Spu spu) {
@@ -444,18 +460,14 @@ public class SpuServiceImpl implements SpuService {
             target.setImages(source.getImages());
             target.setOriginalPrice(source.getOriginalPrice());
             target.setStatus(source.getStatus());
-            BigDecimal rate = pricingRuleService.rateFor(
+            PricingRateResolution pricing = pricingRuleService.rateFor(
                     levelId,
                     source.getCategoryId(),
                     DiscountConstants.isExcluded(source.getExcludeDiscount()));
-            if (source.getRetailMinPrice() != null) {
-                target.setMinPrice(priceService.resolveUnitPrice(source.getRetailMinPrice(), rate));
-            }
-            if (source.getRetailMaxPrice() != null) {
-                target.setMaxPrice(priceService.resolveUnitPrice(source.getRetailMaxPrice(), rate));
-            }
-            return target;
-        }).collect(Collectors.toList());
+            PriceRange range = resolvePriceRange(source.getRetailMinPrice(), source.getRetailMaxPrice(), pricing);
+            target.setMinPrice(range.min());
+            target.setMaxPrice(range.max());
+            return target;        }).collect(Collectors.toList());
     }
 
     @Override
@@ -550,19 +562,19 @@ public class SpuServiceImpl implements SpuService {
             vo.setRetailMinPrice(item.getRetailMinPrice());
             vo.setRetailMaxPrice(item.getRetailMaxPrice());
             vo.setExcludeDiscount(item.getExcludeDiscount());
-            BigDecimal rate = pricingRuleService.rateFor(
+            PricingRateResolution pricing = pricingRuleService.rateFor(
                     levelId, item.getCategoryId(), DiscountConstants.isExcluded(item.getExcludeDiscount()));
-            vo.setPricingRate(rate);
-            if (item.getRetailMinPrice() != null) {
-                vo.setMinPrice(priceService.resolveUnitPrice(item.getRetailMinPrice(), rate));
-            }
-            if (item.getRetailMaxPrice() != null) {
-                vo.setMaxPrice(priceService.resolveUnitPrice(item.getRetailMaxPrice(), rate));
-            }
+            PriceRange range = resolvePriceRange(item.getRetailMinPrice(), item.getRetailMaxPrice(), pricing);
+            vo.setPricingRate(pricing.rate());
+            vo.setMinPrice(range.min());
+            vo.setMaxPrice(range.max());
             return vo;
         }).collect(Collectors.toList());
         voPage.setRecords(records);
         return voPage;
+    }
+
+    private record PriceRange(BigDecimal min, BigDecimal max) {
     }
 
     private void publishSpuChanged(Long spuId, boolean recommendAffected) {
