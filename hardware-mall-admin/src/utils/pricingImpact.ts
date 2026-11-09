@@ -1,3 +1,5 @@
+import { UNSELLABLE_TEXT } from './pricingView'
+
 export interface MatrixRateItem {
   rate?: number | null
 }
@@ -19,7 +21,7 @@ export const getMatrixStats = (items: MatrixRateItem[]): MatrixStats => {
 
 export const getMatrixCellStatus = (rate?: number | null) =>
   rate == null
-    ? { configured: false, label: '未配置，零售兜底' }
+    ? { configured: false, label: `未配置，${UNSELLABLE_TEXT}` }
     : { configured: true, label: '已配置' }
 
 export const canApplyCopiedMatrix = (targetStatus: number | undefined, source: MatrixStats) =>

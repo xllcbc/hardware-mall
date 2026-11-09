@@ -1,5 +1,6 @@
 package com.example.mystore.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
@@ -57,7 +58,9 @@ class AdminSpuPricingControllerTest {
     private String token;
     private Category category;
     private Category gapCategory;
+    private Category excludedGapCategory;
     private UserLevel level;
+    private UserLevel retailLevel;
 
     @BeforeEach
     void setUp() {
@@ -67,6 +70,12 @@ class AdminSpuPricingControllerTest {
 
         category = category("价格视角分类");
         gapCategory = category("价格缺口分类");
+        excludedGapCategory = category("控价缺口分类");
+
+        retailLevel = userLevelMapper.selectOne(new LambdaQueryWrapper<UserLevel>()
+                .eq(UserLevel::getIsRetail, UserLevelStatusConstants.IS_RETAIL)
+                .last("LIMIT 1"));
+        rate(retailLevel.getId(), category.getId(), "1.2000");
 
         level = new UserLevel();
         level.setName("价格视角等级");
@@ -75,13 +84,8 @@ class AdminSpuPricingControllerTest {
         level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
         userLevelMapper.insert(level);
 
-        LevelCategoryRate rate = new LevelCategoryRate();
-        rate.setLevelId(level.getId());
-        rate.setCategoryId(category.getId());
-        rate.setRate(new BigDecimal("0.8000"));
-        rate.setCreateTime(LocalDateTime.now());
-        rate.setUpdateTime(LocalDateTime.now());
-        rateMapper.insert(rate);
+        rate(level.getId(), category.getId(), "0.8000");
+        rate(level.getId(), excludedGapCategory.getId(), "0.9000");
 
         Spu visible = spu(category.getId(), "八折锁具", 1, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         sku(visible.getId(), "10.00");
@@ -93,10 +97,14 @@ class AdminSpuPricingControllerTest {
 
         Spu excluded = spu(category.getId(), "控价锁具", 1, DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
         sku(excluded.getId(), "30.00");
+
+        Spu excludedGap = spu(excludedGapCategory.getId(), "控价缺口胶类", 1,
+                DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
+        sku(excludedGap.getId(), "50.00");
     }
 
     @Test
-    void pricingListReturnsRetailSettlementRateGapAndFilteredTotal() throws Exception {
+    void pricingListReturnsLevelSettlementRateAndFilteredTotal() throws Exception {
         mvc.perform(get("/api/admin/spu/pricing-list")
                         .header("Authorization", "Bearer " + token)
                         .param("levelId", String.valueOf(level.getId()))
@@ -116,39 +124,75 @@ class AdminSpuPricingControllerTest {
                 .andExpect(jsonPath("$.data.records[0].rateMissing").value(false))
                 .andExpect(jsonPath("$.data.records[0].excludeDiscount")
                         .value(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED))
-                .andExpect(jsonPath("$.data.records[1].effectiveRate").value(1.0))
-                .andExpect(jsonPath("$.data.records[1].settlementMinPrice").value(30.0))
-                .andExpect(jsonPath("$.data.records[1].settlementMaxPrice").value(30.0))
+                // 控价商品固定按零售结算价：30.00 × 零售倍率 1.2000 = 36.00
+                .andExpect(jsonPath("$.data.records[1].pricingRate").value(0.8))
+                .andExpect(jsonPath("$.data.records[1].effectiveRate").value(1.2))
+                .andExpect(jsonPath("$.data.records[1].settlementMinPrice").value(36.0))
+                .andExpect(jsonPath("$.data.records[1].settlementMaxPrice").value(36.0))
+                .andExpect(jsonPath("$.data.records[1].rateMissing").value(false))
                 .andExpect(jsonPath("$.data.records[1].excludeDiscount")
                         .value(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED));
     }
 
     @Test
-    void pricingListMarksMissingRateAndFallsBackToRetail() throws Exception {
+    void pricingListMarksMissingRateAsUnsellable() throws Exception {
         mvc.perform(get("/api/admin/spu/pricing-list")
                         .header("Authorization", "Bearer " + token)
                         .param("levelId", String.valueOf(level.getId()))
                         .param("categoryId", String.valueOf(gapCategory.getId())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
-                .andExpect(jsonPath("$.data.records[0].pricingRate").value(1.0))
-                .andExpect(jsonPath("$.data.records[0].effectiveRate").value(1.0))
+                // 管理端仍可见批发基价，但缺口不得给出结算价或兜底倍率
+                .andExpect(jsonPath("$.data.records[0].retailMinPrice").value(7.5))
+                .andExpect(jsonPath("$.data.records[0].pricingRate").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].effectiveRate").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].settlementMinPrice").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].settlementMaxPrice").doesNotExist())
                 .andExpect(jsonPath("$.data.records[0].rateMissing").value(true));
     }
 
     @Test
-    void pricingListWithoutLevelUsesRetailView() throws Exception {
+    void pricingListWithoutLevelUsesRetailMatrix() throws Exception {
         mvc.perform(get("/api/admin/spu/pricing-list")
                         .header("Authorization", "Bearer " + token)
                         .param("categoryId", String.valueOf(category.getId()))
                         .param("keyword", "八折锁具"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
-                .andExpect(jsonPath("$.data.records[0].pricingRate").value(1.0))
-                .andExpect(jsonPath("$.data.records[0].effectiveRate").value(1.0))
-                .andExpect(jsonPath("$.data.records[0].settlementMinPrice").value(10.0))
-                .andExpect(jsonPath("$.data.records[0].settlementMaxPrice").value(20.0))
+                .andExpect(jsonPath("$.data.records[0].pricingRate").value(1.2))
+                .andExpect(jsonPath("$.data.records[0].effectiveRate").value(1.2))
+                .andExpect(jsonPath("$.data.records[0].settlementMinPrice").value(12.0))
+                .andExpect(jsonPath("$.data.records[0].settlementMaxPrice").value(24.0))
                 .andExpect(jsonPath("$.data.records[0].rateMissing").value(false));
+    }
+
+    @Test
+    void pricingListRetailViewGapIsUnsellable() throws Exception {
+        mvc.perform(get("/api/admin/spu/pricing-list")
+                        .header("Authorization", "Bearer " + token)
+                        .param("categoryId", String.valueOf(gapCategory.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].pricingRate").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].effectiveRate").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].settlementMinPrice").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].settlementMaxPrice").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].rateMissing").value(true));
+    }
+
+    @Test
+    void excludedProductWithRetailGapIsUnsellable() throws Exception {
+        mvc.perform(get("/api/admin/spu/pricing-list")
+                        .header("Authorization", "Bearer " + token)
+                        .param("levelId", String.valueOf(level.getId()))
+                        .param("categoryId", String.valueOf(excludedGapCategory.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                // 视角等级已配置 0.9，但控价商品按零售结算且零售缺口，仍然不可售
+                .andExpect(jsonPath("$.data.records[0].pricingRate").value(0.9))
+                .andExpect(jsonPath("$.data.records[0].effectiveRate").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].settlementMinPrice").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].rateMissing").value(true));
     }
 
     @Test
@@ -169,7 +213,7 @@ class AdminSpuPricingControllerTest {
     }
 
     @Test
-    void productWithoutSkuDoesNotFallBackToOriginalPrice() throws Exception {
+    void productWithoutSkuUsesOriginalPriceAsBase() throws Exception {
         spu(category.getId(), "无规格商品", 1, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
 
         mvc.perform(get("/api/admin/spu/pricing-list")
@@ -178,8 +222,10 @@ class AdminSpuPricingControllerTest {
                         .param("keyword", "无规格商品"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
-                .andExpect(jsonPath("$.data.records[0].retailMinPrice").doesNotExist())
-                .andExpect(jsonPath("$.data.records[0].settlementMinPrice").doesNotExist());
+                .andExpect(jsonPath("$.data.records[0].retailMinPrice").value(99.0))
+                .andExpect(jsonPath("$.data.records[0].retailMaxPrice").value(99.0))
+                .andExpect(jsonPath("$.data.records[0].settlementMinPrice").value(79.2))
+                .andExpect(jsonPath("$.data.records[0].settlementMaxPrice").value(79.2));
     }
 
     private Category category(String name) {
@@ -222,5 +268,15 @@ class AdminSpuPricingControllerTest {
         item.setUpdateTime(LocalDateTime.now());
         item.setDeleteTime(0L);
         skuMapper.insert(item);
+    }
+
+    private void rate(Long levelId, Long categoryId, String rate) {
+        LevelCategoryRate item = new LevelCategoryRate();
+        item.setLevelId(levelId);
+        item.setCategoryId(categoryId);
+        item.setRate(new BigDecimal(rate));
+        item.setCreateTime(LocalDateTime.now());
+        item.setUpdateTime(LocalDateTime.now());
+        rateMapper.insert(item);
     }
 }

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   RETAIL_PRICE_VIEW,
+  UNSELLABLE_TEXT,
   formatCurrency,
   formatPriceRange,
   formatRate,
+  formatSettlementRange,
   parsePriceView,
   resolveUnitPrice,
   toPriceViewLevelId
@@ -28,7 +30,17 @@ describe('pricingView', () => {
     expect(formatPriceRange(10, 10)).toBe('¥10.00')
     expect(formatPriceRange()).toBe('-')
     expect(formatRate(1)).toBe('1.0000')
-    expect(formatRate(1, true)).toBe('未配置 / 零售兜底')
+    expect(formatRate(1, true)).toBe('暂不可售')
+    expect(formatRate(null, true)).toBe('暂不可售')
+  })
+
+  it('formats settlement cells with fail-closed gap copy', () => {
+    expect(UNSELLABLE_TEXT).toBe('暂不可售')
+    expect(formatSettlementRange(8, 16, false)).toBe('¥8.00 - ¥16.00')
+    expect(formatSettlementRange(8, 8, false)).toBe('¥8.00')
+    expect(formatSettlementRange(null, null, false)).toBe('-')
+    expect(formatSettlementRange(8, 16, true)).toBe('暂不可售')
+    expect(formatSettlementRange(null, null, true)).toBe('暂不可售')
   })
 
   it('resolves and formats the settlement price with two-decimal rounding', () => {

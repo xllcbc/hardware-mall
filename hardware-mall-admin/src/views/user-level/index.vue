@@ -43,7 +43,7 @@
         </el-table-column>
         <el-table-column label="操作" width="390" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.isRetail !== 1" link type="primary" @click="openMatrix(row)">
+            <el-button link type="primary" @click="openMatrix(row)">
               <el-icon><SetUp /></el-icon>
               倍率矩阵
             </el-button>
@@ -106,7 +106,7 @@
           <el-icon><CopyDocument /></el-icon>
           复制等级
         </el-button>
-        <span class="matrix-tip">倍率范围 (0, 1]，缺口需要补齐后才能启用等级</span>
+        <span class="matrix-tip">倍率范围 (0, 3.0000]，缺口分类的商品对用户显示“暂不可售”</span>
       </div>
       <el-table :data="rateList" max-height="430" v-loading="matrixLoading">
         <el-table-column prop="categoryName" label="商品分类" min-width="200" />
@@ -115,7 +115,7 @@
             <el-input-number
               v-model="row.rate"
               :min="0.0001"
-              :max="1"
+              :max="MAX_PRICING_RATE"
               :precision="4"
               :step="0.01"
               :controls="false"
@@ -191,6 +191,8 @@ import {
   runAfterImpactConfirmation
 } from '@/utils/pricingImpact'
 
+const MAX_PRICING_RATE = 3
+
 const router = useRouter()
 const loading = ref(false)
 const submitLoading = ref(false)
@@ -210,7 +212,7 @@ const copySourceMatrix = ref<LevelRate[]>([])
 const levelForm = reactive({ name: '', sortOrder: 0 })
 
 const copySourceLevels = computed(() =>
-  levelList.value.filter(level => level.id !== currentLevel.value?.id && level.isRetail !== 1)
+  levelList.value.filter(level => level.id !== currentLevel.value?.id)
 )
 
 const openUsers = (level: UserLevel) => {
@@ -417,7 +419,7 @@ const saveMatrix = async () => {
       categoryCount: rateList.value.length,
       configuredCategoryCount: items.length,
       title: '确认保存倍率矩阵',
-      description: '未配置分类将按零售倍率 1.0000 兜底。保存后将立即影响该等级用户的商品取价。',
+      description: '未配置分类的商品将对用户显示“暂不可售”。保存后将立即影响该等级用户的商品取价。',
       confirmButtonText: '确认保存'
     }),
     async () => {
@@ -438,16 +440,16 @@ const fillAll = async () => {
   if (!currentLevel.value) return
   let value: string
   try {
-    ({ value } = await ElMessageBox.prompt('请输入要填充到全部分类的倍率，范围 (0, 1]', '一键填充', {
-      inputPattern: /^(0(\.\d{1,4})?|1(\.0{1,4})?)$/,
-      inputErrorMessage: '请输入 0 到 1 之间的倍率，最多四位小数'
+    ({ value } = await ElMessageBox.prompt(`请输入要填充到全部分类的倍率，范围 (0, ${MAX_PRICING_RATE}]`, '一键填充', {
+      inputPattern: /^(0(\.\d{1,4})?|1(\.\d{1,4})?|2(\.\d{1,4})?|3(\.0{1,4})?)$/,
+      inputErrorMessage: `请输入大于 0 且不超过 ${MAX_PRICING_RATE} 的倍率，最多四位小数`
     }))
   } catch {
     return
   }
   const rate = Number(value)
-  if (rate <= 0 || rate > 1) {
-    ElMessage.warning('倍率必须在 (0, 1] 之间')
+  if (rate <= 0 || rate > MAX_PRICING_RATE) {
+    ElMessage.warning(`倍率必须在 (0, ${MAX_PRICING_RATE}] 之间`)
     return
   }
   await runAfterImpactConfirmation(

@@ -499,35 +499,35 @@ public class SpuServiceImpl implements SpuService {
         Map<Long, List<Sku>> skusBySpu = skuService.getSkusBySpuIds(spuIds);
 
         Long retailLevelId = pricingRuleService.resolveRetailLevelId();
-        boolean retailView = levelId == null || levelId.equals(retailLevelId);
-        Map<Long, LevelRateVO> ratesByCategory = retailView
-                ? Collections.emptyMap()
-                : pricingRuleService.getRates(levelId).stream()
-                        .collect(Collectors.toMap(LevelRateVO::getCategoryId, item -> item));
+        Long viewLevelId = levelId != null ? levelId : retailLevelId;
+        Map<Long, BigDecimal> viewRates = loadConfiguredRates(viewLevelId);
+        Map<Long, BigDecimal> retailRates = viewLevelId.equals(retailLevelId)
+                ? viewRates
+                : loadConfiguredRates(retailLevelId);
 
         List<AdminProductPricingVO> records = source.getRecords().stream().map(spu -> {
             List<Sku> skus = skusBySpu.getOrDefault(spu.getId(), Collections.emptyList());
-            BigDecimal retailMinPrice = null;
-            BigDecimal retailMaxPrice = null;
+            BigDecimal baseMinPrice;
+            BigDecimal baseMaxPrice;
             if (!skus.isEmpty()) {
-                retailMinPrice = skus.stream()
+                baseMinPrice = skus.stream()
                         .map(Sku::getPrice)
                         .min(BigDecimal::compareTo)
                         .orElse(null);
-                retailMaxPrice = skus.stream()
+                baseMaxPrice = skus.stream()
                         .map(Sku::getPrice)
                         .max(BigDecimal::compareTo)
                         .orElse(null);
+            } else {
+                baseMinPrice = spu.getOriginalPrice();
+                baseMaxPrice = spu.getOriginalPrice();
             }
 
-            LevelRateVO rateConfig = ratesByCategory.get(spu.getCategoryId());
-            boolean rateMissing = !retailView && (rateConfig == null || rateConfig.isMissing());
-            BigDecimal pricingRate = rateMissing || rateConfig == null || rateConfig.getRate() == null
-                    ? BigDecimal.ONE
-                    : rateConfig.getRate();
+            BigDecimal pricingRate = viewRates.get(spu.getCategoryId());
             BigDecimal effectiveRate = DiscountConstants.isExcluded(spu.getExcludeDiscount())
-                    ? BigDecimal.ONE
+                    ? retailRates.get(spu.getCategoryId())
                     : pricingRate;
+            boolean rateMissing = effectiveRate == null;
 
             AdminProductPricingVO vo = new AdminProductPricingVO();
             vo.setId(spu.getId());
@@ -538,14 +538,14 @@ public class SpuServiceImpl implements SpuService {
             vo.setImages(spu.getImages());
             vo.setOriginalPrice(spu.getOriginalPrice());
             vo.setWeight(spu.getWeight());
-            vo.setRetailMinPrice(retailMinPrice);
-            vo.setRetailMaxPrice(retailMaxPrice);
+            vo.setRetailMinPrice(baseMinPrice);
+            vo.setRetailMaxPrice(baseMaxPrice);
             vo.setPricingRate(pricingRate);
             vo.setEffectiveRate(effectiveRate);
-            vo.setSettlementMinPrice(retailMinPrice == null
-                    ? null : priceService.resolveUnitPrice(retailMinPrice, effectiveRate));
-            vo.setSettlementMaxPrice(retailMaxPrice == null
-                    ? null : priceService.resolveUnitPrice(retailMaxPrice, effectiveRate));
+            vo.setSettlementMinPrice(rateMissing || baseMinPrice == null
+                    ? null : priceService.resolveUnitPrice(baseMinPrice, effectiveRate));
+            vo.setSettlementMaxPrice(rateMissing || baseMaxPrice == null
+                    ? null : priceService.resolveUnitPrice(baseMaxPrice, effectiveRate));
             vo.setRateMissing(rateMissing);
             vo.setExcludeDiscount(spu.getExcludeDiscount());
             vo.setStatus(spu.getStatus());
@@ -555,6 +555,12 @@ public class SpuServiceImpl implements SpuService {
         }).collect(Collectors.toList());
         result.setRecords(records);
         return result;
+    }
+
+    private Map<Long, BigDecimal> loadConfiguredRates(Long levelId) {
+        return pricingRuleService.getRates(levelId).stream()
+                .filter(item -> item.getRate() != null)
+                .collect(Collectors.toMap(LevelRateVO::getCategoryId, LevelRateVO::getRate));
     }
 
     @Override

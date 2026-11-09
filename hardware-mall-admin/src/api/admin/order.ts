@@ -10,6 +10,9 @@ export interface OrderItem {
   price: number
   quantity: number
   subtotal: number
+  levelId?: number
+  levelName?: string
+  pricingRate?: number
 }
 
 export interface Order {

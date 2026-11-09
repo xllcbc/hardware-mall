@@ -14,7 +14,8 @@ describe('pricing matrix impact', () => {
       missing: 1
     })
     expect(getMatrixCellStatus(1).label).toBe('已配置')
-    expect(getMatrixCellStatus(null).label).toBe('未配置，零售兜底')
+    expect(getMatrixCellStatus(3).label).toBe('已配置')
+    expect(getMatrixCellStatus(null).label).toBe('未配置，暂不可售')
   })
 
   it('only allows an incomplete source matrix to be copied to a disabled target', () => {
