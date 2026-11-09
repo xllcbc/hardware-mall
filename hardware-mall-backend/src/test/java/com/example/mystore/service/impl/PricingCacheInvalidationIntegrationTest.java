@@ -198,6 +198,8 @@ class PricingCacheInvalidationIntegrationTest {
 
         assertThat(pricingRuleService.rateFor(fixture.levelId(), fixture.categoryId(), false))
                 .isEqualByComparingTo("0.8800");
+        // 零售等级已统一走倍率矩阵缓存，rateFor 不再回填零售等级 ID 缓存，此处显式回填后校验 TTL
+        assertThat(pricingRuleService.resolveRetailLevelId()).isNotNull();
 
         assertThat(redisUtil.getExpire(levelCacheKey))
                 .isBetween(PricingCacheConstants.TTL_SECONDS - 5, PricingCacheConstants.MAX_STALE_SECONDS);
