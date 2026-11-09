@@ -140,6 +140,12 @@ class PricingIdentityHttpTest {
         rate.setRate(new BigDecimal("0.8000"));
         levelCategoryRateMapper.insert(rate);
 
+        LevelCategoryRate retailRate = new LevelCategoryRate();
+        retailRate.setLevelId(UserLevelStatusConstants.RETAIL_LEVEL_ID);
+        retailRate.setCategoryId(CATEGORY_ID);
+        retailRate.setRate(new BigDecimal("1.0000"));
+        levelCategoryRateMapper.insert(retailRate);
+
         Spu spu = new Spu();
         spu.setId(PRODUCT_ID);
         spu.setCategoryId(CATEGORY_ID);
@@ -428,6 +434,9 @@ class PricingIdentityHttpTest {
         spuMapper.deleteById(PRODUCT_ID);
         levelCategoryRateMapper.delete(new LambdaQueryWrapper<LevelCategoryRate>()
                 .eq(LevelCategoryRate::getLevelId, CUSTOM_LEVEL_ID));
+        levelCategoryRateMapper.delete(new LambdaQueryWrapper<LevelCategoryRate>()
+                .eq(LevelCategoryRate::getLevelId, UserLevelStatusConstants.RETAIL_LEVEL_ID)
+                .eq(LevelCategoryRate::getCategoryId, CATEGORY_ID));
         userLevelMapper.deleteById(CUSTOM_LEVEL_ID);
         categoryMapper.deleteById(CATEGORY_ID);
     }

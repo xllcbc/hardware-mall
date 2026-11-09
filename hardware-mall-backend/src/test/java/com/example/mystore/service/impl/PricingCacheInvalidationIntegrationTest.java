@@ -196,8 +196,9 @@ class PricingCacheInvalidationIntegrationTest {
         redisUtil.delete(levelCacheKey);
         redisUtil.delete(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID);
 
-        assertThat(pricingRuleService.rateFor(fixture.levelId(), fixture.categoryId(), false))
+        assertThat(pricingRuleService.rateFor(fixture.levelId(), fixture.categoryId(), false).rate())
                 .isEqualByComparingTo("0.8800");
+        assertThat(pricingRuleService.resolveRetailLevelId()).isNotNull();
 
         assertThat(redisUtil.getExpire(levelCacheKey))
                 .isBetween(PricingCacheConstants.TTL_SECONDS - 5, PricingCacheConstants.MAX_STALE_SECONDS);

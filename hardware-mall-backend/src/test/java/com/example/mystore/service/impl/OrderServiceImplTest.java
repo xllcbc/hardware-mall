@@ -15,6 +15,7 @@ import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.OrderVO;
+import com.example.mystore.entity.vo.PricingRateResolution;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.PayService;
@@ -149,7 +150,7 @@ class OrderServiceImplTest {
         spu.setSalesCount(52);
         spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         lenient().when(pricingRuleService.rateFor(any(), any(), anyBoolean()))
-                .thenReturn(BigDecimal.ONE);
+                .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
         lenient().when(pricingRuleService.resolveRetailLevelId()).thenReturn(1L);
         lenient().when(userLevelService.getName(any())).thenReturn("零售");
     }
@@ -286,7 +287,7 @@ class OrderServiceImplTest {
         UserContext.setLevelId(2L);
         try {
             when(pricingRuleService.rateFor(2L, 1L, false))
-                    .thenReturn(new BigDecimal("0.8000"));
+                    .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
             when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
 
@@ -313,11 +314,36 @@ class OrderServiceImplTest {
     }
 
     @Test
+    void previewOrder_gapIsRejected() {
+        UserContext.setLevelId(2L);
+        try {
+            when(pricingRuleService.rateFor(2L, 1L, false))
+                    .thenReturn(PricingRateResolution.missing(2L));
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+            when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+            CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+            line.setSkuId(5L);
+            line.setQuantity(2);
+            CheckoutPreviewRequest request = new CheckoutPreviewRequest();
+            request.setItems(List.of(line));
+
+            assertThatThrownBy(() -> orderService.previewOrder(request))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("商品暂不可售");
+            verify(orderMapper, never()).insert(any(Order.class));
+            verify(skuService, never()).deductStock(anyLong(), anyInt());
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
     void createOrder_priceChanged_returnsLatestPreviewAndReleasesIdempotencyKey() {
         UserContext.setLevelId(2L);
         try {
             when(pricingRuleService.rateFor(2L, 1L, false))
-                    .thenReturn(new BigDecimal("0.8000"));
+                    .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
             when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
             when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
@@ -737,10 +763,58 @@ class OrderServiceImplTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void orderWithoutLevelContextPricesAtRetail() {
+        when(pricingRuleService.rateFor(isNull(), eq(1L), eq(false)))
+                .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
+        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+        when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+        when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+            inv.getArgument(0, Order.class).setId(100L);
+            return 1;
+        });
+        when(orderMapper.selectById(100L)).thenAnswer(inv -> {
+            Order o = new Order();
+            o.setId(100L);
+            o.setUserId(2L);
+            o.setOrderNo("SO1");
+            o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+            o.setAddressId(1L);
+            o.setLogisticsId(1L);
+            return o;
+        });
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(2);
+        CreateOrderRequest request = new CreateOrderRequest();
+        request.setAddressId(1L);
+        request.setLogisticsId(1L);
+        request.setItems(List.of(line));
+        request.setExpectedPayAmount(new BigDecimal("438.00"));
+
+        orderService.createOrder(2L, request, "anon");
+
+        ArgumentCaptor<List<OrderItem>> captor = ArgumentCaptor.forClass(List.class);
+        verify(orderItemMapper).insertBatch(captor.capture());
+        OrderItem item = captor.getValue().get(0);
+        assertThat(item.getLevelId()).isEqualTo(1L);
+        assertThat(item.getLevelName()).isEqualTo("零售");
+        assertThat(item.getPricingRate()).isEqualByComparingTo("1.0000");
+        assertThat(item.getPrice()).isEqualByComparingTo("219.00");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void customLevel_getsDiscountedPriceAndSnapshot() {
         UserContext.setLevelId(2L);
         try {
-            when(pricingRuleService.rateFor(2L, 1L, false)).thenReturn(new BigDecimal("0.8000"));
+            when(pricingRuleService.rateFor(2L, 1L, false))
+                    .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
             when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
             when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);

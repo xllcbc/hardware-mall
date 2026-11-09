@@ -12,5 +12,6 @@ import java.util.Map;
  */
 @Data
 public class PricingLevelCache implements Serializable {
+    private Boolean levelExists;
     private Map<Long, BigDecimal> rates = new HashMap<>();
 }

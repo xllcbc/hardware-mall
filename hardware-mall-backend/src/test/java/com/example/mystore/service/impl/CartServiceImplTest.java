@@ -1,10 +1,12 @@
 package com.example.mystore.service.impl;
 
 import com.example.mystore.common.constant.DiscountConstants;
+import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.CartItemVO;
+import com.example.mystore.entity.vo.PricingRateResolution;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.mapper.CartMapper;
 import com.example.mystore.mapper.SpuMapper;
@@ -24,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -58,7 +61,8 @@ class CartServiceImplTest {
             when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
             when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(spu()));
             when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(sku()));
-            when(pricingRuleService.rateFor(2L, 1L, false)).thenReturn(new BigDecimal("0.8000"));
+            when(pricingRuleService.rateFor(2L, 1L, false))
+                    .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
 
             List<CartItemVO> result = cartService.getCartList(1L);
 
@@ -78,7 +82,8 @@ class CartServiceImplTest {
             when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
             when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(spu()));
             when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(sku()));
-            when(pricingRuleService.rateFor(1L, 1L, false)).thenReturn(BigDecimal.ONE);
+            when(pricingRuleService.rateFor(1L, 1L, false))
+                    .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
 
             List<CartItemVO> result = cartService.getCartList(1L);
 
@@ -132,13 +137,33 @@ class CartServiceImplTest {
                 .thenReturn(Map.of(1L, firstSku, 2L, secondSku));
         when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(spu()));
         when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(firstSku));
-        when(pricingRuleService.rateFor(any(), eq(1L), eq(false))).thenReturn(BigDecimal.ONE);
+        when(pricingRuleService.rateFor(any(), eq(1L), eq(false)))
+                .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
 
         List<CartItemVO> result = cartService.getCartList(1L);
 
         assertThat(result).hasSize(2);
         verify(skuService, times(1)).getSkuMapByIds(any());
         verify(skuService, never()).getSkuById(any());
+    }
+
+    @Test
+    void gapLineIsRejected() {
+        UserContext.setLevelId(2L);
+        try {
+            when(cartMapper.selectList(any())).thenReturn(List.of(cart()));
+            when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
+            when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(spu()));
+            when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(sku()));
+            when(pricingRuleService.rateFor(2L, 1L, false))
+                    .thenReturn(PricingRateResolution.missing(2L));
+
+            assertThatThrownBy(() -> cartService.getCartList(1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("商品暂不可售");
+        } finally {
+            UserContext.clear();
+        }
     }
 
     private Cart cart() {

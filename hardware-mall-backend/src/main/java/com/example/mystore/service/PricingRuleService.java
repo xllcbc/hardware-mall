@@ -2,13 +2,14 @@ package com.example.mystore.service;
 
 import com.example.mystore.entity.dto.LevelRateItemRequest;
 import com.example.mystore.entity.vo.LevelRateVO;
+import com.example.mystore.entity.vo.PricingRateResolution;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 public interface PricingRuleService {
 
-    BigDecimal rateFor(Long levelId, Long categoryId, boolean excludeDiscount);
+    PricingRateResolution rateFor(Long levelId, Long categoryId, boolean excludeDiscount);
 
     Long resolveRetailLevelId();
 

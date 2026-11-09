@@ -24,6 +24,7 @@ import com.example.mystore.entity.vo.OrderItemVO;
 import com.example.mystore.entity.vo.CheckoutItemVO;
 import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.DashboardStatsVO;
+import com.example.mystore.entity.vo.PricingRateResolution;
 import com.example.mystore.entity.vo.RecentOrderVO;
 import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;
@@ -184,8 +185,7 @@ public class OrderServiceImpl implements OrderService {
         // ③ 组装订单明细快照（spu 改从 map 取）
         List<OrderItem> orderItems = new ArrayList<>();
         BigDecimal goodsAmount = BigDecimal.ZERO;
-        Long levelId = UserContext.getLevelId() != null
-                ? UserContext.getLevelId() : pricingRuleService.resolveRetailLevelId();
+        Long currentLevelId = UserContext.getLevelId();
         for (int i = 0; i < requestedItems.size(); i++) {
             CreateOrderRequest.CartItem cartItem = requestedItems.get(i);
             Sku sku = skus.get(i);
@@ -193,10 +193,14 @@ public class OrderServiceImpl implements OrderService {
             if (spu == null) {
                 throw new BusinessException("商品不存在或已下架: " + cartItem.getSkuId());
             }
-            BigDecimal rate = pricingRuleService.rateFor(
-                    levelId,
+            PricingRateResolution pricing = pricingRuleService.rateFor(
+                    currentLevelId,
                     spu.getCategoryId(),
                     DiscountConstants.isExcluded(spu.getExcludeDiscount()));
+            if (pricing.isMissing()) {
+                throw new BusinessException("商品暂不可售: " + cartItem.getSkuId());
+            }
+            BigDecimal rate = pricing.rate();
             BigDecimal unitPrice = priceService.resolveUnitPrice(sku.getPrice(), rate);
             BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             goodsAmount = goodsAmount.add(subtotal);
@@ -221,8 +225,8 @@ public class OrderServiceImpl implements OrderService {
 
             item.setProductImage(sku.getImage() != null ? sku.getImage() : getFirstImage(spu.getImages()));
             item.setPrice(unitPrice);
-            item.setLevelId(levelId);
-            item.setLevelName(userLevelService.getName(levelId));
+            item.setLevelId(pricing.levelId());
+            item.setLevelName(userLevelService.getName(pricing.levelId()));
             item.setPricingRate(rate);
             item.setQuantity(cartItem.getQuantity());
             item.setSubtotal(subtotal);
