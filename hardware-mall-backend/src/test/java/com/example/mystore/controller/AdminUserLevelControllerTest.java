@@ -63,7 +63,7 @@ class AdminUserLevelControllerTest {
                 .getJSONObject("data")
                 .getLongValue("id");
 
-        mvc.perform(put("/api/admin/user-level/" + levelId + "/discounts")
+        mvc.perform(put("/api/admin/user-level/" + levelId + "/rates")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("{\"items\":[{\"categoryId\":88,\"rate\":0.8000}]}"))
@@ -86,21 +86,21 @@ class AdminUserLevelControllerTest {
         long sourceLevelId = createLevel("复制来源");
         long targetLevelId = createLevel("复制目标");
 
-        mvc.perform(post("/api/admin/user-level/" + sourceLevelId + "/discounts/fill")
+        mvc.perform(post("/api/admin/user-level/" + sourceLevelId + "/rates/fill")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("{\"rate\":0.7000}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
-        mvc.perform(post("/api/admin/user-level/" + targetLevelId + "/discounts/copy")
+        mvc.perform(post("/api/admin/user-level/" + targetLevelId + "/rates/copy")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("{\"sourceLevelId\":" + sourceLevelId + "}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
-        mvc.perform(get("/api/admin/user-level/" + targetLevelId + "/discounts")
+        mvc.perform(get("/api/admin/user-level/" + targetLevelId + "/rates")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].categoryId").value(88))
@@ -113,7 +113,7 @@ class AdminUserLevelControllerTest {
         long targetLevelId = createLevel("启用目标");
         long sourceLevelId = createLevel("不完整来源");
 
-        mvc.perform(put("/api/admin/user-level/" + targetLevelId + "/discounts")
+        mvc.perform(put("/api/admin/user-level/" + targetLevelId + "/rates")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("{\"items\":[{\"categoryId\":88,\"rate\":0.9000}]}"))
@@ -126,13 +126,13 @@ class AdminUserLevelControllerTest {
                 .andExpect(status().isOk());
 
         insertCategory("新增分类");
-        mvc.perform(put("/api/admin/user-level/" + sourceLevelId + "/discounts")
+        mvc.perform(put("/api/admin/user-level/" + sourceLevelId + "/rates")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("{\"items\":[{\"categoryId\":88,\"rate\":0.6000}]}"))
                 .andExpect(status().isOk());
 
-        mvc.perform(post("/api/admin/user-level/" + targetLevelId + "/discounts/copy")
+        mvc.perform(post("/api/admin/user-level/" + targetLevelId + "/rates/copy")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("{\"sourceLevelId\":" + sourceLevelId + "}"))
@@ -141,7 +141,7 @@ class AdminUserLevelControllerTest {
                 .andExpect(jsonPath("$.message")
                         .value("来源等级倍率矩阵未填满，不能复制到已启用等级"));
 
-        mvc.perform(get("/api/admin/user-level/" + targetLevelId + "/discounts")
+        mvc.perform(get("/api/admin/user-level/" + targetLevelId + "/rates")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].rate").value(0.9))

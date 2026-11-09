@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="${PRICING_RELEASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DB_DIR="${PRICING_RELEASE_DB_DIR:-$ROOT_DIR/hardware-mall-backend/src/main/resources/db}"
-MIGRATION="${PRICING_RELEASE_MIGRATION:-$DB_DIR/migration_2026-11-02_multi_level_pricing_release.sql}"
+BASE_MIGRATION="${PRICING_RELEASE_MIGRATION:-$DB_DIR/migration_2026-11-02_multi_level_pricing_release.sql}"
+RATE_MIGRATION="${PRICING_RATE_MIGRATION:-$DB_DIR/migration_2026-11-09_level_category_rate.sql}"
 VERIFY="${PRICING_RELEASE_VERIFY:-$DB_DIR/pricing_release_verify.sql}"
 
 DB_PORT="${DB_PORT:-3306}"
@@ -22,6 +23,7 @@ Usage:
   pricing-release.sh backup <backup.sql>
   pricing-release.sh preflight <backup.sql>
   pricing-release.sh migrate <backup.sql>
+  pricing-release.sh schema-state
   pricing-release.sh verify
   pricing-release.sh restore <backup.sql>
   pricing-release.sh rollback-drill <backup.sql> [previous-image]
@@ -42,6 +44,75 @@ require_file() {
     echo "Required file is missing or empty: $path" >&2
     exit 2
   fi
+}
+
+schema_state() {
+  local schema="$1"
+  local counts new_tables new_columns legacy_tables legacy_columns
+  # Legacy shares four common pricing columns; discount_rate is its only distinguishing column.
+  counts="$("${MYSQL[@]}" -N -B "$schema" -e "
+    SELECT CONCAT(
+      (SELECT COUNT(*) FROM information_schema.tables
+        WHERE table_schema = DATABASE() AND table_name = 'level_category_rate'),
+      ':',
+      (SELECT COUNT(*) FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND (
+            (table_name = 'user' AND column_name = 'level_id')
+            OR (table_name = 'spu' AND column_name = 'exclude_discount')
+            OR (table_name = 'order_item'
+              AND column_name IN ('level_id', 'level_name', 'pricing_rate'))
+          )),
+      ':',
+      (SELECT COUNT(*) FROM information_schema.tables
+        WHERE table_schema = DATABASE() AND table_name = 'level_category_discount'),
+      ':',
+      (SELECT COUNT(*) FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'order_item'
+          AND column_name = 'discount_rate')
+    );
+  ")"
+  IFS=':' read -r new_tables new_columns legacy_tables legacy_columns <<< "$counts"
+
+  if [[ "$new_tables" == "1" && "$new_columns" == "5" &&
+        "$legacy_tables" == "0" && "$legacy_columns" == "0" ]]; then
+    echo "target"
+  elif [[ "$new_tables" == "0" && "$new_columns" == "4" &&
+          "$legacy_tables" == "1" && "$legacy_columns" == "1" ]]; then
+    echo "legacy"
+  elif [[ "$new_tables" == "0" && "$new_columns" == "0" &&
+          "$legacy_tables" == "0" && "$legacy_columns" == "0" ]]; then
+    echo "original"
+  else
+    echo "partial"
+  fi
+}
+
+apply_pricing_migrations() {
+  local schema="$1"
+  local state
+  state="$(schema_state "$schema")"
+  case "$state" in
+    original)
+      "${MYSQL[@]}" "$schema" < "$BASE_MIGRATION"
+      "${MYSQL[@]}" "$schema" < "$RATE_MIGRATION"
+      "${MYSQL[@]}" --init-command="SET @expect_empty_level_category_rate = 1" \
+        "$schema" < "$VERIFY"
+      ;;
+    legacy)
+      "${MYSQL[@]}" "$schema" < "$RATE_MIGRATION"
+      "${MYSQL[@]}" --init-command="SET @expect_empty_level_category_rate = 1" \
+        "$schema" < "$VERIFY"
+      ;;
+    target)
+      echo "Pricing schema already uses level_category_rate and pricing_rate."
+      ;;
+    *)
+      echo "Pricing schema is partial; refusing to migrate $schema." >&2
+      exit 4
+      ;;
+  esac
 }
 
 verify_backup_checksum() {
@@ -66,11 +137,14 @@ case "${1:-}" in
     require_db_env
     backup="${2:?backup path required}"
     require_file "$backup"
+    require_file "$BASE_MIGRATION"
+    require_file "$RATE_MIGRATION"
+    require_file "$VERIFY"
     verify_backup_checksum "$backup"
     scratch="${DB_NAME}_pricing_preflight"
     "${MYSQL[@]}" -e "DROP DATABASE IF EXISTS \`$scratch\`; CREATE DATABASE \`$scratch\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
     "${MYSQL[@]}" "$scratch" < "$backup"
-    "${MYSQL[@]}" "$scratch" < "$MIGRATION"
+    apply_pricing_migrations "$scratch"
     "${MYSQL[@]}" "$scratch" < "$VERIFY"
     echo "Preflight database retained for inspection: $scratch"
     ;;
@@ -78,11 +152,19 @@ case "${1:-}" in
     require_db_env
     backup="${2:?backup path required}"
     require_file "$backup"
+    require_file "$BASE_MIGRATION"
+    require_file "$RATE_MIGRATION"
+    require_file "$VERIFY"
     verify_backup_checksum "$backup"
-    "${MYSQL[@]}" "$DB_NAME" < "$MIGRATION"
+    apply_pricing_migrations "$DB_NAME"
+    ;;
+  schema-state)
+    require_db_env
+    schema_state "$DB_NAME"
     ;;
   verify)
     require_db_env
+    require_file "$VERIFY"
     "${MYSQL[@]}" "$DB_NAME" < "$VERIFY"
     ;;
   restore)

@@ -80,6 +80,7 @@ jobs:
             scripts/pricing-release.sh \
             scripts/release/smoke.sh \
             hardware-mall-backend/src/main/resources/db/migration_2026-11-02_multi_level_pricing_release.sql \
+            hardware-mall-backend/src/main/resources/db/migration_2026-11-09_level_category_rate.sql \
             hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql
 
       - name: Upload release kit
@@ -165,22 +166,7 @@ jobs:
               exit 1
             fi
 
-            target_structure="$(mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" \
-              -u "$DB_USERNAME" -N -B "$DB_NAME" -e "
-                SELECT
-                  (SELECT COUNT(*) FROM information_schema.tables
-                    WHERE table_schema = DATABASE()
-                      AND table_name IN ('user_level', 'level_category_discount'))
-                  +
-                  (SELECT COUNT(*) FROM information_schema.columns
-                    WHERE table_schema = DATABASE()
-                      AND (
-                        (table_name = 'user' AND column_name = 'level_id')
-                        OR (table_name = 'spu' AND column_name = 'exclude_discount')
-                        OR (table_name = 'order_item'
-                          AND column_name IN ('level_id', 'level_name', 'discount_rate'))
-                      ));
-              ")"
+            pricing_structure="$(bash scripts/pricing-release.sh schema-state)"
             legacy_fields="$(mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" \
               -u "$DB_USERNAME" -N -B "$DB_NAME" -e "
                 SELECT COUNT(*) FROM information_schema.columns
@@ -196,17 +182,18 @@ jobs:
               exit 1
             fi
 
-            # 目标定价结构完整时应为 7（user_level/level_category_discount 2 张表 +
-            # user.level_id、spu.exclude_discount、order_item 的 level_id/level_name/discount_rate 5 列）。
-            # 0 表示尚未迁移，7 表示已完成迁移，1..6 表示部分迁移必须拒绝。
-            if [[ "$target_structure" != "0" && "$target_structure" != "7" ]]; then
-              echo "Production database contains a partial target pricing schema ($target_structure/7); cannot proceed." >&2
-              exit 1
-            fi
             migration_needed=0
-            if [[ "$target_structure" == "0" ]]; then
-              migration_needed=1
-            fi
+            case "$pricing_structure" in
+              target)
+                ;;
+              legacy|original)
+                migration_needed=1
+                ;;
+              *)
+                echo "Production database contains a partial pricing schema ($pricing_structure); cannot proceed." >&2
+                exit 1
+                ;;
+            esac
 
             docker pull "$REGISTRY/$NAMESPACE/hardware-mall-backend:$previous_tag"
             docker pull "$REGISTRY/$NAMESPACE/hardware-mall-admin:$previous_tag"

@@ -29,7 +29,7 @@ public class OrderItem {
 
     private String levelName;
 
-    private BigDecimal discountRate;
+    private BigDecimal pricingRate;
 
     private Integer quantity;
 

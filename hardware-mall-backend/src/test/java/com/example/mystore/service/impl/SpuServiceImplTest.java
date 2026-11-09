@@ -154,7 +154,7 @@ class SpuServiceImplTest {
         var page = spuService.getUserLevelProductPreview(2L, null, 1, 10);
 
         UserLevelProductPreviewVO vo = page.getRecords().get(0);
-        assertThat(vo.getDiscountRate()).isEqualByComparingTo("0.7000");
+        assertThat(vo.getPricingRate()).isEqualByComparingTo("0.7000");
         assertThat(vo.getMinPrice()).isEqualByComparingTo("70.00");
         assertThat(vo.getMaxPrice()).isEqualByComparingTo("140.00");
     }

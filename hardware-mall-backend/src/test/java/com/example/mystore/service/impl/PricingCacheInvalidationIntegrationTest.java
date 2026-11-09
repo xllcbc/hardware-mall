@@ -6,13 +6,13 @@ import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.entity.db.Category;
-import com.example.mystore.entity.db.LevelCategoryDiscount;
+import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.UserLevel;
-import com.example.mystore.entity.dto.LevelDiscountItemRequest;
+import com.example.mystore.entity.dto.LevelRateItemRequest;
 import com.example.mystore.event.PricingCacheInvalidationEvent;
 import com.example.mystore.event.PricingCacheInvalidationListener;
 import com.example.mystore.mapper.CategoryMapper;
-import com.example.mystore.mapper.LevelCategoryDiscountMapper;
+import com.example.mystore.mapper.LevelCategoryRateMapper;
 import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.UserLevelService;
@@ -63,7 +63,7 @@ class PricingCacheInvalidationIntegrationTest {
     private CategoryMapper categoryMapper;
 
     @Autowired
-    private LevelCategoryDiscountMapper levelCategoryDiscountMapper;
+    private LevelCategoryRateMapper levelCategoryRateMapper;
 
     @Autowired
     private RedisUtil redisUtil;
@@ -87,9 +87,9 @@ class PricingCacheInvalidationIntegrationTest {
     @AfterEach
     void cleanUp() {
         if (!createdLevelIds.isEmpty()) {
-            levelCategoryDiscountMapper.delete(
-                    new LambdaQueryWrapper<LevelCategoryDiscount>()
-                            .in(LevelCategoryDiscount::getLevelId, createdLevelIds));
+            levelCategoryRateMapper.delete(
+                    new LambdaQueryWrapper<LevelCategoryRate>()
+                            .in(LevelCategoryRate::getLevelId, createdLevelIds));
             userLevelMapper.deleteBatchIds(createdLevelIds);
         }
         if (!createdCategoryIds.isEmpty()) {
@@ -108,8 +108,8 @@ class PricingCacheInvalidationIntegrationTest {
         redisUtil.set(productCacheKey, "neutral-product", 60, TimeUnit.SECONDS);
 
         transactionTemplate.executeWithoutResult(status -> {
-            pricingRuleService.saveDiscounts(fixture.levelId(),
-                    List.of(discountRequest(fixture.categoryId(), "0.6200")));
+            pricingRuleService.saveRates(fixture.levelId(),
+                    List.of(rateRequest(fixture.categoryId(), "0.6200")));
             assertThat(redisUtil.hasKey(cacheKey)).isTrue();
         });
 
@@ -124,8 +124,8 @@ class PricingCacheInvalidationIntegrationTest {
         redisUtil.set(cacheKey, "old-rate", PricingCacheConstants.MAX_STALE_SECONDS, TimeUnit.SECONDS);
 
         transactionTemplate.executeWithoutResult(status -> {
-            pricingRuleService.saveDiscounts(fixture.levelId(),
-                    List.of(discountRequest(fixture.categoryId(), "0.6200")));
+            pricingRuleService.saveRates(fixture.levelId(),
+                    List.of(rateRequest(fixture.categoryId(), "0.6200")));
             status.setRollbackOnly();
         });
 
@@ -133,26 +133,26 @@ class PricingCacheInvalidationIntegrationTest {
     }
 
     @Test
-    void fillDiscountsInvalidatesLevelCacheAfterCommit() {
+    void fillRatesInvalidatesLevelCacheAfterCommit() {
         PricingFixture fixture = createFixture("fill");
         String cacheKey = RedisConstants.PREFIX_PRICING_LEVEL + fixture.levelId();
         redisUtil.set(cacheKey, "old-rate", PricingCacheConstants.MAX_STALE_SECONDS, TimeUnit.SECONDS);
 
         transactionTemplate.executeWithoutResult(status ->
-                pricingRuleService.fillDiscounts(fixture.levelId(), new BigDecimal("0.6600")));
+                pricingRuleService.fillRates(fixture.levelId(), new BigDecimal("0.6600")));
 
         assertThat(redisUtil.hasKey(cacheKey)).isFalse();
     }
 
     @Test
-    void copyDiscountsInvalidatesTargetLevelCacheAfterCommit() {
+    void copyRatesInvalidatesTargetLevelCacheAfterCommit() {
         PricingFixture source = createFixture("copy-source");
         PricingFixture target = createFixture("copy-target");
         String cacheKey = RedisConstants.PREFIX_PRICING_LEVEL + target.levelId();
         redisUtil.set(cacheKey, "old-rate", PricingCacheConstants.MAX_STALE_SECONDS, TimeUnit.SECONDS);
 
         transactionTemplate.executeWithoutResult(status ->
-                pricingRuleService.copyDiscounts(target.levelId(), source.levelId()));
+                pricingRuleService.copyRates(target.levelId(), source.levelId()));
 
         assertThat(redisUtil.hasKey(cacheKey)).isFalse();
     }
@@ -160,7 +160,7 @@ class PricingCacheInvalidationIntegrationTest {
     @Test
     void levelStatusChangeInvalidatesLevelAndRetailCachesAfterCommit() {
         PricingFixture fixture = createFixture("status");
-        pricingRuleService.fillDiscounts(fixture.levelId(), new BigDecimal("0.8800"));
+        pricingRuleService.fillRates(fixture.levelId(), new BigDecimal("0.8800"));
         String levelCacheKey = RedisConstants.PREFIX_PRICING_LEVEL + fixture.levelId();
         redisUtil.set(levelCacheKey, "old-rate",
                 PricingCacheConstants.MAX_STALE_SECONDS, TimeUnit.SECONDS);
@@ -263,16 +263,16 @@ class PricingCacheInvalidationIntegrationTest {
         categoryMapper.insert(category);
         createdCategoryIds.add(category.getId());
 
-        LevelCategoryDiscount discount = new LevelCategoryDiscount();
-        discount.setLevelId(level.getId());
-        discount.setCategoryId(category.getId());
-        discount.setRate(new BigDecimal("0.8800"));
-        levelCategoryDiscountMapper.insert(discount);
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(level.getId());
+        rate.setCategoryId(category.getId());
+        rate.setRate(new BigDecimal("0.8800"));
+        levelCategoryRateMapper.insert(rate);
         return new PricingFixture(level.getId(), category.getId());
     }
 
-    private LevelDiscountItemRequest discountRequest(Long categoryId, String rate) {
-        LevelDiscountItemRequest request = new LevelDiscountItemRequest();
+    private LevelRateItemRequest rateRequest(Long categoryId, String rate) {
+        LevelRateItemRequest request = new LevelRateItemRequest();
         request.setCategoryId(categoryId);
         request.setRate(new BigDecimal(rate));
         return request;

@@ -4,10 +4,10 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.annotation.RequireAdmin;
 import com.example.mystore.common.result.Result;
 import com.example.mystore.entity.db.UserLevel;
-import com.example.mystore.entity.dto.CopyLevelDiscountRequest;
-import com.example.mystore.entity.dto.LevelDiscountBatchRequest;
+import com.example.mystore.entity.dto.CopyLevelRateRequest;
+import com.example.mystore.entity.dto.LevelRateBatchRequest;
 import com.example.mystore.entity.dto.RateRequest;
-import com.example.mystore.entity.vo.LevelDiscountVO;
+import com.example.mystore.entity.vo.LevelRateVO;
 import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
 import com.example.mystore.entity.vo.UserLevelVO;
 import com.example.mystore.service.PricingRuleService;
@@ -57,30 +57,30 @@ public class AdminUserLevelController {
         return Result.success();
     }
 
-    @GetMapping("/{id}/discounts")
-    public Result<List<LevelDiscountVO>> getDiscounts(@PathVariable Long id) {
-        return Result.success(pricingRuleService.getDiscounts(id));
+    @GetMapping("/{id}/rates")
+    public Result<List<LevelRateVO>> getRates(@PathVariable Long id) {
+        return Result.success(pricingRuleService.getRates(id));
     }
 
-    @PutMapping("/{id}/discounts")
-    public Result<Void> saveDiscounts(
+    @PutMapping("/{id}/rates")
+    public Result<Void> saveRates(
             @PathVariable Long id,
-            @RequestBody LevelDiscountBatchRequest request) {
-        pricingRuleService.saveDiscounts(id, request == null ? null : request.getItems());
+            @RequestBody LevelRateBatchRequest request) {
+        pricingRuleService.saveRates(id, request == null ? null : request.getItems());
         return Result.success();
     }
 
-    @PostMapping("/{id}/discounts/fill")
-    public Result<Void> fillDiscounts(@PathVariable Long id, @RequestBody RateRequest request) {
-        pricingRuleService.fillDiscounts(id, request == null ? null : request.getRate());
+    @PostMapping("/{id}/rates/fill")
+    public Result<Void> fillRates(@PathVariable Long id, @RequestBody RateRequest request) {
+        pricingRuleService.fillRates(id, request == null ? null : request.getRate());
         return Result.success();
     }
 
-    @PostMapping("/{id}/discounts/copy")
-    public Result<Void> copyDiscounts(
+    @PostMapping("/{id}/rates/copy")
+    public Result<Void> copyRates(
             @PathVariable Long id,
-            @RequestBody CopyLevelDiscountRequest request) {
-        pricingRuleService.copyDiscounts(id, request == null ? null : request.getSourceLevelId());
+            @RequestBody CopyLevelRateRequest request) {
+        pricingRuleService.copyRates(id, request == null ? null : request.getSourceLevelId());
         return Result.success();
     }
 

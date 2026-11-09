@@ -3,6 +3,6 @@ package com.example.mystore.entity.dto;
 import lombok.Data;
 
 @Data
-public class CopyLevelDiscountRequest {
+public class CopyLevelRateRequest {
     private Long sourceLevelId;
 }

@@ -10,7 +10,7 @@ import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.SpecItem;
 import com.example.mystore.entity.db.SpecTemplate;
 import com.example.mystore.entity.vo.AdminProductPricingVO;
-import com.example.mystore.entity.vo.LevelDiscountVO;
+import com.example.mystore.entity.vo.LevelRateVO;
 import com.example.mystore.entity.vo.ProductListVO;
 import com.example.mystore.entity.vo.ProductDetailVO;
 import com.example.mystore.entity.vo.ProductDetailCache;
@@ -472,10 +472,10 @@ public class SpuServiceImpl implements SpuService {
 
         Long retailLevelId = pricingRuleService.resolveRetailLevelId();
         boolean retailView = levelId == null || levelId.equals(retailLevelId);
-        Map<Long, LevelDiscountVO> discountsByCategory = retailView
+        Map<Long, LevelRateVO> ratesByCategory = retailView
                 ? Collections.emptyMap()
-                : pricingRuleService.getDiscounts(levelId).stream()
-                        .collect(Collectors.toMap(LevelDiscountVO::getCategoryId, item -> item));
+                : pricingRuleService.getRates(levelId).stream()
+                        .collect(Collectors.toMap(LevelRateVO::getCategoryId, item -> item));
 
         List<AdminProductPricingVO> records = source.getRecords().stream().map(spu -> {
             List<Sku> skus = skusBySpu.getOrDefault(spu.getId(), Collections.emptyList());
@@ -492,14 +492,14 @@ public class SpuServiceImpl implements SpuService {
                         .orElse(null);
             }
 
-            LevelDiscountVO discount = discountsByCategory.get(spu.getCategoryId());
-            boolean rateMissing = !retailView && (discount == null || discount.isMissing());
-            BigDecimal discountRate = rateMissing || discount == null || discount.getRate() == null
+            LevelRateVO rateConfig = ratesByCategory.get(spu.getCategoryId());
+            boolean rateMissing = !retailView && (rateConfig == null || rateConfig.isMissing());
+            BigDecimal pricingRate = rateMissing || rateConfig == null || rateConfig.getRate() == null
                     ? BigDecimal.ONE
-                    : discount.getRate();
+                    : rateConfig.getRate();
             BigDecimal effectiveRate = DiscountConstants.isExcluded(spu.getExcludeDiscount())
                     ? BigDecimal.ONE
-                    : discountRate;
+                    : pricingRate;
 
             AdminProductPricingVO vo = new AdminProductPricingVO();
             vo.setId(spu.getId());
@@ -512,7 +512,7 @@ public class SpuServiceImpl implements SpuService {
             vo.setWeight(spu.getWeight());
             vo.setRetailMinPrice(retailMinPrice);
             vo.setRetailMaxPrice(retailMaxPrice);
-            vo.setDiscountRate(discountRate);
+            vo.setPricingRate(pricingRate);
             vo.setEffectiveRate(effectiveRate);
             vo.setSettlementMinPrice(retailMinPrice == null
                     ? null : priceService.resolveUnitPrice(retailMinPrice, effectiveRate));
@@ -552,7 +552,7 @@ public class SpuServiceImpl implements SpuService {
             vo.setExcludeDiscount(item.getExcludeDiscount());
             BigDecimal rate = pricingRuleService.rateFor(
                     levelId, item.getCategoryId(), DiscountConstants.isExcluded(item.getExcludeDiscount()));
-            vo.setDiscountRate(rate);
+            vo.setPricingRate(rate);
             if (item.getRetailMinPrice() != null) {
                 vo.setMinPrice(priceService.resolveUnitPrice(item.getRetailMinPrice(), rate));
             }

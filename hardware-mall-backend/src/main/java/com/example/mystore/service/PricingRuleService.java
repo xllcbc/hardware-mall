@@ -1,7 +1,7 @@
 package com.example.mystore.service;
 
-import com.example.mystore.entity.dto.LevelDiscountItemRequest;
-import com.example.mystore.entity.vo.LevelDiscountVO;
+import com.example.mystore.entity.dto.LevelRateItemRequest;
+import com.example.mystore.entity.vo.LevelRateVO;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -12,13 +12,13 @@ public interface PricingRuleService {
 
     Long resolveRetailLevelId();
 
-    List<LevelDiscountVO> getDiscounts(Long levelId);
+    List<LevelRateVO> getRates(Long levelId);
 
-    void saveDiscounts(Long levelId, List<LevelDiscountItemRequest> items);
+    void saveRates(Long levelId, List<LevelRateItemRequest> items);
 
-    void fillDiscounts(Long levelId, BigDecimal rate);
+    void fillRates(Long levelId, BigDecimal rate);
 
-    void copyDiscounts(Long levelId, Long sourceLevelId);
+    void copyRates(Long levelId, Long sourceLevelId);
 
     boolean isComplete(Long levelId);
 }

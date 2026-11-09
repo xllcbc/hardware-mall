@@ -49,7 +49,7 @@ async function installAdminApi(page: Page): Promise<AdminApiState> {
           subtitle: 'E2E product',
           retailMinPrice: 50,
           retailMaxPrice: 50,
-          discountRate: discounted ? 0.8 : 1,
+          pricingRate: discounted ? 0.8 : 1,
           effectiveRate: discounted ? 0.8 : 1,
           settlementMinPrice: discounted ? 40 : 50,
           settlementMaxPrice: discounted ? 40 : 50,
@@ -67,7 +67,7 @@ async function installAdminApi(page: Page): Promise<AdminApiState> {
       await fulfill(route, { 1: 2 })
       return
     }
-    if (url.pathname === '/api/admin/user-level/2/discounts') {
+    if (url.pathname === '/api/admin/user-level/2/rates') {
       await fulfill(route, [
         { categoryId: 1, categoryName: '锁具', rate: 0.8, missing: false },
         { categoryId: 2, categoryName: '工具', missing: true }

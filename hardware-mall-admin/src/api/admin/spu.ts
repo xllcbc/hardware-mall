@@ -38,7 +38,7 @@ export interface AdminProductPricing {
   weight?: number
   retailMinPrice?: number
   retailMaxPrice?: number
-  discountRate: number
+  pricingRate: number
   effectiveRate: number
   settlementMinPrice?: number
   settlementMaxPrice?: number

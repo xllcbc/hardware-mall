@@ -9,8 +9,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("level_category_discount")
-public class LevelCategoryDiscount {
+@TableName("level_category_rate")
+public class LevelCategoryRate {
 
     @TableId(type = IdType.AUTO)
     private Long id;

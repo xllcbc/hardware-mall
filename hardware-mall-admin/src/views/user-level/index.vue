@@ -108,7 +108,7 @@
         </el-button>
         <span class="matrix-tip">倍率范围 (0, 1]，缺口需要补齐后才能启用等级</span>
       </div>
-      <el-table :data="discountList" max-height="430" v-loading="matrixLoading">
+      <el-table :data="rateList" max-height="430" v-loading="matrixLoading">
         <el-table-column prop="categoryName" label="商品分类" min-width="200" />
         <el-table-column label="倍率" width="360">
           <template #default="{ row }">
@@ -171,16 +171,16 @@ import { computed, h, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  copyUserLevelDiscounts,
+  copyUserLevelRates,
   createUserLevel,
   deleteUserLevel,
-  fillUserLevelDiscounts,
-  getUserLevelDiscounts,
+  fillUserLevelRates,
+  getUserLevelRates,
   getUserLevelList,
-  saveUserLevelDiscounts,
+  saveUserLevelRates,
   updateUserLevelInfo,
   updateUserLevelStatus,
-  type LevelDiscount,
+  type LevelRate,
   type UserLevel
 } from '@/api/admin/userLevel'
 import { getCategoryList, type Category } from '@/api/admin/category'
@@ -197,7 +197,7 @@ const submitLoading = ref(false)
 const matrixLoading = ref(false)
 const levelList = ref<UserLevel[]>([])
 const categories = ref<Category[]>([])
-const discountList = ref<LevelDiscount[]>([])
+const rateList = ref<LevelRate[]>([])
 const currentLevel = ref<UserLevel | null>(null)
 const editingLevel = ref<UserLevel | null>(null)
 const levelDialogVisible = ref(false)
@@ -206,7 +206,7 @@ const copyVisible = ref(false)
 const copySourceLoading = ref(false)
 const copySourceLoaded = ref(false)
 const copySourceLevelId = ref<number | null>(null)
-const copySourceMatrix = ref<LevelDiscount[]>([])
+const copySourceMatrix = ref<LevelRate[]>([])
 const levelForm = reactive({ name: '', sortOrder: 0 })
 
 const copySourceLevels = computed(() =>
@@ -391,20 +391,20 @@ const openMatrix = async (level: UserLevel) => {
   matrixDialogVisible.value = true
   matrixLoading.value = true
   try {
-    discountList.value = await getUserLevelDiscounts(level.id) || []
+    rateList.value = await getUserLevelRates(level.id) || []
   } finally {
     matrixLoading.value = false
   }
 }
 
-const syncMissingFlag = (item: LevelDiscount) => {
+const syncMissingFlag = (item: LevelRate) => {
   item.missing = item.rate == null
 }
 
 const saveMatrix = async () => {
   if (!currentLevel.value) return
-  discountList.value.forEach(syncMissingFlag)
-  const items = discountList.value
+  rateList.value.forEach(syncMissingFlag)
+  const items = rateList.value
     .filter(item => item.rate != null)
     .map(item => ({ categoryId: item.categoryId, rate: Number(item.rate) }))
   if (!items.length) {
@@ -414,7 +414,7 @@ const saveMatrix = async () => {
   await runAfterImpactConfirmation(
     () => confirmPricingImpact({
       level: currentLevel.value!,
-      categoryCount: discountList.value.length,
+      categoryCount: rateList.value.length,
       configuredCategoryCount: items.length,
       title: '确认保存倍率矩阵',
       description: '未配置分类将按零售倍率 1.0000 兜底。保存后将立即影响该等级用户的商品取价。',
@@ -423,9 +423,9 @@ const saveMatrix = async () => {
     async () => {
       matrixLoading.value = true
       try {
-        await saveUserLevelDiscounts(currentLevel.value!.id, items)
+        await saveUserLevelRates(currentLevel.value!.id, items)
         ElMessage.success('倍率矩阵已保存')
-        discountList.value = await getUserLevelDiscounts(currentLevel.value!.id) || []
+        rateList.value = await getUserLevelRates(currentLevel.value!.id) || []
         loadLevels()
       } finally {
         matrixLoading.value = false
@@ -453,16 +453,16 @@ const fillAll = async () => {
   await runAfterImpactConfirmation(
     () => confirmPricingImpact({
       level: currentLevel.value!,
-      categoryCount: discountList.value.length,
-      configuredCategoryCount: discountList.value.length,
+      categoryCount: rateList.value.length,
+      configuredCategoryCount: rateList.value.length,
       title: '确认一键填充',
       description: `将把全部分类倍率覆盖为 ${rate.toFixed(4)}，保存后将立即影响该等级用户的商品取价。`,
       confirmButtonText: '确认填充'
     }),
     async () => {
-      await fillUserLevelDiscounts(currentLevel.value!.id, rate)
+      await fillUserLevelRates(currentLevel.value!.id, rate)
       ElMessage.success('已填充全部分类')
-      discountList.value = await getUserLevelDiscounts(currentLevel.value!.id) || []
+      rateList.value = await getUserLevelRates(currentLevel.value!.id) || []
     }
   )
 }
@@ -478,7 +478,7 @@ const loadCopySourceMatrix = async (sourceLevelId: number) => {
   copySourceLoading.value = true
   copySourceLoaded.value = false
   try {
-    copySourceMatrix.value = await getUserLevelDiscounts(sourceLevelId) || []
+    copySourceMatrix.value = await getUserLevelRates(sourceLevelId) || []
     copySourceLoaded.value = true
   } finally {
     copySourceLoading.value = false
@@ -517,10 +517,10 @@ const copyMatrix = async () => {
     async () => {
       matrixLoading.value = true
       try {
-        await copyUserLevelDiscounts(currentLevel.value!.id, copySourceLevelId.value!)
+        await copyUserLevelRates(currentLevel.value!.id, copySourceLevelId.value!)
         ElMessage.success(sourceStats.missing ? '复制完成，缺口仍需手动补齐' : '复制完成')
         copyVisible.value = false
-        discountList.value = await getUserLevelDiscounts(currentLevel.value!.id) || []
+        rateList.value = await getUserLevelRates(currentLevel.value!.id) || []
       } finally {
         matrixLoading.value = false
       }

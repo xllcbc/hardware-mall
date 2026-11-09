@@ -4,11 +4,11 @@ import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
-import com.example.mystore.entity.db.LevelCategoryDiscount;
+import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.db.UserLevel;
-import com.example.mystore.mapper.LevelCategoryDiscountMapper;
+import com.example.mystore.mapper.LevelCategoryRateMapper;
 import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.mapper.UserLevelMapper;
@@ -52,7 +52,7 @@ class UserProductControllerTest {
     @Autowired
     private UserLevelMapper userLevelMapper;
     @Autowired
-    private LevelCategoryDiscountMapper levelCategoryDiscountMapper;
+    private LevelCategoryRateMapper levelCategoryRateMapper;
     @Autowired
     private RedisUtil redisUtil;
     @Autowired
@@ -74,11 +74,11 @@ class UserProductControllerTest {
         level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
         userLevelMapper.insert(level);
 
-        LevelCategoryDiscount discount = new LevelCategoryDiscount();
-        discount.setLevelId(2L);
-        discount.setCategoryId(1L);
-        discount.setRate(new BigDecimal("0.8000"));
-        levelCategoryDiscountMapper.insert(discount);
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(2L);
+        rate.setCategoryId(1L);
+        rate.setRate(new BigDecimal("0.8000"));
+        levelCategoryRateMapper.insert(rate);
 
         Spu spu = new Spu();
         spu.setId(9001L);

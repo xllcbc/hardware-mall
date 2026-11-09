@@ -5,6 +5,6 @@ import lombok.Data;
 import java.util.List;
 
 @Data
-public class LevelDiscountBatchRequest {
-    private List<LevelDiscountItemRequest> items;
+public class LevelRateBatchRequest {
+    private List<LevelRateItemRequest> items;
 }

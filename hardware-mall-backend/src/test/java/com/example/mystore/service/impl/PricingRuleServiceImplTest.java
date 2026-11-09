@@ -5,13 +5,13 @@ import com.example.mystore.common.constant.PricingCacheConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Category;
-import com.example.mystore.entity.db.LevelCategoryDiscount;
+import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.UserLevel;
-import com.example.mystore.entity.dto.LevelDiscountItemRequest;
+import com.example.mystore.entity.dto.LevelRateItemRequest;
 import com.example.mystore.entity.vo.PricingLevelCache;
 import com.example.mystore.event.PricingCacheInvalidationEvent;
 import com.example.mystore.mapper.CategoryMapper;
-import com.example.mystore.mapper.LevelCategoryDiscountMapper;
+import com.example.mystore.mapper.LevelCategoryRateMapper;
 import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.util.RedisUtil;
 import org.junit.jupiter.api.Test;
@@ -38,7 +38,7 @@ class PricingRuleServiceImplTest {
     @Mock
     private UserLevelMapper userLevelMapper;
     @Mock
-    private LevelCategoryDiscountMapper levelCategoryDiscountMapper;
+    private LevelCategoryRateMapper levelCategoryRateMapper;
     @Mock
     private CategoryMapper categoryMapper;
     @Mock
@@ -60,7 +60,7 @@ class PricingRuleServiceImplTest {
         BigDecimal rate = pricingRuleService.rateFor(1L, 9L, false);
 
         assertThat(rate).isEqualByComparingTo("1.0000");
-        verifyNoInteractions(levelCategoryDiscountMapper);
+        verifyNoInteractions(levelCategoryRateMapper);
     }
 
     @Test
@@ -100,11 +100,11 @@ class PricingRuleServiceImplTest {
         Category category = new Category();
         category.setId(9L);
         when(categoryMapper.selectList(any())).thenReturn(List.of(category));
-        LevelCategoryDiscount discount = new LevelCategoryDiscount();
-        discount.setLevelId(2L);
-        discount.setCategoryId(9L);
-        discount.setRate(new BigDecimal("0.8000"));
-        when(levelCategoryDiscountMapper.selectList(any())).thenReturn(List.of(discount));
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(2L);
+        rate.setCategoryId(9L);
+        rate.setRate(new BigDecimal("0.8000"));
+        when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of(rate));
 
         assertThat(pricingRuleService.isComplete(2L)).isTrue();
     }
@@ -124,29 +124,29 @@ class PricingRuleServiceImplTest {
                     Supplier<PricingLevelCache> loader = invocation.getArgument(6);
                     return loader.get();
                 });
-        LevelCategoryDiscount discount = new LevelCategoryDiscount();
-        discount.setLevelId(2L);
-        discount.setCategoryId(9L);
-        discount.setRate(new BigDecimal("0.7500"));
-        when(levelCategoryDiscountMapper.selectList(any())).thenReturn(List.of(discount));
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(2L);
+        rate.setCategoryId(9L);
+        rate.setRate(new BigDecimal("0.7500"));
+        when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of(rate));
 
         assertThat(pricingRuleService.rateFor(2L, 9L, false))
                 .isEqualByComparingTo("0.7500");
-        verify(levelCategoryDiscountMapper).selectList(any());
+        verify(levelCategoryRateMapper).selectList(any());
     }
 
     @Test
-    void saveDiscounts_publishesPricingInvalidationInsteadOfEvictingInTransaction() {
+    void saveRates_publishesPricingInvalidationInsteadOfEvictingInTransaction() {
         when(userLevelMapper.selectById(2L)).thenReturn(customLevel(2L));
         Category category = new Category();
         category.setId(9L);
         when(categoryMapper.selectById(9L)).thenReturn(category);
-        when(levelCategoryDiscountMapper.selectOne(any())).thenReturn(null);
-        LevelDiscountItemRequest item = new LevelDiscountItemRequest();
+        when(levelCategoryRateMapper.selectOne(any())).thenReturn(null);
+        LevelRateItemRequest item = new LevelRateItemRequest();
         item.setCategoryId(9L);
         item.setRate(new BigDecimal("0.8000"));
 
-        pricingRuleService.saveDiscounts(2L, List.of(item));
+        pricingRuleService.saveRates(2L, List.of(item));
 
         verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
                 PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, 2L));
@@ -154,14 +154,14 @@ class PricingRuleServiceImplTest {
     }
 
     @Test
-    void fillDiscounts_publishesPricingInvalidationInsteadOfEvictingInTransaction() {
+    void fillRates_publishesPricingInvalidationInsteadOfEvictingInTransaction() {
         when(userLevelMapper.selectById(2L)).thenReturn(customLevel(2L));
         Category category = new Category();
         category.setId(9L);
         when(categoryMapper.selectList(any())).thenReturn(List.of(category));
-        when(levelCategoryDiscountMapper.selectOne(any())).thenReturn(null);
+        when(levelCategoryRateMapper.selectOne(any())).thenReturn(null);
 
-        pricingRuleService.fillDiscounts(2L, new BigDecimal("0.7000"));
+        pricingRuleService.fillRates(2L, new BigDecimal("0.7000"));
 
         verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
                 PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, 2L));
@@ -169,21 +169,21 @@ class PricingRuleServiceImplTest {
     }
 
     @Test
-    void copyDiscounts_replacesTargetMatrixAndPreservesSourceGap() {
+    void copyRates_replacesTargetMatrixAndPreservesSourceGap() {
         when(userLevelMapper.selectById(2L)).thenReturn(customLevel(2L));
         when(userLevelMapper.selectById(3L)).thenReturn(customLevel(3L));
-        LevelCategoryDiscount source = new LevelCategoryDiscount();
+        LevelCategoryRate source = new LevelCategoryRate();
         source.setLevelId(3L);
         source.setCategoryId(9L);
         source.setRate(new BigDecimal("0.6000"));
-        when(levelCategoryDiscountMapper.selectList(any())).thenReturn(List.of(source));
-        when(levelCategoryDiscountMapper.delete(any())).thenReturn(1);
+        when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of(source));
+        when(levelCategoryRateMapper.delete(any())).thenReturn(1);
 
-        pricingRuleService.copyDiscounts(2L, 3L);
+        pricingRuleService.copyRates(2L, 3L);
 
-        verify(levelCategoryDiscountMapper).delete(any());
-        ArgumentCaptor<LevelCategoryDiscount> inserted = ArgumentCaptor.forClass(LevelCategoryDiscount.class);
-        verify(levelCategoryDiscountMapper).insert(inserted.capture());
+        verify(levelCategoryRateMapper).delete(any());
+        ArgumentCaptor<LevelCategoryRate> inserted = ArgumentCaptor.forClass(LevelCategoryRate.class);
+        verify(levelCategoryRateMapper).insert(inserted.capture());
         assertThat(inserted.getAllValues())
                 .singleElement()
                 .satisfies(row -> {
@@ -191,14 +191,14 @@ class PricingRuleServiceImplTest {
                     assertThat(row.getCategoryId()).isEqualTo(9L);
                     assertThat(row.getRate()).isEqualByComparingTo("0.6000");
                 });
-        verify(levelCategoryDiscountMapper, never()).updateById(any(LevelCategoryDiscount.class));
+        verify(levelCategoryRateMapper, never()).updateById(any(LevelCategoryRate.class));
         verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
                 PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, 2L));
         verify(redisUtil, never()).delete(anyString());
     }
 
     @Test
-    void copyDiscounts_rejectsIncompleteSourceForEnabledTarget() {
+    void copyRates_rejectsIncompleteSourceForEnabledTarget() {
         UserLevel target = customLevel(2L);
         target.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
         when(userLevelMapper.selectById(2L)).thenReturn(target);
@@ -210,18 +210,18 @@ class PricingRuleServiceImplTest {
         gapCategory.setId(10L);
         when(categoryMapper.selectList(any())).thenReturn(List.of(configuredCategory, gapCategory));
 
-        LevelCategoryDiscount source = new LevelCategoryDiscount();
+        LevelCategoryRate source = new LevelCategoryRate();
         source.setLevelId(3L);
         source.setCategoryId(9L);
         source.setRate(new BigDecimal("0.6000"));
-        when(levelCategoryDiscountMapper.selectList(any())).thenReturn(List.of(source));
+        when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of(source));
 
-        assertThatThrownBy(() -> pricingRuleService.copyDiscounts(2L, 3L))
+        assertThatThrownBy(() -> pricingRuleService.copyRates(2L, 3L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("来源等级倍率矩阵未填满，不能复制到已启用等级");
 
-        verify(levelCategoryDiscountMapper, never()).delete(any());
-        verify(levelCategoryDiscountMapper, never()).insert(any(LevelCategoryDiscount.class));
+        verify(levelCategoryRateMapper, never()).delete(any());
+        verify(levelCategoryRateMapper, never()).insert(any(LevelCategoryRate.class));
         verify(eventPublisher, never()).publishEvent(any());
     }
 

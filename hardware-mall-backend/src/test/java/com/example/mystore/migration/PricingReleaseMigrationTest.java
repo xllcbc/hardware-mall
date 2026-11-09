@@ -29,8 +29,12 @@ class PricingReleaseMigrationTest {
 
     private static final String DATABASE = "hardware_mall";
     private static final String SNAPSHOT_RESOURCE = "db/production-original-schema.sql";
-    private static final String MIGRATION_RESOURCE = "db/migration_2026-11-02_multi_level_pricing_release.sql";
+    private static final String BASE_MIGRATION_RESOURCE =
+            "db/migration_2026-11-02_multi_level_pricing_release.sql";
+    private static final String RATE_MIGRATION_RESOURCE =
+            "db/migration_2026-11-09_level_category_rate.sql";
     private static final String INIT_RESOURCE = "db/init.sql";
+    private static final String VERIFY_RESOURCE = "db/pricing_release_verify.sql";
 
     @Container
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.36")
@@ -41,8 +45,10 @@ class PricingReleaseMigrationTest {
     @BeforeAll
     static void copyScriptsToContainer() throws IOException {
         copyResource(SNAPSHOT_RESOURCE, "/tmp/production-original-schema.sql");
-        copyResource(MIGRATION_RESOURCE, "/tmp/pricing-release.sql");
+        copyResource(BASE_MIGRATION_RESOURCE, "/tmp/pricing-release.sql");
+        copyResource(RATE_MIGRATION_RESOURCE, "/tmp/pricing-rate-rename.sql");
         copyResource(INIT_RESOURCE, "/tmp/init.sql");
+        copyResource(VERIFY_RESOURCE, "/tmp/pricing-verify.sql");
     }
 
     @BeforeEach
@@ -54,19 +60,33 @@ class PricingReleaseMigrationTest {
     void migration_upgradesProductionSchemaToTheFinalPricingModel() throws Exception {
         loadSnapshot(DATABASE);
 
-        ExecResult migration = runSqlFile(DATABASE, "/tmp/pricing-release.sql");
-
-        assertThat(migration.getExitCode())
-                .as(migration.getStderr())
-                .isZero();
+        runMigrations(DATABASE);
         assertFinalPricingModel(DATABASE);
         assertThat(queryStrings(DATABASE,
                 "SELECT CONCAT(name, ':', is_retail, ':', status) FROM user_level ORDER BY id"))
                 .containsExactly("零售:1:1");
-        assertThat(queryStrings(DATABASE, "SELECT CAST(COUNT(*) AS CHAR) FROM level_category_discount"))
+        assertThat(queryStrings(DATABASE, "SELECT CAST(COUNT(*) AS CHAR) FROM level_category_rate"))
                 .containsExactly("0");
         assertThat(queryStrings(DATABASE, "SELECT CAST(COUNT(*) AS CHAR) FROM user WHERE level_id = 1"))
                 .containsExactly(queryStrings(DATABASE, "SELECT CAST(COUNT(*) AS CHAR) FROM user").get(0));
+        runMigrationVerify(DATABASE);
+    }
+
+    @Test
+    void migrationVerifyRejectsNonEmptyRateMatrix() throws Exception {
+        loadSnapshot(DATABASE);
+        runMigrations(DATABASE);
+        execute(DATABASE,
+                "INSERT INTO category (id, parent_id, name, sort_order, status) " +
+                        "VALUES (1, 0, '测试分类', 0, 1)",
+                "INSERT INTO level_category_rate (level_id, category_id, rate) " +
+                        "VALUES (1, 1, 0.8000)");
+
+        ExecResult verification = runVerify(DATABASE, true);
+
+        assertThat(verification.getExitCode()).isNotZero();
+        assertThat(verification.getStdout() + verification.getStderr())
+                .contains("level_category_rate must be empty after migration");
     }
 
     @Test
@@ -105,25 +125,69 @@ class PricingReleaseMigrationTest {
         String initialized = "hardware_mall_initialized";
         loadSnapshot(migrated);
         copyModifiedResource(INIT_RESOURCE, "/tmp/init-final.sql", DATABASE, initialized);
-        copyModifiedResource(MIGRATION_RESOURCE, "/tmp/migration-final.sql", null, null);
+        copyModifiedResource(BASE_MIGRATION_RESOURCE, "/tmp/migration-base-final.sql", null, null);
+        copyModifiedResource(RATE_MIGRATION_RESOURCE, "/tmp/migration-rate-final.sql", null, null);
 
         assertThat(runSqlFile(null, "/tmp/init-final.sql").getExitCode()).isZero();
-        assertThat(runSqlFile(migrated, "/tmp/migration-final.sql").getExitCode()).isZero();
+        assertThat(runSqlFile(migrated, "/tmp/migration-base-final.sql").getExitCode()).isZero();
+        assertThat(runSqlFile(migrated, "/tmp/migration-rate-final.sql").getExitCode()).isZero();
 
         assertThat(pricingModelDefinition(initialized))
                 .isEqualTo(pricingModelDefinition(migrated));
         assertFinalPricingModel(initialized);
         assertFinalPricingModel(migrated);
+        runMigrationVerify(migrated);
+    }
+
+    @Test
+    void rateRenameMigrationPreservesPricesAndClearsLegacyRates() throws Exception {
+        loadSnapshot(DATABASE);
+        assertThat(runSqlFile(DATABASE, "/tmp/pricing-release.sql").getExitCode()).isZero();
+        execute(DATABASE,
+                "INSERT INTO category (id, parent_id, name, sort_order, status) " +
+                        "VALUES (1, 0, '测试分类', 0, 1)",
+                "INSERT INTO level_category_discount (level_id, category_id, rate) " +
+                        "VALUES (1, 1, 0.8000)",
+                "INSERT INTO spu (id, category_id, name, original_price) " +
+                        "VALUES (1, 1, '价格快照 SPU', 199.00)",
+                "INSERT INTO sku (id, spu_id, specs, price, spec_hash) " +
+                        "VALUES (1, 1, JSON_ARRAY(), 188.00, 'price-snapshot')");
+
+        List<String> skuPrices = queryStrings(DATABASE,
+                "SELECT CONCAT(id, ':', price) FROM sku ORDER BY id");
+        List<String> spuPrices = queryStrings(DATABASE,
+                "SELECT CONCAT(id, ':', original_price) FROM spu ORDER BY id");
+
+        ExecResult migration = runSqlFile(DATABASE, "/tmp/pricing-rate-rename.sql");
+
+        assertThat(migration.getExitCode())
+                .as(migration.getStdout() + migration.getStderr())
+                .isZero();
+        assertThat(queryStrings(DATABASE,
+                "SELECT CONCAT(id, ':', price) FROM sku ORDER BY id"))
+                .isEqualTo(skuPrices);
+        assertThat(queryStrings(DATABASE,
+                "SELECT CONCAT(id, ':', original_price) FROM spu ORDER BY id"))
+                .isEqualTo(spuPrices);
+        assertThat(tableExists(DATABASE, "level_category_discount")).isFalse();
+        assertThat(tableExists(DATABASE, "level_category_rate")).isTrue();
+        assertThat(columnExists(DATABASE, "order_item", "discount_rate")).isFalse();
+        assertThat(columnExists(DATABASE, "order_item", "pricing_rate")).isTrue();
+        assertThat(queryStrings(DATABASE, "SELECT CAST(COUNT(*) AS CHAR) FROM level_category_rate"))
+                .containsExactly("0");
+        runMigrationVerify(DATABASE);
     }
 
     private static void assertFinalPricingModel(String schema) throws SQLException {
         assertThat(tableExists(schema, "user_level")).isTrue();
-        assertThat(tableExists(schema, "level_category_discount")).isTrue();
+        assertThat(tableExists(schema, "level_category_rate")).isTrue();
+        assertThat(tableExists(schema, "level_category_discount")).isFalse();
         assertThat(columnExists(schema, "user", "level_id")).isTrue();
         assertThat(columnExists(schema, "spu", "exclude_discount")).isTrue();
         assertThat(columnExists(schema, "order_item", "level_id")).isTrue();
         assertThat(columnExists(schema, "order_item", "level_name")).isTrue();
-        assertThat(columnExists(schema, "order_item", "discount_rate")).isTrue();
+        assertThat(columnExists(schema, "order_item", "pricing_rate")).isTrue();
+        assertThat(columnExists(schema, "order_item", "discount_rate")).isFalse();
         assertThat(columnExists(schema, "user", "user_group")).isFalse();
         assertThat(columnExists(schema, "sku", "wholesale_price")).isFalse();
         assertThat(columnExists(schema, "order_item", "price_type")).isFalse();
@@ -135,14 +199,14 @@ class PricingReleaseMigrationTest {
                 .containsExactly("level_id");
         assertThat(queryStrings(schema,
                 "SELECT index_name FROM information_schema.statistics " +
-                        "WHERE table_schema = DATABASE() AND table_name = 'level_category_discount' " +
+                        "WHERE table_schema = DATABASE() AND table_name = 'level_category_rate' " +
                         "AND index_name = 'uk_level_category' AND non_unique = 0"))
                 .containsOnly("uk_level_category");
         assertThat(queryStrings(schema,
                 "SELECT constraint_name FROM information_schema.table_constraints " +
-                        "WHERE constraint_schema = DATABASE() AND table_name = 'level_category_discount' " +
+                        "WHERE constraint_schema = DATABASE() AND table_name = 'level_category_rate' " +
                         "AND constraint_type = 'FOREIGN KEY' ORDER BY constraint_name"))
-                .containsExactly("fk_lcd_category", "fk_lcd_level");
+                .containsExactly("fk_lcr_category", "fk_lcr_level");
     }
 
     private static List<String> pricingModelDefinition(String schema) throws SQLException {
@@ -151,13 +215,13 @@ class PricingReleaseMigrationTest {
                         "COALESCE(column_default, '<null>')) " +
                         "FROM information_schema.columns " +
                         "WHERE table_schema = DATABASE() AND table_name IN " +
-                        "('user', 'spu', 'sku', 'order_item', 'user_level', 'level_category_discount') " +
+                "('user', 'spu', 'sku', 'order_item', 'user_level', 'level_category_rate') " +
                         "ORDER BY table_name, ordinal_position"));
         definition.addAll(queryStrings(schema,
                 "SELECT CONCAT(table_name, '.', index_name, ':', non_unique, ':', seq_in_index, ':', column_name) " +
                         "FROM information_schema.statistics " +
                         "WHERE table_schema = DATABASE() AND table_name IN " +
-                        "('user', 'spu', 'sku', 'order_item', 'user_level', 'level_category_discount') " +
+                "('user', 'spu', 'sku', 'order_item', 'user_level', 'level_category_rate') " +
                         "ORDER BY table_name, index_name, seq_in_index"));
         return definition;
     }
@@ -166,6 +230,33 @@ class PricingReleaseMigrationTest {
         copyModifiedResource(SNAPSHOT_RESOURCE, "/tmp/snapshot-" + schema + ".sql", DATABASE, schema);
         ExecResult result = runSqlFile(null, "/tmp/snapshot-" + schema + ".sql");
         assertThat(result.getExitCode()).as(result.getStderr()).isZero();
+    }
+
+    private static void runMigrations(String schema) throws Exception {
+        ExecResult baseMigration = runSqlFile(schema, "/tmp/pricing-release.sql");
+        assertThat(baseMigration.getExitCode())
+                .as(baseMigration.getStdout() + baseMigration.getStderr())
+                .isZero();
+
+        ExecResult rateMigration = runSqlFile(schema, "/tmp/pricing-rate-rename.sql");
+        assertThat(rateMigration.getExitCode())
+                .as(rateMigration.getStdout() + rateMigration.getStderr())
+                .isZero();
+    }
+
+    private static void runMigrationVerify(String schema) throws Exception {
+        ExecResult verification = runVerify(schema, true);
+        assertThat(verification.getExitCode())
+                .as(verification.getStdout() + verification.getStderr())
+                .isZero();
+    }
+
+    private static ExecResult runVerify(String schema, boolean expectEmptyRateTable) throws Exception {
+        return mysql(
+                schema,
+                "--init-command=SET @expect_empty_level_category_rate = " + (expectEmptyRateTable ? "1" : "0"),
+                "-e",
+                "SOURCE /tmp/pricing-verify.sql");
     }
 
     private static ExecResult runSqlFile(String schema, String path) throws Exception {
