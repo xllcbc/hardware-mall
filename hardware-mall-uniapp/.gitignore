@@ -3,3 +3,4 @@ dist/
 *.log
 .DS_Store
 *.key
+scripts/debug/harness.html
