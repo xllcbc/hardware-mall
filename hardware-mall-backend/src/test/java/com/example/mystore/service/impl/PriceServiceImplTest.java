@@ -32,8 +32,10 @@ class PriceServiceImplTest {
                 new BigDecimal("10.00"), BigDecimal.ZERO))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> priceService.resolveUnitPrice(
-                new BigDecimal("10.00"), new BigDecimal("1.0001")))
+                new BigDecimal("10.00"), new BigDecimal("3.0001")))
                 .isInstanceOf(IllegalArgumentException.class);
+        assertThat(priceService.resolveUnitPrice(new BigDecimal("10.00"), new BigDecimal("3.0000")))
+                .isEqualByComparingTo("30.00");
     }
 
     @Test

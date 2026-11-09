@@ -50,26 +50,21 @@ class PricingRuleServiceImplTest {
     private PricingRuleServiceImpl pricingRuleService;
 
     @Test
-    void retailLevelShortCircuitsToOne() {
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID),
-                eq(Long.class), eq(PricingCacheConstants.TTL_SECONDS),
+    void retailLevelUsesItsOwnMatrix() {
+        PricingLevelCache cache = new PricingLevelCache();
+        cache.setRates(Map.of(9L, new BigDecimal("1.5000")));
+        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_LEVEL + 1L),
+                eq(PricingLevelCache.class), eq(PricingCacheConstants.TTL_SECONDS),
                 eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
                 eq(500L), any()))
-                .thenReturn(1L);
+                .thenReturn(cache);
 
-        BigDecimal rate = pricingRuleService.rateFor(1L, 9L, false);
-
-        assertThat(rate).isEqualByComparingTo("1.0000");
-        verifyNoInteractions(levelCategoryRateMapper);
+        assertThat(pricingRuleService.rateFor(1L, 9L, false))
+                .isEqualByComparingTo("1.5000");
     }
 
     @Test
     void customLevelUsesCachedCategoryRate() {
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID),
-                eq(Long.class), eq(PricingCacheConstants.TTL_SECONDS),
-                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
-                eq(500L), any()))
-                .thenReturn(1L);
         PricingLevelCache cache = new PricingLevelCache();
         cache.setRates(Map.of(9L, new BigDecimal("0.7000")));
         when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_LEVEL + 2L),
@@ -111,11 +106,6 @@ class PricingRuleServiceImplTest {
 
     @Test
     void customLevelCacheMissLoadsRatesFromDatabase() {
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID),
-                eq(Long.class), eq(PricingCacheConstants.TTL_SECONDS),
-                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
-                eq(500L), any()))
-                .thenReturn(1L);
         when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_LEVEL + 2L),
                 eq(PricingLevelCache.class), eq(PricingCacheConstants.TTL_SECONDS),
                 eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
@@ -223,6 +213,97 @@ class PricingRuleServiceImplTest {
         verify(levelCategoryRateMapper, never()).delete(any());
         verify(levelCategoryRateMapper, never()).insert(any(LevelCategoryRate.class));
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void retailLevelAcceptsRatesWithUnifiedCompleteness() {
+        UserLevel retail = new UserLevel();
+        retail.setId(1L);
+        retail.setIsRetail(UserLevelStatusConstants.IS_RETAIL);
+        when(userLevelMapper.selectById(1L)).thenReturn(retail);
+        Category category = new Category();
+        category.setId(9L);
+        when(categoryMapper.selectById(9L)).thenReturn(category);
+        when(levelCategoryRateMapper.selectOne(any())).thenReturn(null);
+        LevelRateItemRequest item = new LevelRateItemRequest();
+        item.setCategoryId(9L);
+        item.setRate(new BigDecimal("3.0000"));
+
+        pricingRuleService.saveRates(1L, List.of(item));
+
+        ArgumentCaptor<LevelCategoryRate> inserted = ArgumentCaptor.forClass(LevelCategoryRate.class);
+        verify(levelCategoryRateMapper).insert(inserted.capture());
+        assertThat(inserted.getValue().getRate()).isEqualByComparingTo("3.0000");
+        verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
+                PricingCacheInvalidationEvent.Type.MATRIX_CHANGED, 1L));
+    }
+
+    @Test
+    void retailLevelCompletenessFollowsUnifiedRule() {
+        UserLevel retail = new UserLevel();
+        retail.setId(1L);
+        retail.setIsRetail(UserLevelStatusConstants.IS_RETAIL);
+        when(userLevelMapper.selectById(1L)).thenReturn(retail);
+        Category category = new Category();
+        category.setId(9L);
+        when(categoryMapper.selectList(any())).thenReturn(List.of(category));
+        when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of());
+
+        assertThat(pricingRuleService.isComplete(1L)).isFalse();
+    }
+
+    @Test
+    void rateAboveUpperBoundIsRejected() {
+        UserLevel retail = new UserLevel();
+        retail.setId(1L);
+        retail.setIsRetail(UserLevelStatusConstants.IS_RETAIL);
+        when(userLevelMapper.selectById(1L)).thenReturn(retail);
+        Category category = new Category();
+        category.setId(9L);
+        when(categoryMapper.selectById(9L)).thenReturn(category);
+        LevelRateItemRequest item = new LevelRateItemRequest();
+        item.setCategoryId(9L);
+        item.setRate(new BigDecimal("3.0001"));
+
+        assertThatThrownBy(() -> pricingRuleService.saveRates(1L, List.of(item)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("倍率必须在 (0, 3] 之间");
+        verify(levelCategoryRateMapper, never()).insert(any(LevelCategoryRate.class));
+    }
+
+    @Test
+    void retailLevelFillAndCopyRatesSucceed() {
+        UserLevel retail = new UserLevel();
+        retail.setId(1L);
+        retail.setIsRetail(UserLevelStatusConstants.IS_RETAIL);
+        when(userLevelMapper.selectById(1L)).thenReturn(retail);
+        Category category = new Category();
+        category.setId(9L);
+        when(categoryMapper.selectList(any())).thenReturn(List.of(category));
+        when(levelCategoryRateMapper.selectOne(any())).thenReturn(null);
+
+        pricingRuleService.fillRates(1L, new BigDecimal("2.5000"));
+
+        ArgumentCaptor<LevelCategoryRate> inserted = ArgumentCaptor.forClass(LevelCategoryRate.class);
+        verify(levelCategoryRateMapper).insert(inserted.capture());
+        assertThat(inserted.getValue().getRate()).isEqualByComparingTo("2.5000");
+
+        reset(levelCategoryRateMapper, eventPublisher);
+        when(userLevelMapper.selectById(2L)).thenReturn(customLevel(2L));
+        LevelCategoryRate source = new LevelCategoryRate();
+        source.setLevelId(1L);
+        source.setCategoryId(9L);
+        source.setRate(new BigDecimal("2.5000"));
+        when(levelCategoryRateMapper.selectList(any())).thenReturn(List.of(source));
+        when(levelCategoryRateMapper.delete(any())).thenReturn(1);
+
+        pricingRuleService.copyRates(2L, 1L);
+
+        verify(levelCategoryRateMapper).delete(any());
+        ArgumentCaptor<LevelCategoryRate> copied = ArgumentCaptor.forClass(LevelCategoryRate.class);
+        verify(levelCategoryRateMapper).insert(copied.capture());
+        assertThat(copied.getValue().getLevelId()).isEqualTo(2L);
+        assertThat(copied.getValue().getRate()).isEqualByComparingTo("2.5000");
     }
 
     private UserLevel customLevel(Long id) {

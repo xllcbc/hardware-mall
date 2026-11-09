@@ -20,5 +20,5 @@ public class UserLevelStatusConstants {
 
     public static final BigDecimal DEFAULT_RATE = new BigDecimal("1.0000");
     public static final BigDecimal MIN_EXCLUSIVE_RATE = BigDecimal.ZERO;
-    public static final BigDecimal MAX_INCLUSIVE_RATE = BigDecimal.ONE;
+    public static final BigDecimal MAX_INCLUSIVE_RATE = new BigDecimal("3.0000");
 }

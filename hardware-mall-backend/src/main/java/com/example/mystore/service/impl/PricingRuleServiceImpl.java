@@ -50,10 +50,6 @@ public class PricingRuleServiceImpl implements PricingRuleService {
         if (excludeDiscount || levelId == null || categoryId == null) {
             return UserLevelStatusConstants.DEFAULT_RATE;
         }
-        Long retailLevelId = resolveRetailLevelId();
-        if (retailLevelId != null && retailLevelId.equals(levelId)) {
-            return UserLevelStatusConstants.DEFAULT_RATE;
-        }
         PricingLevelCache cache = getLevelCache(levelId);
         if (cache == null || cache.getRates() == null) {
             return UserLevelStatusConstants.DEFAULT_RATE;
@@ -81,10 +77,7 @@ public class PricingRuleServiceImpl implements PricingRuleService {
 
     @Override
     public List<LevelRateVO> getRates(Long levelId) {
-        UserLevel level = requireLevel(levelId);
-        if (Integer.valueOf(UserLevelStatusConstants.IS_RETAIL).equals(level.getIsRetail())) {
-            return List.of();
-        }
+        requireLevel(levelId);
         List<Category> categories = categoryMapper.selectList(new LambdaQueryWrapper<Category>()
                 .eq(Category::getDeleteTime, 0)
                 .orderByDesc(Category::getSortOrder)
@@ -107,7 +100,6 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     @Transactional
     public void saveRates(Long levelId, List<LevelRateItemRequest> items) {
         UserLevel level = requireLevel(levelId);
-        rejectRetail(level);
         if (items == null || items.isEmpty()) {
             throw new BusinessException("倍率明细不能为空");
         }
@@ -131,7 +123,6 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     @Transactional
     public void fillRates(Long levelId, BigDecimal rate) {
         UserLevel level = requireLevel(levelId);
-        rejectRetail(level);
         validateRate(rate);
         List<Category> categories = categoryMapper.selectList(new LambdaQueryWrapper<Category>()
                 .eq(Category::getDeleteTime, 0));
@@ -146,7 +137,6 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     @Transactional
     public void copyRates(Long levelId, Long sourceLevelId) {
         UserLevel target = requireLevel(levelId);
-        rejectRetail(target);
         if (sourceLevelId == null) {
             throw new BusinessException("来源等级不能为空");
         }
@@ -154,9 +144,6 @@ public class PricingRuleServiceImpl implements PricingRuleService {
             throw new BusinessException("不能复制到自身");
         }
         UserLevel source = requireLevel(sourceLevelId);
-        if (Integer.valueOf(UserLevelStatusConstants.IS_RETAIL).equals(source.getIsRetail())) {
-            throw new BusinessException("零售等级没有可复制的倍率矩阵");
-        }
         if (Integer.valueOf(UserLevelStatusConstants.STATUS_ENABLED).equals(target.getStatus())
                 && !isComplete(sourceLevelId)) {
             throw new BusinessException("来源等级倍率矩阵未填满，不能复制到已启用等级");
@@ -174,9 +161,6 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     @Override
     public boolean isComplete(Long levelId) {
         UserLevel level = requireLevel(levelId);
-        if (Integer.valueOf(UserLevelStatusConstants.IS_RETAIL).equals(level.getIsRetail())) {
-            return true;
-        }
         List<Category> categories = categoryMapper.selectList(new LambdaQueryWrapper<Category>()
                 .eq(Category::getDeleteTime, 0));
         if (categories.isEmpty()) {
@@ -257,17 +241,11 @@ public class PricingRuleServiceImpl implements PricingRuleService {
         }
     }
 
-    private void rejectRetail(UserLevel level) {
-        if (Integer.valueOf(UserLevelStatusConstants.IS_RETAIL).equals(level.getIsRetail())) {
-            throw new BusinessException("零售等级不维护倍率矩阵");
-        }
-    }
-
     private void validateRate(BigDecimal rate) {
         if (rate == null
                 || rate.compareTo(UserLevelStatusConstants.MIN_EXCLUSIVE_RATE) <= 0
                 || rate.compareTo(UserLevelStatusConstants.MAX_INCLUSIVE_RATE) > 0) {
-            throw new BusinessException("倍率必须在 (0, 1] 之间");
+            throw new BusinessException("倍率必须在 (0, 3] 之间");
         }
         if (rate.scale() > 4) {
             throw new BusinessException("倍率最多保留四位小数");
