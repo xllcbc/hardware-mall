@@ -24,7 +24,7 @@ import com.example.mystore.entity.vo.OrderItemVO;
 import com.example.mystore.entity.vo.CheckoutItemVO;
 import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.DashboardStatsVO;
-import com.example.mystore.entity.vo.PricingRateResolution;
+import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.entity.vo.RecentOrderVO;
 import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;

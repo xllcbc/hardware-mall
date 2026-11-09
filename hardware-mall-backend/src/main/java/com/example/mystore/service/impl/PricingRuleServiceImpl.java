@@ -11,7 +11,7 @@ import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.entity.dto.LevelRateItemRequest;
 import com.example.mystore.entity.vo.LevelRateVO;
 import com.example.mystore.entity.vo.PricingLevelCache;
-import com.example.mystore.entity.vo.PricingRateResolution;
+import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.event.PricingCacheInvalidationEvent;
 import com.example.mystore.mapper.CategoryMapper;
 import com.example.mystore.mapper.LevelCategoryRateMapper;

@@ -2,7 +2,7 @@ package com.example.mystore.service;
 
 import com.example.mystore.entity.dto.LevelRateItemRequest;
 import com.example.mystore.entity.vo.LevelRateVO;
-import com.example.mystore.entity.vo.PricingRateResolution;
+import com.example.mystore.entity.dto.PricingRateResolution;
 
 import java.math.BigDecimal;
 import java.util.List;

@@ -15,7 +15,7 @@ import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.OrderVO;
-import com.example.mystore.entity.vo.PricingRateResolution;
+import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
 import com.example.mystore.service.PayService;

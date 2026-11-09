@@ -6,7 +6,7 @@ import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.vo.CartItemVO;
-import com.example.mystore.entity.vo.PricingRateResolution;
+import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.mapper.CartMapper;
 import com.example.mystore.mapper.SpuMapper;

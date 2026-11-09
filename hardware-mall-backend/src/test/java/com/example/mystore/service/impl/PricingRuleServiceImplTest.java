@@ -9,7 +9,7 @@ import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.entity.dto.LevelRateItemRequest;
 import com.example.mystore.entity.vo.PricingLevelCache;
-import com.example.mystore.entity.vo.PricingRateResolution;
+import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.event.PricingCacheInvalidationEvent;
 import com.example.mystore.mapper.CategoryMapper;
 import com.example.mystore.mapper.LevelCategoryRateMapper;
@@ -110,14 +110,7 @@ class PricingRuleServiceImplTest {
 
     @Test
     void nonexistentLevelFallsBackToRetail() {
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_LEVEL + 88L),
-                eq(PricingLevelCache.class), eq(PricingCacheConstants.TTL_SECONDS),
-                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
-                eq(500L), any()))
-                .thenAnswer(invocation -> {
-                    Supplier<PricingLevelCache> loader = invocation.getArgument(6);
-                    return loader.get();
-                });
+        stubLoadingLevelCache(88L);
         when(userLevelMapper.selectById(88L)).thenReturn(null);
         stubRetailLevelId(1L);
         stubLevelCache(1L, true, Map.of(9L, new BigDecimal("1.1000")));
@@ -133,14 +126,7 @@ class PricingRuleServiceImplTest {
         UserLevel disabled = customLevel(3L);
         disabled.setStatus(UserLevelStatusConstants.STATUS_DISABLED);
         when(userLevelMapper.selectById(3L)).thenReturn(disabled);
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_LEVEL + 3L),
-                eq(PricingLevelCache.class), eq(PricingCacheConstants.TTL_SECONDS),
-                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
-                eq(500L), any()))
-                .thenAnswer(invocation -> {
-                    Supplier<PricingLevelCache> loader = invocation.getArgument(6);
-                    return loader.get();
-                });
+        stubLoadingLevelCache(3L);
         LevelCategoryRate rate = new LevelCategoryRate();
         rate.setLevelId(3L);
         rate.setCategoryId(9L);
@@ -206,14 +192,7 @@ class PricingRuleServiceImplTest {
 
     @Test
     void customLevelCacheMissLoadsRatesFromDatabase() {
-        when(redisUtil.queryWithCache(eq(RedisConstants.PREFIX_PRICING_LEVEL + 2L),
-                eq(PricingLevelCache.class), eq(PricingCacheConstants.TTL_SECONDS),
-                eq(RedisConstants.CACHE_NULL_TTL), eq(PricingCacheConstants.JITTER_SECONDS),
-                eq(500L), any()))
-                .thenAnswer(invocation -> {
-                    Supplier<PricingLevelCache> loader = invocation.getArgument(6);
-                    return loader.get();
-                });
+        stubLoadingLevelCache(2L);
         when(userLevelMapper.selectById(2L)).thenReturn(customLevel(2L));
         LevelCategoryRate rate = new LevelCategoryRate();
         rate.setLevelId(2L);
@@ -417,6 +396,21 @@ class PricingRuleServiceImplTest {
                 eq(PricingCacheConstants.JITTER_SECONDS),
                 eq(500L),
                 any())).thenReturn(retailId);
+    }
+
+    private void stubLoadingLevelCache(Long levelId) {
+        when(redisUtil.queryWithCache(
+                eq(RedisConstants.PREFIX_PRICING_LEVEL + levelId),
+                eq(PricingLevelCache.class),
+                eq(PricingCacheConstants.TTL_SECONDS),
+                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(PricingCacheConstants.JITTER_SECONDS),
+                eq(500L),
+                any()))
+                .thenAnswer(invocation -> {
+                    Supplier<PricingLevelCache> loader = invocation.getArgument(6);
+                    return loader.get();
+                });
     }
 
     private void stubLevelCache(Long levelId, Boolean levelExists, Map<Long, BigDecimal> rates) {

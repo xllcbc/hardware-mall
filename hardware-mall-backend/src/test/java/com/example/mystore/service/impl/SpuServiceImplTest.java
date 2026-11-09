@@ -9,7 +9,7 @@ import com.example.mystore.entity.vo.ProductDetailVO;
 import com.example.mystore.entity.vo.ProductListCacheItem;
 import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.entity.vo.ProductListVO;
-import com.example.mystore.entity.vo.PricingRateResolution;
+import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
