@@ -256,7 +256,9 @@ const goProductDetail = (id: number | string) => {
 
 .product-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  // minmax(0, 1fr) 而非 1fr：1fr 的 auto 最小值会取网格项（小程序中是 product-card 宿主节点，
+  // 无 min-width:0）的内容最小宽度，副标题 white-space:nowrap 过长时会把左列撑大、右列挤压。
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20rpx;
   width: 100%;
   box-sizing: border-box;
