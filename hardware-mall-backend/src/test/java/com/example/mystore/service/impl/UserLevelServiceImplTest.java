@@ -68,6 +68,34 @@ class UserLevelServiceImplTest {
     }
 
     @Test
+    void disableRejectedWhenLevelHasUsers() {
+        UserLevel level = customLevel(2L);
+        level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
+        when(userLevelMapper.selectById(2L)).thenReturn(level);
+        when(userMapper.selectCount(any())).thenReturn(3L);
+
+        assertThatThrownBy(() -> userLevelService.updateStatus(2L, UserLevelStatusConstants.STATUS_DISABLED))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("该等级仍有关联用户，不能停用");
+        verify(userLevelMapper, never()).updateById(any(UserLevel.class));
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void disableAllowedWhenLevelHasNoUsers() {
+        UserLevel level = customLevel(2L);
+        level.setStatus(UserLevelStatusConstants.STATUS_ENABLED);
+        when(userLevelMapper.selectById(2L)).thenReturn(level);
+        when(userMapper.selectCount(any())).thenReturn(0L);
+
+        userLevelService.updateStatus(2L, UserLevelStatusConstants.STATUS_DISABLED);
+
+        verify(userLevelMapper).updateById(level);
+        verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
+                PricingCacheInvalidationEvent.Type.LEVEL_AVAILABILITY_CHANGED, 2L));
+    }
+
+    @Test
     void statusChange_publishesPricingOnlyInvalidation() {
         UserLevel level = customLevel(2L);
         when(userLevelMapper.selectById(2L)).thenReturn(level);

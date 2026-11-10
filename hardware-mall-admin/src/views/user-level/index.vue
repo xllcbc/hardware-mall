@@ -371,8 +371,12 @@ const submitLevel = async () => {
 
 const toggleStatus = async (level: UserLevel) => {
   const next = level.status === 1 ? 0 : 1
+  if (next === 0 && Number(level.userCount || 0) > 0) {
+    ElMessage.warning('该等级仍有关联用户，请先调整用户归属后再停用')
+    return
+  }
   await ElMessageBox.confirm(
-    next === 1 ? '启用前必须确保所有分类倍率已配置，是否继续？' : '停用后该等级用户仍按原倍率取价，是否继续？',
+    next === 1 ? '启用前必须确保所有分类倍率已配置，是否继续？' : '停用后该等级将不可用，是否继续？',
     '提示',
     { type: 'warning' }
   )

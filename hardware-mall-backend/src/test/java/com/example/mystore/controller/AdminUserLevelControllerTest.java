@@ -2,7 +2,9 @@ package com.example.mystore.controller;
 
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Category;
+import com.example.mystore.entity.db.User;
 import com.example.mystore.mapper.CategoryMapper;
+import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.util.JwtUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,6 +15,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -32,6 +35,8 @@ class AdminUserLevelControllerTest {
     private JwtUtil jwtUtil;
     @Autowired
     private CategoryMapper categoryMapper;
+    @Autowired
+    private UserMapper userMapper;
 
     private String token;
 
@@ -148,6 +153,46 @@ class AdminUserLevelControllerTest {
                 .andExpect(jsonPath("$.data[1].missing").value(true));
     }
 
+    @Test
+    void disableRejectedWhenLevelHasUsers() throws Exception {
+        long levelId = createLevel("有用户等级");
+
+        mvc.perform(put("/api/admin/user-level/" + levelId + "/rates")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType("application/json")
+                        .content("{\"items\":[{\"categoryId\":88,\"rate\":0.8000}]}"))
+                .andExpect(status().isOk());
+        mvc.perform(put("/api/admin/user-level/" + levelId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType("application/json")
+                        .content("{\"status\":1}"))
+                .andExpect(status().isOk());
+
+        userMapper.insert(user(1201L, "disable_check_user", levelId));
+
+        mvc.perform(put("/api/admin/user-level/" + levelId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType("application/json")
+                        .content("{\"status\":0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(500))
+                .andExpect(jsonPath("$.message").value("该等级仍有关联用户，不能停用"));
+
+        String listBody = mvc.perform(get("/api/admin/user-level/list")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        int status = com.alibaba.fastjson2.JSON.parseObject(listBody)
+                .getJSONArray("data")
+                .stream()
+                .map(item -> (com.alibaba.fastjson2.JSONObject) item)
+                .filter(item -> item.getLongValue("id") == levelId)
+                .findFirst()
+                .orElseThrow()
+                .getIntValue("status");
+        org.junit.jupiter.api.Assertions.assertEquals(1, status);
+    }
+
     private long createLevel(String name) throws Exception {
         String body = mvc.perform(post("/api/admin/user-level")
                         .header("Authorization", "Bearer " + token)
@@ -159,6 +204,20 @@ class AdminUserLevelControllerTest {
         return com.alibaba.fastjson2.JSON.parseObject(body)
                 .getJSONObject("data")
                 .getLongValue("id");
+    }
+
+    private User user(Long id, String openid, Long levelId) {
+        User user = new User();
+        user.setId(id);
+        user.setOpenid(openid);
+        user.setNickname(openid);
+        user.setRole(StatusConstants.USER_ROLE_REGULAR);
+        user.setLevelId(levelId);
+        user.setStatus(StatusConstants.USER_STATUS_NORMAL);
+        user.setCreateTime(LocalDateTime.now());
+        user.setUpdateTime(LocalDateTime.now());
+        user.setDeleteTime(0L);
+        return user;
     }
 
     private void insertCategory(String name) {
