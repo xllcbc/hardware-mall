@@ -122,9 +122,9 @@ test('admin pricing view, matrix, deep link and 1280px layout', async ({ page })
   expect(state.pricingRequests.at(-1)?.searchParams.get('levelId')).toBe('2')
 
   await page.locator('.price-view-select').click()
-  await page.getByRole('option', { name: '零售基准' }).click()
+  await page.getByRole('option', { name: '零售', exact: true }).click()
   await expect(page).toHaveURL(/\/spu$/)
-  await expect(page.locator('.price-view-summary')).toContainText('零售基准')
+  await expect(page.locator('.price-view-summary')).toContainText('零售')
   expect(state.pricingRequests.at(-1)?.searchParams.has('levelId')).toBe(false)
 
   await page.setViewportSize({ width: 1280, height: 800 })
