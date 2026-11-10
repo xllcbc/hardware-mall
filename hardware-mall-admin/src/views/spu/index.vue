@@ -25,7 +25,7 @@
             class="price-view-select"
             @change="handlePriceViewChange"
           >
-            <el-option label="零售基准" :value="RETAIL_PRICE_VIEW" />
+            <el-option :label="retailViewLabel" :value="RETAIL_PRICE_VIEW" />
             <el-option
               v-for="level in enabledLevels"
               :key="level.id"
@@ -148,15 +148,17 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="零售区间" width="116">
+        <el-table-column label="批发基价" width="116">
           <template #default="{ row }">
             <span class="price-range">{{ formatPriceRange(row.retailMinPrice, row.retailMaxPrice) }}</span>
           </template>
         </el-table-column>
         <el-table-column :label="settlementRangeLabel" width="124">
           <template #default="{ row }">
-            <span class="price-range price-range-emphasis">
-              {{ formatPriceRange(row.settlementMinPrice, row.settlementMaxPrice) }}
+            <span
+              :class="['price-range', row.rateMissing ? 'price-range-unsellable' : 'price-range-emphasis']"
+            >
+              {{ formatSettlementRange(row.settlementMinPrice, row.settlementMaxPrice, row.rateMissing) }}
             </span>
           </template>
         </el-table-column>
@@ -164,20 +166,12 @@
           <template #default="{ row }">
             <div class="rate-cell">
               <span :class="['rate-value', { 'is-missing': row.rateMissing }]">
-                {{ formatRate(row.pricingRate, row.rateMissing) }}
+                {{ formatRate(row.effectiveRate, row.rateMissing) }}
               </span>
-              <el-tag
-                v-if="isDiscountExcluded(row.excludeDiscount)"
-                size="small"
-                type="info"
-                effect="plain"
-              >
-                不参与折扣
-              </el-tag>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="折扣状态" width="84">
+        <el-table-column label="折扣状态" width="140">
           <template #default="{ row }">
             <el-tag
               :type="getExcludeDiscountTagType(row.excludeDiscount)"
@@ -331,8 +325,26 @@
                   class="uploaded-image"
                 />
                 <div class="image-mask">
-                  <el-icon @click="previewImage(form.images, index)"><ZoomIn /></el-icon>
-                  <el-icon @click="removeImage(index)"><Delete /></el-icon>
+                  <el-tooltip content="预览图片" placement="top">
+                    <button
+                      type="button"
+                      class="mask-action"
+                      aria-label="预览图片"
+                      @click="previewImage(form.images, index)"
+                    >
+                      <el-icon><ZoomIn /></el-icon>
+                    </button>
+                  </el-tooltip>
+                  <el-tooltip content="移除图片" placement="top">
+                    <button
+                      type="button"
+                      class="mask-action"
+                      aria-label="移除图片"
+                      @click="removeImage(index)"
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </button>
+                  </el-tooltip>
                 </div>
                 <el-badge
                   v-if="index === 0"
@@ -393,7 +405,7 @@
             :active-text="DISCOUNT_PARTICIPATION_TEXT[DISCOUNT_PARTICIPATION.DISABLED]"
             :inactive-text="DISCOUNT_PARTICIPATION_TEXT[DISCOUNT_PARTICIPATION.ENABLED]"
           />
-          <span class="form-tip">开启后该商品的所有等级均按零售价计算</span>
+          <span class="form-tip">开启后该商品固定按零售结算价，不随等级倍率变化</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -541,7 +553,15 @@
               header-align="center"
             >
               <template #default="{ row }">
-                <div class="sku-image-wrapper" @click="handleSkuImageUpload(row)">
+                <div
+                  class="sku-image-wrapper"
+                  role="button"
+                  tabindex="0"
+                  aria-label="上传SKU图片"
+                  @click="handleSkuImageUpload(row)"
+                  @keydown.enter.prevent="handleSkuImageUpload(row)"
+                  @keydown.space.prevent="handleSkuImageUpload(row)"
+                >
                   <el-image
                     v-if="row.image"
                     :src="row.image"
@@ -555,7 +575,7 @@
               </template>
             </el-table-column>
             <el-table-column
-              label="零售价(元)"
+              label="批发基价(元)"
               width="136"
               align="center"
               header-align="center"
@@ -582,7 +602,7 @@
               <template #default="{ row }">
                 <div class="sku-level-price-cell">
                   <span class="sku-level-price">
-                    {{ formatCurrency(getSkuLevelPrice(row.price)) }}
+                    {{ currentSkuRate == null ? UNSELLABLE_TEXT : formatCurrency(getSkuLevelPrice(row.price)) }}
                   </span>
                   <el-tag
                     v-if="skuLevelPriceNotice"
@@ -675,7 +695,7 @@
       class="sku-batch-dialog"
     >
       <el-form label-width="90px">
-        <el-form-item :label="batchMode === 'price' ? '零售价(元)' : '库存'">
+        <el-form-item :label="batchMode === 'price' ? '批发基价(元)' : '库存'">
           <el-input-number
             v-model="batchValue"
             :min="0"
@@ -735,9 +755,11 @@ import {
 } from '@/constants/discount'
 import {
   RETAIL_PRICE_VIEW,
+  UNSELLABLE_TEXT,
   formatCurrency,
   formatPriceRange,
   formatRate,
+  formatSettlementRange,
   parsePriceView,
   resolveUnitPrice,
   toPriceViewLevelId,
@@ -822,8 +844,14 @@ const enabledLevels = computed(() =>
   levelList.value.filter(level => level.status === 1 && level.isRetail !== 1)
 )
 
+const retailLevel = computed(() =>
+  levelList.value.find(level => level.isRetail === 1) || null
+)
+
+const retailViewLabel = computed(() => retailLevel.value?.name || '零售')
+
 const priceViewLabel = computed(() => {
-  if (priceView.value === RETAIL_PRICE_VIEW) return '零售基准'
+  if (priceView.value === RETAIL_PRICE_VIEW) return retailViewLabel.value
   return levelList.value.find(level => level.id === priceView.value)?.name || '已选等级'
 })
 
@@ -832,30 +860,27 @@ const settlementRangeLabel = computed(() =>
 )
 
 const skuLevelPriceColumnLabel = computed(() =>
-  priceView.value === RETAIL_PRICE_VIEW ? '零售基准价' : `${priceViewLabel.value}价`
+  priceView.value === RETAIL_PRICE_VIEW ? '零售结算价' : `${priceViewLabel.value}结算价`
 )
 
-const currentSkuRate = computed(() => {
+const currentSkuRate = computed<number | null>(() => {
   const row = currentSpu.value
-  if (!row || isDiscountExcluded(row.excludeDiscount)) return 1
-  const rate = Number(row.effectiveRate ?? row.pricingRate ?? 1)
-  return Number.isFinite(rate) ? rate : 1
+  if (!row || row.rateMissing) return null
+  const rate = Number(row.effectiveRate ?? row.pricingRate)
+  return Number.isFinite(rate) ? rate : null
 })
 
 const skuLevelPriceNotice = computed<{ text: string; type: 'warning' | 'info' } | null>(() => {
   const row = currentSpu.value
   if (!row || priceView.value === RETAIL_PRICE_VIEW) return null
   if (isDiscountExcluded(row.excludeDiscount)) {
-    return { text: '不参与折扣', type: 'info' }
-  }
-  if (row.rateMissing) {
-    return { text: '未配置，零售兜底', type: 'warning' }
+    return { text: getExcludeDiscountText(row.excludeDiscount), type: 'info' }
   }
   return null
 })
 
-const getSkuLevelPrice = (retailPrice?: number | null) =>
-  resolveUnitPrice(retailPrice, currentSkuRate.value)
+const getSkuLevelPrice = (basePrice?: number | null) =>
+  currentSkuRate.value == null ? null : resolveUnitPrice(basePrice, currentSkuRate.value)
 
 const getSkuCount = (spuId: number) => {
   return skuCountMap.value[spuId] || 0
@@ -1493,6 +1518,11 @@ onMounted(async () => {
   font-weight: 600;
 }
 
+.price-range-unsellable {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .rate-cell {
   display: grid;
   justify-items: start;
@@ -1589,10 +1619,27 @@ onMounted(async () => {
   opacity: 1;
 }
 
-.image-mask .el-icon {
-  color: white;
-  font-size: 18px;
+.image-mask .mask-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: #fff;
   cursor: pointer;
+}
+
+.image-mask .mask-action .el-icon {
+  font-size: 18px;
+}
+
+.image-mask .mask-action:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 .main-badge {
@@ -1798,6 +1845,11 @@ onMounted(async () => {
   overflow: hidden;
   border: 1px dashed var(--border-color);
   cursor: pointer;
+}
+
+.sku-image-wrapper:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 .sku-image {

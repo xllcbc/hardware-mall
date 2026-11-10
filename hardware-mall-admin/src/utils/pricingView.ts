@@ -1,5 +1,7 @@
 export const RETAIL_PRICE_VIEW = 'retail' as const
 
+export const UNSELLABLE_TEXT = '暂不可售'
+
 export type PriceView = typeof RETAIL_PRICE_VIEW | number
 
 export function parsePriceView(value: unknown): PriceView {
@@ -21,9 +23,18 @@ export function formatPriceRange(min?: number | null, max?: number | null): stri
 }
 
 export function formatRate(rate?: number | null, missing = false): string {
-  if (missing) return '未配置 / 零售兜底'
+  if (missing) return UNSELLABLE_TEXT
   if (rate == null) return '-'
   return Number(rate).toFixed(4)
+}
+
+export function formatSettlementRange(
+  min?: number | null,
+  max?: number | null,
+  missing = false
+): string {
+  if (missing) return UNSELLABLE_TEXT
+  return formatPriceRange(min, max)
 }
 
 export function resolveUnitPrice(

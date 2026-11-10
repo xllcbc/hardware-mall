@@ -76,7 +76,7 @@
         </el-table-column>
         <el-table-column label="用户等级" width="108">
           <template #default="{ row }">
-            <el-tag :type="row.levelId === 1 ? 'info' : 'success'" size="small" effect="light">
+            <el-tag :type="row.levelId != null && row.levelId === retailLevelId ? 'info' : 'success'" size="small" effect="light">
               {{ row.levelName || '未设置' }}
             </el-tag>
           </template>
@@ -241,6 +241,10 @@ const editingLevelUserId = ref<number | null>(null)
 const levelForm = reactive({ levelId: null as number | null })
 
 const enabledLevels = computed(() => levelOptions.value.filter(level => level.status === 1))
+
+const retailLevelId = computed(() =>
+  levelOptions.value.find(level => level.isRetail === 1)?.id ?? null
+)
 
 watch(regionFilter, () => {
   pagination.page = 1
