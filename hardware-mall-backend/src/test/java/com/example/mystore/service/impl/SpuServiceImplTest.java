@@ -242,8 +242,8 @@ class SpuServiceImplTest {
         item.setId(1L);
         item.setCategoryId(categoryId);
         item.setName("商品");
-        item.setRetailMinPrice(new BigDecimal(min));
-        item.setRetailMaxPrice(new BigDecimal(max));
+        item.setBasePriceMin(new BigDecimal(min));
+        item.setBasePriceMax(new BigDecimal(max));
         item.setOriginalPrice(new BigDecimal("300.00"));
         item.setExcludeDiscount(excludeDiscount);
         item.setStatus(StatusConstants.PRODUCT_STATUS_ON_SHELF);
