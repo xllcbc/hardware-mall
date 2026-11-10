@@ -124,6 +124,13 @@ public class UserLevelServiceImpl implements UserLevelService {
         if (status == UserLevelStatusConstants.STATUS_ENABLED && !pricingRuleService.isComplete(id)) {
             throw new BusinessException("等级倍率矩阵未填满，不能启用");
         }
+        if (status == UserLevelStatusConstants.STATUS_DISABLED) {
+            Long users = userMapper.selectCount(new LambdaQueryWrapper<User>()
+                    .eq(User::getLevelId, id));
+            if (users != null && users > 0) {
+                throw new BusinessException("该等级仍有关联用户，不能停用");
+            }
+        }
         level.setStatus(status);
         level.setUpdateTime(LocalDateTime.now());
         userLevelMapper.updateById(level);
