@@ -39,7 +39,8 @@
           <view class="item-info">
             <text class="item-name">{{ item.name }}</text>
             <view class="item-bottom">
-<text class="item-price">¥{{ formatPrice(item.minPrice) }}起</text>
+              <text v-if="item.minPrice == null" class="item-unsellable">暂不可售</text>
+              <text v-else class="item-price">¥{{ formatPrice(item.minPrice) }}起</text>
              </view>
           </view>
         </view>
@@ -97,8 +98,8 @@ const toggleSelect = (id: number) => {
   }
 }
 
-const formatPrice = (price: number | undefined) => {
-  if (!price) return '0.00'
+const formatPrice = (price: number | null | undefined) => {
+  if (price == null) return '0.00'
   return price.toFixed(2)
 }
 
@@ -306,6 +307,12 @@ const goShopping = () => {
   font-size: 28rpx;
   font-weight: 700;
   color: #C9A86C;
+}
+
+.item-unsellable {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #999999;
 }
 
 .go-shopping {

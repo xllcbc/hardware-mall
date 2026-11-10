@@ -16,7 +16,8 @@
     <view class="product-content">
       <view class="price-section">
         <view class="price-wrap">
-          <template v-if="displayPrice !== null">
+          <text v-if="!isSellable" class="unsellable-text">暂不可售</text>
+          <template v-else-if="displayPrice !== null">
             <text class="price-symbol">¥</text>
             <text class="price-value">{{ formatPrice(displayPrice) }}</text>
           </template>
@@ -77,8 +78,8 @@
         </view>
       </view>
       <view class="footer-right">
-        <view class="add-cart-btn" @tap="addToCart">加入购物车</view>
-        <view class="buy-btn" @tap="buyNow">立即购买</view>
+        <view class="add-cart-btn" :class="{ disabled: !isSellable }" @tap="addToCart">加入购物车</view>
+        <view class="buy-btn" :class="{ disabled: !isSellable }" @tap="buyNow">立即购买</view>
       </view>
     </view>
     </template>
@@ -132,6 +133,12 @@ const currentSku = computed(() => {
 
 const selectedSkuPrice = computed(() => {
   return currentSku.value?.price ?? null
+})
+
+const isSellable = computed(() => {
+  if (detailData.value?.sellable === false) return false
+  if (currentSku.value && currentSku.value.sellable === false) return false
+  return true
 })
 
 const availableMinPrice = computed<number | null>(() => {
@@ -194,6 +201,7 @@ const isSpecAvailable = (templateId: number, itemId: number) => {
   return skus.value.some(sku =>
     sku.status === 1 &&
     sku.stock > 0 &&
+    sku.sellable !== false &&
     currentSpecs.every(cs =>
       sku.specs.some(s => s.templateId === cs.templateId && s.itemId === cs.itemId)
     )
@@ -226,11 +234,13 @@ onMounted(async () => {
       const data = await getProductDetail(numericId)
       detailData.value = data
       product.value = data?.spu || {}
+      const sellable = data?.sellable !== false
       appStore.addFootprint({
         id: product.value.id,
         name: product.value.name,
         image: product.value.images?.[0] || '/static/images/face.jpg',
-        price: data?.minPrice || product.value.originalPrice || 0
+        // 只落最终售价(minPrice 已由后端解析); 不可售或无最终价时记为 null, 绝不写入批发基价
+        price: sellable ? data?.minPrice ?? null : null
       })
     } catch (e) {
       console.error('Failed to load product:', e)
@@ -245,12 +255,14 @@ onMounted(async () => {
 
 const toggleFavorite = () => {
   if (!product.value.id) return
+  // 只落最终售价(minPrice / 已解析的 SKU 价); 不回落到批发基价 originalPrice
+  const finalPrice = detailData.value?.minPrice ?? selectedSkuPrice.value ?? null
   appStore.toggleFavorite({
     id: product.value.id,
     name: product.value.name || '',
     image: product.value.images?.[0] || '/static/images/face.jpg',
-    minPrice: detailData.value?.minPrice || selectedSkuPrice.value || product.value.originalPrice || 0,
-    originalPrice: product.value.originalPrice
+    minPrice: isSellable.value ? finalPrice : null,
+    originalPrice: null
   })
 }
 
@@ -259,6 +271,10 @@ const goCart = () => {
 }
 
 const addToCart = async () => {
+  if (!isSellable.value) {
+    uni.showToast({ title: '商品暂不可售', icon: 'none' })
+    return
+  }
   if (specTemplates.value.length && !currentSku.value) {
     uni.showToast({ title: '请选择商品规格', icon: 'none' })
     return
@@ -284,6 +300,10 @@ const addToCart = async () => {
 }
 
 const buyNow = async () => {
+  if (!isSellable.value) {
+    uni.showToast({ title: '商品暂不可售', icon: 'none' })
+    return
+  }
   if (specTemplates.value.length && !currentSku.value) {
     uni.showToast({ title: '请选择商品规格', icon: 'none' })
     return
@@ -298,6 +318,10 @@ const buyNow = async () => {
   }
   if (!currentSku.value) {
     uni.showToast({ title: '暂无可用规格，请稍后再试', icon: 'none' })
+    return
+  }
+  if (currentSku.value.price == null) {
+    uni.showToast({ title: '商品暂不可售', icon: 'none' })
     return
   }
   if (!(await requireLogin('登录后才能下单'))) return
@@ -382,6 +406,12 @@ const onShare = () => {
 
 .price-placeholder {
   font-size: 30rpx;
+  color: #999999;
+}
+
+.unsellable-text {
+  font-size: 40rpx;
+  font-weight: 600;
   color: #999999;
 }
 
@@ -593,5 +623,11 @@ const onShare = () => {
 .buy-btn {
   background: linear-gradient(135deg, #C9A86C 0%, #B8956A 100%);
   color: #FFFFFF;
+}
+
+.add-cart-btn.disabled,
+.buy-btn.disabled {
+  background: #CCCCCC;
+  color: #999999;
 }
 </style>

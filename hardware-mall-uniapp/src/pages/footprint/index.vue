@@ -37,7 +37,8 @@
           <view class="item-info">
             <text class="item-name">{{ item.name }}</text>
             <view class="item-meta">
-              <text class="item-price">¥{{ formatPrice(item.price) }}</text>
+              <text v-if="item.price == null" class="item-unsellable">暂不可售</text>
+              <text v-else class="item-price">¥{{ formatPrice(item.price) }}</text>
               <text class="view-time">{{ formatTime(item.viewTime) }}</text>
             </view>
           </view>
@@ -99,7 +100,8 @@ const toggleSelect = (id: number) => {
   }
 }
 
-const formatPrice = (price: number) => {
+const formatPrice = (price: number | null) => {
+  if (price == null) return '0.00'
   return price.toFixed(2)
 }
 
@@ -335,6 +337,12 @@ const goShopping = () => {
   font-size: 28rpx;
   font-weight: 700;
   color: #C9A86C;
+}
+
+.item-unsellable {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #999999;
 }
 
 .view-time {
