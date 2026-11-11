@@ -11,6 +11,7 @@ import com.example.mystore.entity.db.Category;
 import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.entity.db.Order;
+import com.example.mystore.entity.db.OrderIdempotency;
 import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.entity.db.Sku;
@@ -22,6 +23,7 @@ import com.example.mystore.mapper.AddressMapper;
 import com.example.mystore.mapper.CartMapper;
 import com.example.mystore.mapper.LevelCategoryRateMapper;
 import com.example.mystore.mapper.LogisticsMapper;
+import com.example.mystore.mapper.OrderIdempotencyMapper;
 import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.mapper.PaymentRecordMapper;
@@ -93,6 +95,8 @@ class PricingIdentityHttpTest {
     private OrderMapper orderMapper;
     @Autowired
     private OrderItemMapper orderItemMapper;
+    @Autowired
+    private OrderIdempotencyMapper orderIdempotencyMapper;
     @Autowired
     private PaymentRecordMapper paymentRecordMapper;
     @Autowired
@@ -284,7 +288,8 @@ class PricingIdentityHttpTest {
                 .eq(Cart::getUserId, session.userId())
                 .eq(Cart::getSkuId, 9301L)
                 .eq(Cart::getDeleteTime, 0L))).isNotNull();
-        assertThat(redisUtil.get(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "http-price-changed")).isNull();
+        assertThat(orderIdempotencyMapper.selectByUserAndKey(session.userId(), "http-price-changed").getState())
+                .isEqualTo(OrderIdempotency.STATE_FAILED);
         assertThat(paymentRecordMapper.selectCount(new LambdaQueryWrapper<PaymentRecord>()
                 .eq(PaymentRecord::getOrderId, order.getId()))).isZero();
     }
@@ -326,7 +331,8 @@ class PricingIdentityHttpTest {
                 .eq(Order::getUserId, session.userId()))).isZero();
         assertThat(paymentRecordMapper.selectCount(new LambdaQueryWrapper<>()))
                 .isEqualTo(paymentCountBefore);
-        assertThat(redisUtil.get(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "http-rollback")).isNull();
+        assertThat(orderIdempotencyMapper.selectByUserAndKey(session.userId(), "http-rollback").getState())
+                .isEqualTo(OrderIdempotency.STATE_FAILED);
     }
 
     private LoginSession login(long expectedLevelId) {
@@ -423,6 +429,8 @@ class PricingIdentityHttpTest {
             }
             orderMapper.delete(new LambdaQueryWrapper<Order>()
                     .eq(Order::getUserId, existing.getId()));
+            orderIdempotencyMapper.delete(new LambdaQueryWrapper<OrderIdempotency>()
+                    .eq(OrderIdempotency::getUserId, existing.getId()));
             cartMapper.delete(new LambdaQueryWrapper<Cart>()
                     .eq(Cart::getUserId, existing.getId()));
             addressMapper.delete(new LambdaQueryWrapper<Address>()

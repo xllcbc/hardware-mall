@@ -7,11 +7,11 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
-import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.common.exception.PriceChangedException;
 import com.example.mystore.entity.db.Order;
+import com.example.mystore.entity.db.OrderIdempotency;
 import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
@@ -32,6 +32,7 @@ import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
+import com.example.mystore.service.OrderIdempotencyService;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.PriceService;
@@ -40,6 +41,7 @@ import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
+import com.example.mystore.util.OrderRequestFingerprint;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.UserContext;
 import com.wechat.pay.java.service.payments.model.Transaction;
@@ -86,6 +88,7 @@ public class OrderServiceImpl implements OrderService {
     private final PriceService priceService;
     private final PricingRuleService pricingRuleService;
     private final UserLevelService userLevelService;
+    private final OrderIdempotencyService orderIdempotencyService;
 
     @Value("${wechat.pay.mch-id:}")
     private String mchId;
@@ -101,17 +104,23 @@ public class OrderServiceImpl implements OrderService {
     public OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey) {
         log.info("创建订单开始, userId={}, idemKey={}, request={}", userId, idempotencyKey, request);
 
-        String idemKey = RedisConstants.PREFIX_ORDER_IDEMPOTENCY + idempotencyKey;
-        if (idempotencyKey == null || !redisUtil.setIfAbsent(idemKey, userId,
-                RedisConstants.IDEMPOTENCY_TTL, TimeUnit.SECONDS)) {
-            // M8: 冲突时校验坑的归属 —— 自己的坑是真重复下单; 别人的坑不得误伤, 也不得清除
-            Object owner = idempotencyKey == null ? null : redisUtil.get(idemKey);
-            if (owner == null || !owner.toString().equals(String.valueOf(userId))) {
-                throw new BusinessException("请求冲突，请刷新后重试");
+        String idemKey = requireIdempotencyKey(idempotencyKey);
+        String requestHash = OrderRequestFingerprint.fingerprint(request);
+        OrderIdempotencyService.ClaimOutcome claim =
+                orderIdempotencyService.claim(userId, idemKey, requestHash);
+        switch (claim.kind()) {
+            case SUCCEEDED -> {
+                // 订单已提交但上次 VO 组装失败时，同 key 同指纹重试直接返回原订单
+                return getOrderVO(claim.orderId(), userId);
             }
-            throw new BusinessException("请勿重复下单");
+            case PROCESSING -> throw new BusinessException("订单处理中，请稍后重试");
+            case CONFLICT -> throw new BusinessException("幂等键已用于其他请求，请刷新后重试");
+            case ACQUIRED -> {
+                // 继续创建订单
+            }
         }
 
+        Long orderId;
         try {
             // ① 事务外：只读校验 + 构建订单明细快照（不占用 DB 连接事务）
             Address address = requireAddress(userId, request.getAddressId());
@@ -119,20 +128,33 @@ public class OrderServiceImpl implements OrderService {
             SettlementSnapshot settlement = buildSettlementSnapshot(request.getItems());
             requireConfirmedAmount(request.getExpectedPayAmount(), settlement);
 
-            // ② 事务内：扣减库存 + 建单 + 明细 + 删购物车 + 发布事件
-            Long orderId = new TransactionTemplate(transactionManager)
+            // ② 事务内：扣减库存 + 建单 + 明细 + 删购物车 + 幂等记录置成功 + 发布事件
+            orderId = new TransactionTemplate(transactionManager)
                     .execute(status -> persistOrder(
                             userId, address.getId(), logistics.getId(),
-                            request.getBuyerRemark(), settlement));
-
-            // ③ 事务外：组装返回 VO
-            return getOrderVO(orderId, userId);
+                            request.getBuyerRemark(), settlement, claim));
         } catch (RuntimeException e) {
-            // M8: 业务失败 = 意图未达成, 释放幂等坑允许立即重试
-            // 此刻事务已回滚、DB 零痕迹, 删坑不会造成"订单建成但坑没了"的重复下单窗口
-            redisUtil.delete(idemKey);
+            // 提交前失败：独立事务置失败，允许同一幂等键立即重试
+            orderIdempotencyService.markFailed(claim.recordId(), claim.ownerToken());
+            orderIdempotencyService.releaseLock(
+                    userId, idemKey, claim.ownerToken(), claim.lockAcquired());
             throw e;
         }
+
+        orderIdempotencyService.releaseLock(userId, idemKey, claim.ownerToken(), claim.lockAcquired());
+        // ③ 事务外：组装返回 VO；VO 失败不得把已成功的幂等记录置失败或删除
+        return getOrderVO(orderId, userId);
+    }
+
+    private String requireIdempotencyKey(String idempotencyKey) {
+        if (!StringUtils.hasText(idempotencyKey)) {
+            throw new BusinessException("缺少幂等键，请刷新后重试");
+        }
+        String idemKey = idempotencyKey.trim();
+        if (idemKey.length() > OrderIdempotency.IDEMPOTENCY_KEY_MAX_LENGTH) {
+            throw new BusinessException("幂等键过长，请刷新后重试");
+        }
+        return idemKey;
     }
 
     private Address requireAddress(Long userId, Long addressId) {
@@ -273,7 +295,8 @@ public class OrderServiceImpl implements OrderService {
 
     private Long persistOrder(
             Long userId, Long addressId, Long logisticsId,
-            String buyerRemark, SettlementSnapshot settlement) {
+            String buyerRemark, SettlementSnapshot settlement,
+            OrderIdempotencyService.ClaimOutcome idempotencyClaim) {
         // 【事务内】只扣 DB 库存 + 销量自增
         for (OrderItem item : settlement.items()) {
             boolean deducted = skuService.deductStock(item.getSkuId(), item.getQuantity());
@@ -316,6 +339,10 @@ public class OrderServiceImpl implements OrderService {
                    .set(Cart::getDeleteTime, System.currentTimeMillis());
         cartMapper.update(null, cartWrapper);
         log.info("删除购物车商品, userId={}, skuIds={}", userId, cartSkuIds);
+
+        // 幂等记录置成功必须与订单创建同事务；更新失败会回滚订单
+        orderIdempotencyService.markSucceeded(
+                idempotencyClaim.recordId(), idempotencyClaim.ownerToken(), order.getId());
 
         // 发布库存同步事件，事务提交后由监听器异步执行
         List<Long> skuIds = settlement.items().stream()

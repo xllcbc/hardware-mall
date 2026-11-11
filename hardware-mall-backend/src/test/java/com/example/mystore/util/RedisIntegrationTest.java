@@ -98,6 +98,17 @@ class RedisIntegrationTest {
     }
 
     @Test
+    void deleteIfValueMatches_onlyDeletesMatchingOwnerToken() {
+        String key = RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "1:test-owner";
+        assertThat(redisUtil.setIfAbsentRaw(key, "owner-a", 300, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(redisUtil.deleteIfValueMatches(key, "owner-b")).isFalse();
+
+        assertThat(redisUtil.deleteIfValueMatches(key, "owner-a")).isTrue();
+        assertThat(redisUtil.deleteIfValueMatches(key, "owner-a")).isFalse();
+    }
+
+    @Test
     void testHasKey() {
         redisUtil.set("test:exists", "value");
         assertThat(redisUtil.hasKey("test:exists")).isTrue();

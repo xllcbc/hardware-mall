@@ -44,6 +44,15 @@ public class RedisUtil {
                     + "return v", Long.class);
 
     /**
+     * 比较并删除：只有当前值仍等于持有者 token 时才删除。
+     * 用于幂等快锁，避免旧请求误删新请求的锁。
+     */
+    private static final DefaultRedisScript<Long> DELETE_IF_MATCH_SCRIPT = new DefaultRedisScript<>(
+            "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+                    + "return redis.call('DEL', KEYS[1]) end "
+                    + "return 0", Long.class);
+
+    /**
      * 未抢到锁时的告警轮数
      */
     @Value("${cache.query.lock-warn-loops:10}")
@@ -202,6 +211,22 @@ public class RedisUtil {
 
     public boolean setIfAbsent(String key, Object value) {
         return Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(key, value));
+    }
+
+    /**
+     * 以原始字符串写入占位值，供 Lua 比较删除使用（Fastjson2 会加引号，无法直接比较）。
+     */
+    public boolean setIfAbsentRaw(String key, String value, long timeout, TimeUnit unit) {
+        return Boolean.TRUE.equals(stringRedisTemplate.opsForValue().setIfAbsent(key, value, timeout, unit));
+    }
+
+    /**
+     * @return true=值匹配并已删除；false=值已被其他持有者替换或 key 已不存在
+     */
+    public boolean deleteIfValueMatches(String key, String expectedValue) {
+        Long result = stringRedisTemplate.execute(DELETE_IF_MATCH_SCRIPT,
+                Collections.singletonList(key), expectedValue);
+        return result != null && result > 0;
     }
 
     public Long incr(String key) {

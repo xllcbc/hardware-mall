@@ -313,3 +313,19 @@ CREATE TABLE `payment_record` (
   UNIQUE KEY `uk_out_trade_no` (`out_trade_no`),
   KEY `idx_order_id` (`order_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付记录表';
+
+-- 下单幂等记录表（数据库为幂等权威，Redis 仅作短时快锁）
+CREATE TABLE IF NOT EXISTS `order_idempotency` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `user_id` BIGINT NOT NULL COMMENT '用户ID',
+  `idem_key` VARCHAR(128) NOT NULL COMMENT '客户端幂等键',
+  `request_hash` CHAR(64) NOT NULL COMMENT '请求指纹 SHA-256',
+  `state` VARCHAR(16) NOT NULL COMMENT 'PROCESSING/SUCCEEDED/FAILED',
+  `owner_token` VARCHAR(64) NOT NULL COMMENT '本次请求持有者令牌',
+  `order_id` BIGINT DEFAULT NULL COMMENT '成功后关联的订单ID',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_idem_key` (`user_id`, `idem_key`),
+  KEY `idx_state_update` (`state`, `update_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='下单幂等记录表';
