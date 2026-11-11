@@ -92,8 +92,9 @@ import { getAddressList } from '@/api/address'
 import { getLogisticsList } from '@/api/logistics'
 import { createOrder, getCheckoutPreview, getOrderDetail, getIdempotencyToken } from '@/api/order'
 import { prepayOrder } from '@/api/pay'
-import { ApiError, API_CODE_PRICE_CHANGED } from '@/utils/request'
+import { ApiError, API_CODE_IDEMPOTENCY_CONFLICT, API_CODE_PRICE_CHANGED } from '@/utils/request'
 import { decidePriceChange, shouldBlockPayment } from '@/utils/checkoutPricing'
+import { buildOrderPayloadFingerprint, shouldRefreshIdempotencyKey } from '@/utils/orderIdempotency'
 import { requireLogin } from '@/utils/auth'
 import type { Address, CheckoutPreview, Logistics } from '@/types'
 
@@ -106,7 +107,7 @@ const logisticsList = ref<Logistics[]>([])
 const selectedLogistics = ref<Logistics | null>(null)
 const buyerRemark = ref('')
 const submitted = ref(false)
-const idemKey = ref('')
+const idempotency = ref({ key: '', fingerprint: '' })
 const preview = ref<CheckoutPreview | null>(null)
 const previewLoading = ref(false)
 
@@ -203,6 +204,19 @@ const addAddress = () => {
   uni.navigateTo({ url: '/pages/address/edit' })
 }
 
+const clearIdempotencyKey = () => {
+  idempotency.value = { key: '', fingerprint: '' }
+}
+
+const ensureIdempotencyKey = async (fingerprint: string) => {
+  if (!shouldRefreshIdempotencyKey(idempotency.value, fingerprint)) {
+    return idempotency.value.key
+  }
+  const token = await getIdempotencyToken()
+  idempotency.value = { key: token, fingerprint }
+  return token
+}
+
 const submitOrder = async () => {
   if (submitted.value) return
   if (!(await requireLogin('登录后才能提交订单'))) return
@@ -232,6 +246,7 @@ const submitOrder = async () => {
 
   submitted.value = true
   const expectedPayAmount = preview.value.payAmount
+  let fingerprint = ''
   try {
     const items = requestItems.value
 
@@ -243,11 +258,10 @@ const submitOrder = async () => {
       buyerRemark: buyerRemark.value
     }
 
-    if (!idemKey.value) {
-      idemKey.value = await getIdempotencyToken()
-    }
-    const order = await createOrder(orderData, idemKey.value)
-    idemKey.value = ''
+    fingerprint = buildOrderPayloadFingerprint(orderData)
+    const idempotencyKey = await ensureIdempotencyKey(fingerprint)
+    const order = await createOrder(orderData, idempotencyKey)
+    clearIdempotencyKey()
 
     if (isDirectBuy.value) {
       preOrderStore.clearItem()
@@ -307,6 +321,21 @@ const submitOrder = async () => {
       }, 1500)
     }
   } catch (e: any) {
+    if (e instanceof ApiError && e.code === API_CODE_IDEMPOTENCY_CONFLICT) {
+      clearIdempotencyKey()
+      try {
+        await ensureIdempotencyKey(fingerprint)
+      } catch {
+        // 刷新失败时保持空键, 下次提交会再次获取
+      }
+      submitted.value = false
+      uni.showModal({
+        title: '订单信息已变化',
+        content: '请重新提交订单。',
+        showCancel: false
+      })
+      return
+    }
     if (e instanceof ApiError
       && e.code === API_CODE_PRICE_CHANGED
       && e.data?.preview) {
@@ -314,7 +343,7 @@ const submitOrder = async () => {
       const latestAmount = Number(latestPreview.payAmount)
       const previousAmount = Number(e.data.expectedPayAmount ?? expectedPayAmount)
       submitted.value = false
-      idemKey.value = ''
+      clearIdempotencyKey()
       preview.value = latestPreview
       uni.showModal({
         title: '商品价格已更新',

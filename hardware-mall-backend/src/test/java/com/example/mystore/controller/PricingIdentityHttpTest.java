@@ -5,6 +5,7 @@ import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
+import com.example.mystore.common.exception.IdempotencyConflictException;
 import com.example.mystore.entity.db.Address;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Category;
@@ -238,6 +239,18 @@ class PricingIdentityHttpTest {
         assertThat(createdResponse.path("code").asInt()).isEqualTo(200);
         assertThat(createdResponse.path("data").path("payAmount").decimalValue())
                 .isEqualByComparingTo("40.00");
+
+        JsonNode conflictResponse = postJson(
+                "/api/user/order/create",
+                Map.of(
+                        "items", List.of(Map.of("skuId", 9301L, "quantity", 2)),
+                        "addressId", ADDRESS_ID,
+                        "logisticsId", LOGISTICS_ID,
+                        "expectedPayAmount", new BigDecimal("40.00"),
+                        "buyerRemark", "changed payload"),
+                session.token(), "http-price-ok");
+        assertThat(conflictResponse.path("code").asInt())
+                .isEqualTo(IdempotencyConflictException.CODE);
 
         Order order = orderMapper.selectOne(new LambdaQueryWrapper<Order>()
                 .eq(Order::getUserId, session.userId())

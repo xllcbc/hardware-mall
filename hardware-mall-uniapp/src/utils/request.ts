@@ -16,6 +16,9 @@ interface ResponseData<T = any> {
 }
 
 export const API_CODE_PRICE_CHANGED = 40901
+export const API_CODE_IDEMPOTENCY_CONFLICT = 40902
+
+const CLIENT_HANDLED_CODES = new Set([API_CODE_PRICE_CHANGED, API_CODE_IDEMPOTENCY_CONFLICT])
 
 export class ApiError extends Error {
   code: number
@@ -72,7 +75,8 @@ async function request<T = any>(options: RequestOptions): Promise<T> {
           // 审核合规: 不强制跳转登录页, 弹可取消提示, 用户确认后才去登录
           requireLogin(response.message || '登录已过期，请重新登录')
           reject(new ApiError(response.code, response.message, response.data))
-        } else if (response.code === API_CODE_PRICE_CHANGED) {
+        } else if (CLIENT_HANDLED_CODES.has(response.code)) {
+          // 由调用方按业务场景处理, 不重复弹出通用 toast
           reject(new ApiError(response.code, response.message, response.data))
         } else {
           uni.showToast({ title: response.message || '请求失败', icon: 'none' })

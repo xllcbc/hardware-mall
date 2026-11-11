@@ -8,6 +8,7 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
+import com.example.mystore.common.exception.IdempotencyConflictException;
 import com.example.mystore.common.exception.PriceChangedException;
 import com.example.mystore.entity.db.*;
 import com.example.mystore.entity.dto.CheckoutPreviewRequest;
@@ -373,8 +374,10 @@ class OrderServiceImplTest {
                         ClaimOutcome.Kind.CONFLICT, 10L, "owner-token", null, false));
 
         assertThatThrownBy(() -> orderService.createOrder(2L, stubValidRequest(), "k1"))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage("幂等键已用于其他请求，请刷新后重试");
+                .isInstanceOfSatisfying(IdempotencyConflictException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(IdempotencyConflictException.CODE);
+                    assertThat(e).hasMessage("幂等键已用于其他请求，请刷新后重试");
+                });
 
         verify(orderMapper, never()).insert(any(Order.class));
         verify(orderIdempotencyService, never()).markFailed(any(), any());
