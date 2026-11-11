@@ -9,6 +9,7 @@ import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
+import com.example.mystore.common.exception.IdempotencyConflictException;
 import com.example.mystore.common.exception.PriceChangedException;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderIdempotency;
@@ -113,7 +114,7 @@ public class OrderServiceImpl implements OrderService {
                 return getOrderVO(claim.orderId(), userId);
             }
             case PROCESSING -> throw new BusinessException("订单处理中，请稍后重试");
-            case CONFLICT -> throw new BusinessException("幂等键已用于其他请求，请刷新后重试");
+            case CONFLICT -> throw new IdempotencyConflictException();
             case ACQUIRED -> {
                 // 继续创建订单
             }

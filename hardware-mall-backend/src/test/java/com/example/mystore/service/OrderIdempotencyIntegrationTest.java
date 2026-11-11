@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
+import com.example.mystore.common.exception.IdempotencyConflictException;
 import com.example.mystore.entity.db.Address;
 import com.example.mystore.entity.db.Category;
 import com.example.mystore.entity.db.LevelCategoryRate;
@@ -224,8 +225,10 @@ class OrderIdempotencyIntegrationTest {
         assertThat(original.getId()).isNotNull();
 
         assertThatThrownBy(() -> orderService.createOrder(USER_ID, request(3), "conflict-key"))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage("幂等键已用于其他请求，请刷新后重试");
+                .isInstanceOfSatisfying(IdempotencyConflictException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(IdempotencyConflictException.CODE);
+                    assertThat(e).hasMessage("幂等键已用于其他请求，请刷新后重试");
+                });
 
         assertThat(orderMapper.selectCount(new LambdaQueryWrapper<Order>()
                 .eq(Order::getUserId, USER_ID))).isEqualTo(1L);
