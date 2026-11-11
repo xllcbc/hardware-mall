@@ -737,6 +737,90 @@ class PayServiceImplTest {
         assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_CLOSED);
     }
 
+    // ==================== prepay 失败后复用支付记录 ====================
+
+    @Test
+    void prepay_shouldReuseClosedRecord_whenRetryAfterPrepayFailure() {
+        // 首次 prepay 失败留下一条 CLOSED; 再次支付必须复用同一行, 不能新插撞 uk_out_trade_no
+        User user = setupUser("o-test-prepay-retry");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        PaymentRecord closed = setupPaymentRecord(
+                orderId, PaymentRecord.STATUS_CLOSED, orderNoOf(orderId));
+
+        assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("创建支付订单失败");
+
+        java.util.List<PaymentRecord> records = paymentRecordMapper.selectList(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).getId()).isEqualTo(closed.getId());
+        assertThat(records.get(0).getStatus()).isEqualTo(PaymentRecord.STATUS_CLOSED);
+    }
+
+    @Test
+    void prepay_shouldReusePendingRecord_whenRetry() {
+        User user = setupUser("o-test-prepay-pending");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        PaymentRecord pending = setupPaymentRecord(
+                orderId, PaymentRecord.STATUS_PENDING, orderNoOf(orderId));
+
+        assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("创建支付订单失败");
+
+        java.util.List<PaymentRecord> records = paymentRecordMapper.selectList(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).getId()).isEqualTo(pending.getId());
+        assertThat(records.get(0).getStatus()).isEqualTo(PaymentRecord.STATUS_PENDING);
+    }
+
+    @Test
+    void prepay_shouldReject_whenRecordIsPaid() {
+        User user = setupUser("o-test-prepay-paid");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        PaymentRecord paid = setupPaymentRecord(
+                orderId, PaymentRecord.STATUS_PAID, orderNoOf(orderId));
+
+        assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已支付");
+
+        PaymentRecord pr = paymentRecordMapper.selectById(paid.getId());
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_PAID);
+    }
+
+    @Test
+    void prepay_shouldReject_whenRecordIsRefunding() {
+        User user = setupUser("o-test-prepay-refunding");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        PaymentRecord refunding = setupPaymentRecord(
+                orderId, PaymentRecord.STATUS_REFUNDING, orderNoOf(orderId));
+
+        assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("退款中");
+
+        PaymentRecord pr = paymentRecordMapper.selectById(refunding.getId());
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
+    }
+
+    @Test
+    void prepay_shouldReject_whenRecordIsRefunded() {
+        User user = setupUser("o-test-prepay-refunded");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        PaymentRecord refunded = setupPaymentRecord(
+                orderId, PaymentRecord.STATUS_REFUNDED, orderNoOf(orderId));
+
+        assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已退款");
+
+        PaymentRecord pr = paymentRecordMapper.selectById(refunded.getId());
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDED);
+    }
+
     // ==================== helper ====================
 
     private static Refund refundWithStatus(Status status) {
@@ -760,6 +844,10 @@ class PayServiceImplTest {
         user.setStatus(1);
         userMapper.insert(user);
         return user;
+    }
+
+    private String orderNoOf(Long orderId) {
+        return orderMapper.selectById(orderId).getOrderNo();
     }
 
     private Long setupSku(int stock) {        Sku sku = new Sku();
