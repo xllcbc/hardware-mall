@@ -36,6 +36,7 @@ import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.PriceService;
 import com.example.mystore.service.PricingRuleService;
+import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
@@ -383,11 +384,29 @@ public class OrderServiceImpl implements OrderService {
 
         Page<OrderVO> voPage = new Page<>(orderPage.getCurrent(), orderPage.getSize(), orderPage.getTotal());
         List<OrderVO> voList = new ArrayList<>();
+        Map<Long, PaymentRecord> latestPayments = loadLatestPaymentRecords(orderPage.getRecords());
         for (Order order : orderPage.getRecords()) {
-            voList.add(getOrderVO(order.getId(), null));
+            voList.add(buildOrderVO(order, null, latestPayments));
         }
         voPage.setRecords(voList);
         return voPage;
+    }
+
+    private Map<Long, PaymentRecord> loadLatestPaymentRecords(List<Order> orders) {
+        if (orders.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<Long> orderIds = orders.stream().map(Order::getId).toList();
+        List<PaymentRecord> records = paymentRecordMapper.selectList(
+                new LambdaQueryWrapper<PaymentRecord>()
+                        .in(PaymentRecord::getOrderId, orderIds)
+                        .orderByDesc(PaymentRecord::getCreateTime)
+                        .orderByDesc(PaymentRecord::getId));
+        Map<Long, PaymentRecord> latestByOrderId = new HashMap<>();
+        for (PaymentRecord record : records) {
+            latestByOrderId.putIfAbsent(record.getOrderId(), record);
+        }
+        return latestByOrderId;
     }
 
     @Override
@@ -703,6 +722,11 @@ public class OrderServiceImpl implements OrderService {
         if (order == null) {
             throw new BusinessException("订单不存在");
         }
+        // 已取消订单的迟到支付: 只校验最新支付记录已支付后直接退款, 订单保持 5
+        if (order.getStatus() == StatusConstants.ORDER_CANCELLED) {
+            retryCancelledOrderRefund(orderId, reason);
+            return;
+        }
         // 预检: 明显错状态直接报错 (CAS 才是权威并发守卫, 预检仅为友好提示)
         // 8(退款申请中) 视为管理员审核通过; 9(退款失败) 允许管理员重试: 沿用同一 CAS 占位链路 →6→微信退款→回调→7
         if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT
@@ -730,7 +754,26 @@ public class OrderServiceImpl implements OrderService {
         }
         log.info("订单置退款中, orderId={}, 等待微信退款回调确认", orderId);
 
-        payService.refund(orderId, reason);
+        handleRefundResult(orderId, payService.refund(orderId, reason));
+    }
+
+    private void retryCancelledOrderRefund(Long orderId, String reason) {
+        PaymentRecord latest = payService.queryByOrderId(orderId);
+        if (latest == null || latest.getStatus() != PaymentRecord.STATUS_PAID) {
+            throw new BusinessException("已取消订单的最新支付记录不是已支付状态，无法重试退款");
+        }
+        RefundResult result = payService.refund(orderId, reason);
+        log.info("已取消订单重试退款, orderId={}, result={}", orderId, result);
+        handleRefundResult(orderId, result);
+    }
+
+    private void handleRefundResult(Long orderId, RefundResult result) {
+        if (result == RefundResult.DEFINITE_FAILED) {
+            throw new BusinessException("退款确定失败：微信明确拒绝，支付记录已回退，请稍后重试");
+        }
+        if (result == RefundResult.UNKNOWN) {
+            log.warn("退款结果未知, 等待退款回调或对账确认, orderId={}", orderId);
+        }
     }
 
     @Override
@@ -797,7 +840,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public OrderVO getAdminOrderById(Long orderId) {
-        return getOrderVO(orderId, null);
+        return buildOrderVO(orderMapper.selectById(orderId), null, null);
     }
 
     @Override
@@ -879,12 +922,15 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private OrderVO getOrderVO(Long orderId, Long userId) {
-        Order order = orderMapper.selectById(orderId);
+        return buildOrderVO(orderMapper.selectById(orderId), userId, null);
+    }
+
+    private OrderVO buildOrderVO(Order order, Long userId, Map<Long, PaymentRecord> latestPayments) {
         Address address = addressMapper.selectById(order.getAddressId());
         Logistics logistics = logisticsMapper.selectById(order.getLogisticsId());
 
         LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
-        itemWrapper.eq(OrderItem::getOrderId, orderId);
+        itemWrapper.eq(OrderItem::getOrderId, order.getId());
         List<OrderItem> items = orderItemMapper.selectList(itemWrapper);
 
         OrderVO vo = new OrderVO();
@@ -912,15 +958,34 @@ public class OrderServiceImpl implements OrderService {
         vo.setItems(items.stream().map(item -> toOrderItemVO(item, userId == null)).toList());
 
         // 微信确认收货组件所需参数(商户单号=订单号; 交易单号支付成功后回填)
-        PaymentRecord payRecord = paymentRecordMapper.selectOne(new LambdaQueryWrapper<PaymentRecord>()
-                .eq(PaymentRecord::getOrderId, orderId)
-                .orderByDesc(PaymentRecord::getCreateTime)
-                .last("LIMIT 1"));
+        PaymentRecord payRecord = latestPayments != null
+                ? latestPayments.get(order.getId())
+                : paymentRecordMapper.selectOne(new LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getOrderId, order.getId())
+                        .orderByDesc(PaymentRecord::getCreateTime)
+                        .orderByDesc(PaymentRecord::getId)
+                        .last("LIMIT 1"));
         vo.setMerchantId(mchId);
         vo.setMerchantTradeNo(payRecord != null ? payRecord.getOutTradeNo() : null);
         vo.setTransactionId(payRecord != null ? payRecord.getTransactionId() : null);
+        vo.setPaymentStatus(payRecord != null ? payRecord.getStatus() : null);
+        vo.setPaymentStatusText(getPaymentStatusText(payRecord));
 
         return vo;
+    }
+
+    private String getPaymentStatusText(PaymentRecord record) {
+        if (record == null) {
+            return "未支付";
+        }
+        return switch (record.getStatus()) {
+            case PaymentRecord.STATUS_PENDING -> "待支付";
+            case PaymentRecord.STATUS_PAID -> "已支付";
+            case PaymentRecord.STATUS_CLOSED -> "已关闭";
+            case PaymentRecord.STATUS_REFUNDED -> "已退款";
+            case PaymentRecord.STATUS_REFUNDING -> "退款中";
+            default -> "未知";
+        };
     }
 
     private OrderItemVO toOrderItemVO(OrderItem item, boolean includePricingSnapshot) {

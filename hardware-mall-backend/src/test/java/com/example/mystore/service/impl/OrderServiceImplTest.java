@@ -21,6 +21,7 @@ import com.example.mystore.service.CartService;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.PriceService;
 import com.example.mystore.service.PricingRuleService;
+import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
@@ -551,6 +552,70 @@ class OrderServiceImplTest {
 
         assertThat(result.getRecords()).isEmpty();
         verify(orderMapper).selectPage(any(), any());
+    }
+
+    @Test
+    void getAdminOrderPage_batchLoadsLatestPaymentStatus() {
+        Order cancelled = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        Order shipped = orderWithStatus(2L, StatusConstants.ORDER_SHIPPED);
+        Order cancelledWithoutPayment = orderWithStatus(3L, StatusConstants.ORDER_CANCELLED);
+        Page<Order> orderPage = new Page<>(1, 20, 3);
+        orderPage.setRecords(List.of(cancelled, shipped, cancelledWithoutPayment));
+
+        when(orderMapper.selectPage(any(), any())).thenReturn(orderPage);
+        when(addressMapper.selectById(any())).thenReturn(address);
+        when(logisticsMapper.selectById(any())).thenReturn(logistics);
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        PaymentRecord latestPaid = paymentRecord(1L, PaymentRecord.STATUS_PAID);
+        PaymentRecord olderRefunded = paymentRecord(1L, PaymentRecord.STATUS_REFUNDED);
+        PaymentRecord refunded = paymentRecord(2L, PaymentRecord.STATUS_REFUNDED);
+        when(paymentRecordMapper.selectList(any())).thenReturn(List.of(latestPaid, olderRefunded, refunded));
+
+        Page<OrderVO> result = orderService.getAdminOrderPage(null, null, null, null, null, 1, 20);
+
+        assertThat(result.getRecords()).extracting(OrderVO::getPaymentStatus)
+                .containsExactly(PaymentRecord.STATUS_PAID, PaymentRecord.STATUS_REFUNDED, null);
+        assertThat(result.getRecords()).extracting(OrderVO::getPaymentStatusText)
+                .containsExactly("已支付", "已退款", "未支付");
+        verify(paymentRecordMapper, times(1)).selectList(any());
+        verify(paymentRecordMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void getAdminOrderById_exposesPaymentStatus() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(paymentRecordMapper.selectOne(any())).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+
+        OrderVO vo = orderService.getAdminOrderById(1L);
+
+        assertThat(vo.getPaymentStatus()).isEqualTo(PaymentRecord.STATUS_PAID);
+        assertThat(vo.getPaymentStatusText()).isEqualTo("已支付");
+    }
+
+    private Order orderWithStatus(Long id, int status) {
+        Order order = new Order();
+        order.setId(id);
+        order.setUserId(2L);
+        order.setOrderNo("SO" + id);
+        order.setStatus(status);
+        order.setAddressId(1L);
+        order.setLogisticsId(1L);
+        return order;
+    }
+
+    private PaymentRecord paymentRecord(Long orderId, int status) {
+        PaymentRecord record = new PaymentRecord();
+        record.setOrderId(orderId);
+        record.setStatus(status);
+        record.setAmount(new BigDecimal("100.00"));
+        record.setOutTradeNo("OUT_" + orderId);
+        record.setCreateTime(LocalDateTime.now());
+        return record;
     }
 
     private CreateOrderRequest stubValidRequest() {
@@ -1410,6 +1475,118 @@ class OrderServiceImplTest {
         // (CAS in-list 是否含 8 的并发防护属 DB 层, 由 Testcontainers 并发测试兜底, mock 无法观测)
         verify(orderMapper).update(isNull(), any());
         verify(payService).refund(1L, "同意退款");
+    }
+
+    // ==================== 已取消订单重试退款 ====================
+
+    @Test
+    void refundOrder_cancelledAndPaid_retriesRefundWithoutChangingOrderStatus() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+        when(payService.refund(1L, "管理员重试退款")).thenReturn(RefundResult.ACCEPTED);
+
+        orderService.refundOrder(1L, "管理员重试退款");
+
+        verify(orderMapper, never()).update(any(), any());
+        verify(payService).refund(1L, "管理员重试退款");
+    }
+
+    @Test
+    void refundOrder_cancelledButUnpaid_rejectsWithoutRefund() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PENDING));
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "管理员重试退款"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不是已支付");
+
+        verify(payService, never()).refund(any(), any());
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_cancelledWithoutPaymentRecord_rejectsWithoutRefund() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(payService.queryByOrderId(1L)).thenReturn(null);
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "管理员重试退款"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不是已支付");
+
+        verify(payService, never()).refund(any(), any());
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_cancelledPaymentDefiniteFailure_returnsClearErrorAndKeepsOrderStatus() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+        when(payService.refund(1L, "管理员重试退款")).thenReturn(RefundResult.DEFINITE_FAILED);
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "管理员重试退款"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("退款确定失败");
+
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_cancelledPaymentResultUnknown_returnsNormally() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+        when(payService.refund(1L, "管理员重试退款")).thenReturn(RefundResult.UNKNOWN);
+
+        orderService.refundOrder(1L, "管理员重试退款");
+
+        verify(payService).refund(1L, "管理员重试退款");
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_activePaymentDefiniteFailure_returnsClearError() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_SHIPPED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        when(payService.refund(1L, "质量问题")).thenReturn(RefundResult.DEFINITE_FAILED);
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "质量问题"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("退款确定失败");
+    }
+
+    @Test
+    void refundOrder_activePaymentResultUnknown_returnsNormally() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_SHIPPED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        when(payService.refund(1L, "质量问题")).thenReturn(RefundResult.UNKNOWN);
+
+        orderService.refundOrder(1L, "质量问题");
+
+        verify(payService).refund(1L, "质量问题");
+    }
+
+    @Test
+    void refundOrder_legacyStatuses_keepCasRefundChain() {
+        for (int status : new int[]{
+                StatusConstants.ORDER_PENDING_SHIPMENT,
+                StatusConstants.ORDER_SHIPPED,
+                StatusConstants.ORDER_REFUND_REQUESTED,
+                StatusConstants.ORDER_REFUND_FAILED}) {
+            when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, status));
+            when(orderMapper.update(isNull(), any())).thenReturn(1);
+            when(payService.refund(1L, "质量问题")).thenReturn(RefundResult.ACCEPTED);
+
+            orderService.refundOrder(1L, "质量问题");
+        }
+
+        verify(orderMapper, times(4)).update(isNull(), any());
+        verify(payService, times(4)).refund(1L, "质量问题");
     }
 
     // ==================== rejectRefund 管理员拒绝退款申请 ====================

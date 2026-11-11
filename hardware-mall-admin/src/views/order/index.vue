@@ -109,6 +109,17 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="支付状态" width="100">
+          <template #default="{ row }">
+            <el-tag
+              :type="getPaymentStatusType(row.paymentStatus)"
+              size="small"
+              effect="plain"
+            >
+              {{ row.paymentStatusText }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="createTime" label="下单时间" width="160">
           <template #default="{ row }">
             <span class="time">{{ row.createTime }}</span>
@@ -152,7 +163,8 @@
             <el-button 
               link 
               type="warning" 
-              v-if="row.status === ORDER_STATUS.REFUND_FAILED" 
+              v-if="row.status === ORDER_STATUS.REFUND_FAILED
+                || (row.status === ORDER_STATUS.CANCELLED && row.paymentStatus === PAYMENT_STATUS.PAID)" 
               @click="handleRetryRefund(row)"
             >
               重试退款
@@ -187,6 +199,11 @@
         <el-descriptions-item label="订单状态">
           <el-tag :type="getStatusType(currentOrder.status)" size="small" effect="light">
             {{ currentOrder.statusText }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="支付状态">
+          <el-tag :type="getPaymentStatusType(currentOrder.paymentStatus)" size="small" effect="light">
+            {{ currentOrder.paymentStatusText }}
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="收货人">{{ currentOrder.receiverName }}</el-descriptions-item>
@@ -278,7 +295,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { getOrderList, shipOrder, refundOrder, rejectRefund, getOrderStats } from '@/api/admin/order'
 import { getLogisticsList } from '@/api/admin/logistics'
-import { ORDER_STATUS, ORDER_STATUS_TYPE, DELIVERY_TYPE } from '@/constants/status'
+import { ORDER_STATUS, ORDER_STATUS_TYPE, DELIVERY_TYPE, PAYMENT_STATUS, PAYMENT_STATUS_TYPE } from '@/constants/status'
 
 const route = useRoute()
 const router = useRouter()
@@ -317,6 +334,11 @@ const shipRules = {
 const getStatusType = (status: number | null | undefined): string => {
   if (status == null) return 'info'
   return ORDER_STATUS_TYPE[status] || 'info'
+}
+
+const getPaymentStatusType = (status: number | null | undefined): string => {
+  if (status == null) return 'info'
+  return PAYMENT_STATUS_TYPE[status] || 'info'
 }
 
 const loadData = async () => {
@@ -450,7 +472,7 @@ const handleRetryRefund = async (row: any) => {
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )
     await refundOrder(row.id, '管理员重试退款')
-    ElMessage.success('退款已重新受理, 等待微信原路退回')
+    ElMessage.success('退款请求已受理, 最终结果以微信回调或对账为准')
     loadOrderStats()
     loadData()
   } catch {

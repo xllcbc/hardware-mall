@@ -1,5 +1,8 @@
 import request from '@/utils/request'
 
+/** 退款需等待微信受理结果, 默认 10s 会先于后端三态返回超时 */
+const REFUND_REQUEST_TIMEOUT_MS = 30000
+
 export interface OrderItem {
   id: number
   orderId: number
@@ -27,6 +30,8 @@ export interface Order {
   payAmount: number
   status: number
   statusText?: string
+  paymentStatus?: number
+  paymentStatusText?: string
   logisticsName?: string
   logisticsNo?: string
   deliveryType?: number
@@ -71,7 +76,7 @@ export const shipOrder = (id: number, payload: ShipOrderPayload) => {
 }
 
 export const refundOrder = (id: number, reason: string) => {
-  return request.put(`/admin/order/${id}/refund`, { reason })
+  return request.put(`/admin/order/${id}/refund`, { reason }, { timeout: REFUND_REQUEST_TIMEOUT_MS })
 }
 
 export const rejectRefund = (id: number, reason: string) => {
