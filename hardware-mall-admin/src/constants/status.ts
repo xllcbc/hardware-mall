@@ -40,6 +40,23 @@ export const ORDER_STATUS_TYPE: Record<number, string> = {
   [ORDER_STATUS.REFUND_FAILED]: 'danger',      // 红色
 }
 
+// ==================== 支付状态(最新支付记录) ====================
+export const PAYMENT_STATUS = {
+  PENDING: 0,    // 待支付
+  PAID: 1,       // 已支付
+  CLOSED: 2,     // 已关闭
+  REFUNDED: 3,   // 已退款
+  REFUNDING: 4,  // 退款中
+} as const
+
+export const PAYMENT_STATUS_TYPE: Record<number, string> = {
+  [PAYMENT_STATUS.PENDING]: 'info',
+  [PAYMENT_STATUS.PAID]: 'success',
+  [PAYMENT_STATUS.CLOSED]: 'info',
+  [PAYMENT_STATUS.REFUNDED]: 'info',
+  [PAYMENT_STATUS.REFUNDING]: 'warning',
+}
+
 // ==================== 发货方式(对齐微信 logistics_type) ====================
 export const DELIVERY_TYPE = {
   LOCAL: 2,    // 同城配送

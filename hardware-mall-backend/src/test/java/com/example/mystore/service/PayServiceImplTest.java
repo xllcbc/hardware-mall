@@ -267,6 +267,12 @@ class PayServiceImplTest {
 
         assertThat(result).containsEntry("code", "SUCCESS");
         assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(10);
+        // 退款成功只更新支付记录, 订单保持已取消
+        assertThat(paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getOutTradeNo, outTradeNo)).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDED);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_CANCELLED);
     }
 
     @Test
