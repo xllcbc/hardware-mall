@@ -8,6 +8,7 @@ import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.User;
+import com.example.mystore.event.LatePaymentRefundEvent;
 import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.mapper.PaymentRecordMapper;
@@ -15,10 +16,13 @@ import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.impl.DingTalkAlertService;
 import com.example.mystore.service.impl.PayServiceImpl;
-import com.wechat.pay.java.core.Config;
+import com.wechat.pay.java.core.exception.ServiceException;
 import com.wechat.pay.java.core.notification.NotificationParser;
 import com.wechat.pay.java.core.notification.RequestParam;
+import com.wechat.pay.java.service.payments.model.Transaction;
+import com.wechat.pay.java.service.refund.model.Refund;
 import com.wechat.pay.java.service.refund.model.RefundNotification;
+import com.wechat.pay.java.service.refund.model.Status;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +30,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,23 +42,23 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest
 @org.junit.jupiter.api.Tag("h2")
 @ActiveProfiles("test")
 @Transactional
+@RecordApplicationEvents
 @Sql(scripts = "/db/schema-test.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
 class PayServiceImplTest {
 
-    @MockBean Config wechatPayConfig;
+    @MockBean WechatPayGateway wechatPayGateway;
     @MockBean NotificationParser notificationParser;
     @MockBean DingTalkAlertService dingTalkAlertService;
 
@@ -132,29 +138,21 @@ class PayServiceImplTest {
     }
 
     @Test
-    void shouldTriggerAutoRefund_whenOrderCancelled() {
-        doNothing().when(payService).refund(anyLong(), anyString());
-
+    void shouldPublishLatePaymentRefundEvent_whenOrderCancelled(ApplicationEvents events) {
         Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
         setupPaymentRecord(orderId, PaymentRecord.STATUS_PENDING, "OUT_003");
 
         boolean result = payService.processPaymentSuccess("OUT_003", "TXN_ID");
 
         assertThat(result).isTrue();
-        verify(payService).refund(eq(orderId), anyString());
-    }
-
-    @Test
-    void shouldAlert_whenAutoRefundFails() {
-        doThrow(new RuntimeException("退款失败")).when(payService).refund(anyLong(), anyString());
-
-        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
-        setupPaymentRecord(orderId, PaymentRecord.STATUS_PENDING, "OUT_004");
-
-        boolean result = payService.processPaymentSuccess("OUT_004", "TXN_ID");
-
-        assertThat(result).isTrue();
-        verify(dingTalkAlertService).alert(eq("AUTO_REFUND_FAIL"), anyString());
+        assertThat(events.stream(LatePaymentRefundEvent.class))
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.orderId()).isEqualTo(orderId);
+                    assertThat(event.outTradeNo()).isEqualTo("OUT_003");
+                });
+        // 支付事务内不得外呼微信退款
+        verify(wechatPayGateway, never()).createRefund(anyString(), anyString(), any(), anyString());
     }
 
     // ==================== refundCallback ====================
@@ -225,7 +223,7 @@ class PayServiceImplTest {
         Map<String, String> result = payService.refundCallback("body", "sig", "nonce", "ts", "serial");
 
         assertThat(result).containsEntry("code", "SUCCESS");
-        verify(dingTalkAlertService).alert(eq("REFUND_ROLLBACK"), anyString());
+        verify(dingTalkAlertService).alert(eq("REFUND_DEFINITE_FAILED"), eq(orderId), anyString());
 
         PaymentRecord pr = paymentRecordMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PaymentRecord>()
@@ -269,6 +267,12 @@ class PayServiceImplTest {
 
         assertThat(result).containsEntry("code", "SUCCESS");
         assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(10);
+        // 退款成功只更新支付记录, 订单保持已取消
+        assertThat(paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getOutTradeNo, outTradeNo)).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDED);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_CANCELLED);
     }
 
     @Test
@@ -295,21 +299,407 @@ class PayServiceImplTest {
         assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(13);
     }
 
-    // ==================== refund claim-first ====================
+    // ==================== refund 三态 ====================
 
     @Test
-    void refund_shouldStayRefunding_whenWechatCallFails() {
-        // claim-first: CAS PAID→REFUNDING 在外呼之前; 外呼抛异常也应停留 REFUNDING 且不向上抛
-        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_SHIPMENT);
+    void refund_shouldReturnUnknownAndStayRefunding_whenWechatCallTimesOut() {
+        // claim-first: CAS PAID→REFUNDING 在外呼之前; 超时/响应丢失不能判定结果, 保持退款中
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
         setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
 
-        // wechatPayConfig 为 @MockBean: SDK 外呼必然抛异常, 模拟超时/响应丢失
-        payService.refund(orderId, "测试退款");
+        // 假网关模拟超时/响应丢失
+        doThrow(new RuntimeException("timeout")).when(wechatPayGateway)
+                .createRefund(anyString(), anyString(), any(), anyString());
 
+        RefundResult result = payService.refund(orderId, "测试退款");
+
+        assertThat(result).isEqualTo(RefundResult.UNKNOWN);
         PaymentRecord pr = paymentRecordMapper.selectOne(
                 new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
         assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
-        verify(dingTalkAlertService).alert(eq("REFUND_FAIL"), anyString());
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_REFUNDING);
+        verify(dingTalkAlertService).alert(eq("REFUND_RESULT_UNKNOWN"), eq(orderId), anyString());
+    }
+
+    @Test
+    void refund_shouldReturnUnknown_whenWechatReturns5xx() {
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        ServiceException serverError = serviceException(500, "SYSTEM_ERROR", "系统错误");
+        doThrow(serverError).when(wechatPayGateway)
+                .createRefund(anyString(), anyString(), any(), anyString());
+
+        RefundResult result = payService.refund(orderId, "测试退款");
+
+        assertThat(result).isEqualTo(RefundResult.UNKNOWN);
+        assertThat(paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId)).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        verify(dingTalkAlertService).alert(eq("REFUND_RESULT_UNKNOWN"), eq(orderId), anyString());
+    }
+
+    // ==================== 微信支付网关接缝 ====================
+
+    @Test
+    void prepay_shouldReturnWechatParams_whenGatewayAccepts() {
+        User user = setupUser("o-test-prepay-ok");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        Map<String, String> params = Map.of(
+                "appId", "wx-test-appid-for-ci",
+                "timeStamp", "1700000000",
+                "nonceStr", "nonce",
+                "packageValue", "prepay_id=wx001",
+                "signType", "RSA",
+                "paySign", "sign");
+        when(wechatPayGateway.prepay(anyString(), any(), eq("o-test-prepay-ok"))).thenReturn(params);
+
+        Map<String, String> result = payService.prepay(user.getId(), orderId);
+
+        assertThat(result).isEqualTo(params);
+        verify(wechatPayGateway).prepay(anyString(), eq(new BigDecimal("100.00")), eq("o-test-prepay-ok"));
+    }
+
+    @Test
+    void refund_shouldReturnAcceptedWithoutAlert_whenGatewayAccepts() {
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+
+        RefundResult result = payService.refund(orderId, "测试退款");
+
+        assertThat(result).isEqualTo(RefundResult.ACCEPTED);
+        PaymentRecord pr = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        verify(wechatPayGateway).createRefund(
+                eq(record.getOutTradeNo()), eq("REFUND_" + record.getOutTradeNo()),
+                eq(new BigDecimal("100.00")), eq("测试退款"));
+        verifyNoInteractions(dingTalkAlertService);
+    }
+
+    @Test
+    void refund_shouldRollbackToFailedOrder_whenGatewayRejectsWith4xx() {
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        ServiceException rejected = serviceException(400, "PARAM_ERROR", "参数错误");
+        doThrow(rejected).when(wechatPayGateway)
+                .createRefund(anyString(), anyString(), any(), anyString());
+
+        RefundResult result = payService.refund(orderId, "测试退款");
+
+        assertThat(result).isEqualTo(RefundResult.DEFINITE_FAILED);
+        PaymentRecord pr = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_PAID);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_REFUND_FAILED);
+        verify(dingTalkAlertService).alert(eq("REFUND_DEFINITE_FAILED"), eq(orderId), anyString());
+    }
+
+    @Test
+    void refund_shouldRollback_whenRequestWasNotSent() {
+        // 本地校验/签名/配置错误: 请求未发出, 属于确定失败
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        doThrow(new IllegalArgumentException("private key invalid")).when(wechatPayGateway)
+                .createRefund(anyString(), anyString(), any(), anyString());
+
+        RefundResult result = payService.refund(orderId, "测试退款");
+
+        assertThat(result).isEqualTo(RefundResult.DEFINITE_FAILED);
+        assertThat(paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId)).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_PAID);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_REFUND_FAILED);
+        verify(dingTalkAlertService).alert(eq("REFUND_DEFINITE_FAILED"), eq(orderId), anyString());
+    }
+
+    @Test
+    void refund_shouldKeepOrderCancelled_whenLatePaymentRefundResultUnknown() {
+        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        doThrow(new RuntimeException("timeout")).when(wechatPayGateway)
+                .createRefund(anyString(), anyString(), any(), anyString());
+
+        RefundResult result = payService.refund(orderId, "迟到支付自动退款");
+
+        assertThat(result).isEqualTo(RefundResult.UNKNOWN);
+        assertThat(paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId)).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_CANCELLED);
+        verify(dingTalkAlertService).alert(eq("REFUND_RESULT_UNKNOWN"), eq(orderId), anyString());
+    }
+
+    @Test
+    void refund_shouldKeepOrderCancelled_whenLatePaymentRefundRejectedWith4xx() {
+        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        ServiceException rejected = serviceException(400, "PARAM_ERROR", "参数错误");
+        doThrow(rejected).when(wechatPayGateway)
+                .createRefund(anyString(), anyString(), any(), anyString());
+
+        RefundResult result = payService.refund(orderId, "迟到支付自动退款");
+
+        assertThat(result).isEqualTo(RefundResult.DEFINITE_FAILED);
+        assertThat(paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId)).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_PAID);
+        // 已取消订单保持 5, 不因退款失败改成 9
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_CANCELLED);
+        verify(dingTalkAlertService).alert(eq("REFUND_DEFINITE_FAILED"), eq(orderId), anyString());
+    }
+
+    // ==================== 退款对账 ====================
+
+    @Test
+    void reconcileRefund_shouldResubmitWithSameRefundNo_whenRefundingRecordHasNoRefundOrder() {
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, uniqueOutTradeNo());
+        doThrow(serviceException(404, "RESOURCE_NOT_EXISTS", "退款单不存在"))
+                .when(wechatPayGateway).queryRefund("REFUND_" + record.getOutTradeNo());
+
+        payService.reconcileRefund(record);
+
+        verify(wechatPayGateway).createRefund(
+                eq(record.getOutTradeNo()), eq("REFUND_" + record.getOutTradeNo()),
+                eq(new BigDecimal("100.00")), anyString());
+        PaymentRecord pr = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_REFUNDING);
+        verify(dingTalkAlertService, never()).alert(eq("REFUND_ROLLBACK"), eq(orderId), anyString());
+    }
+
+    @Test
+    void reconcileRefund_shouldKeepRefundingAndNotResubmit_whenWechatQueryReturns5xx() {
+        // 5xx 无法判定, 不得误判为“无此退款单”而回退或重发
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, uniqueOutTradeNo());
+        doThrow(serviceException(500, "SYSTEM_ERROR", "系统错误"))
+                .when(wechatPayGateway).queryRefund("REFUND_" + record.getOutTradeNo());
+
+        payService.reconcileRefund(record);
+
+        verify(wechatPayGateway, never()).createRefund(anyString(), anyString(), any(), anyString());
+        PaymentRecord pr = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_REFUNDING);
+        verify(dingTalkAlertService).alert(eq("REFUND_RESULT_UNKNOWN"), eq(orderId), anyString());
+    }
+
+    @Test
+    void reconcileRefund_shouldKeepRefunding_when404HasUnexpectedErrorCode() {
+        // 只有 404 + RESOURCE_NOT_EXISTS 才代表“无退款单”; 其他 404 属查询异常, 不得触发补发
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, uniqueOutTradeNo());
+        doThrow(serviceException(404, "NOT_FOUND", "接口不存在"))
+                .when(wechatPayGateway).queryRefund("REFUND_" + record.getOutTradeNo());
+
+        payService.reconcileRefund(record);
+
+        verify(wechatPayGateway, never()).createRefund(anyString(), anyString(), any(), anyString());
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        verify(dingTalkAlertService).alert(eq("REFUND_RESULT_UNKNOWN"), eq(orderId), anyString());
+    }
+
+    @Test
+    void reconcileRefund_shouldKeepRefunding_whenRefundQueryThrowsNetworkError() {
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, uniqueOutTradeNo());
+        doThrow(new RuntimeException("timeout"))
+                .when(wechatPayGateway).queryRefund("REFUND_" + record.getOutTradeNo());
+
+        payService.reconcileRefund(record);
+
+        verify(wechatPayGateway, never()).createRefund(anyString(), anyString(), any(), anyString());
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        verify(dingTalkAlertService).alert(eq("REFUND_RESULT_UNKNOWN"), eq(orderId), anyString());
+    }
+
+    @Test
+    void reconcileRefund_shouldConfirmAndRestoreStock_whenRefundingOrderRefundSucceeds() {
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, uniqueOutTradeNo());
+        Long skuId = setupSku(10);
+        setupOrderItem(orderId, skuId, 3);
+        when(wechatPayGateway.queryRefund("REFUND_" + record.getOutTradeNo()))
+                .thenReturn(refundWithStatus(Status.SUCCESS));
+
+        payService.reconcileRefund(record);
+
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDED);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_REFUNDED);
+        assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(13);
+    }
+
+    @Test
+    void reconcileRefund_shouldRollbackOrderToFailed_whenRefundExplicitlyClosed() {
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, uniqueOutTradeNo());
+        when(wechatPayGateway.queryRefund("REFUND_" + record.getOutTradeNo()))
+                .thenReturn(refundWithStatus(Status.CLOSED));
+
+        payService.reconcileRefund(record);
+
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_PAID);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_REFUND_FAILED);
+        verify(dingTalkAlertService).alert(eq("REFUND_ROLLBACK"), eq(orderId), anyString());
+    }
+
+    @Test
+    void reconcileRefund_shouldMarkRefundedWithoutRestoringStock_whenCancelledOrderRefundSucceeds() {
+        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, uniqueOutTradeNo());
+        Long skuId = setupSku(10);
+        setupOrderItem(orderId, skuId, 3);
+        when(wechatPayGateway.queryRefund("REFUND_" + record.getOutTradeNo()))
+                .thenReturn(refundWithStatus(Status.SUCCESS));
+
+        payService.reconcileRefund(record);
+
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDED);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_CANCELLED);
+        assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(10);
+    }
+
+    @Test
+    void reconcileRefund_shouldResubmitAndKeepOrderCancelled_whenCancelledOrderHasNoRefundOrder() {
+        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, uniqueOutTradeNo());
+        doThrow(serviceException(404, "RESOURCE_NOT_EXISTS", "退款单不存在"))
+                .when(wechatPayGateway).queryRefund("REFUND_" + record.getOutTradeNo());
+
+        payService.reconcileRefund(record);
+
+        verify(wechatPayGateway).createRefund(
+                eq(record.getOutTradeNo()), eq("REFUND_" + record.getOutTradeNo()),
+                eq(new BigDecimal("100.00")), anyString());
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_CANCELLED);
+    }
+
+    @Test
+    void reconcileRefund_shouldKeepRefundingAndAlert_whenResubmitResultUnknown() {
+        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, uniqueOutTradeNo());
+        doThrow(serviceException(404, "RESOURCE_NOT_EXISTS", "退款单不存在"))
+                .when(wechatPayGateway).queryRefund("REFUND_" + record.getOutTradeNo());
+        doThrow(new RuntimeException("timeout"))
+                .when(wechatPayGateway).createRefund(anyString(), anyString(), any(), anyString());
+
+        payService.reconcileRefund(record);
+
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        verify(dingTalkAlertService).alert(eq("REFUND_RESULT_UNKNOWN"), eq(orderId), anyString());
+    }
+
+    @Test
+    void reconcileRefund_shouldQueryThenResubmit_whenPaidCancelledOrderHasNoRefundOrder() {
+        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        doThrow(serviceException(404, "RESOURCE_NOT_EXISTS", "退款单不存在"))
+                .when(wechatPayGateway).queryRefund("REFUND_" + record.getOutTradeNo());
+
+        payService.reconcileRefund(record);
+
+        verify(wechatPayGateway).createRefund(
+                eq(record.getOutTradeNo()), eq("REFUND_" + record.getOutTradeNo()),
+                eq(new BigDecimal("100.00")), anyString());
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_CANCELLED);
+    }
+
+    @Test
+    void reconcileRefund_shouldKeepPaidAndAlert_whenPaidCancelledOrderQueryReturns5xx() {
+        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        doThrow(serviceException(500, "SYSTEM_ERROR", "系统错误"))
+                .when(wechatPayGateway).queryRefund("REFUND_" + record.getOutTradeNo());
+
+        payService.reconcileRefund(record);
+
+        verify(wechatPayGateway, never()).createRefund(anyString(), anyString(), any(), anyString());
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_PAID);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_CANCELLED);
+        verify(dingTalkAlertService).alert(eq("REFUND_RESULT_UNKNOWN"), eq(orderId), anyString());
+    }
+
+    @Test
+    void reconcileRefund_shouldMarkRefunded_whenPaidCancelledOrderRefundAlreadySucceeded() {
+        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        Long skuId = setupSku(10);
+        setupOrderItem(orderId, skuId, 3);
+        when(wechatPayGateway.queryRefund("REFUND_" + record.getOutTradeNo()))
+                .thenReturn(refundWithStatus(Status.SUCCESS));
+
+        payService.reconcileRefund(record);
+
+        PaymentRecord updated = paymentRecordMapper.selectById(record.getId());
+        assertThat(updated.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDED);
+        assertThat(updated.getRefundAmount()).isEqualByComparingTo("100.00");
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_CANCELLED);
+        assertThat(skuMapper.selectById(skuId).getStock()).isEqualTo(10);
+    }
+
+    @Test
+    void reconcileRefund_shouldKeepPaidAndAlertDefiniteFailure_whenPaidCancelledOrderRefundClosed() {
+        // 已支付+已取消没有退款中状态可回退, 不得宣称“已回退”
+        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        when(wechatPayGateway.queryRefund("REFUND_" + record.getOutTradeNo()))
+                .thenReturn(refundWithStatus(Status.CLOSED));
+
+        payService.reconcileRefund(record);
+
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_PAID);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_CANCELLED);
+        verify(dingTalkAlertService).alert(eq("REFUND_DEFINITE_FAILED"), eq(orderId), anyString());
+        verify(dingTalkAlertService, never()).alert(eq("REFUND_ROLLBACK"), eq(orderId), anyString());
+    }
+
+    @Test
+    void reconcileRefund_shouldClaimRefunding_whenPaidCancelledOrderRefundIsProcessing() {
+        Long orderId = setupOrder(StatusConstants.ORDER_CANCELLED);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        when(wechatPayGateway.queryRefund("REFUND_" + record.getOutTradeNo()))
+                .thenReturn(refundWithStatus(Status.PROCESSING));
+
+        payService.reconcileRefund(record);
+
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_CANCELLED);
+    }
+
+    @Test
+    void reconcileRefund_shouldIgnorePaidRecord_whenOrderNotCancelled() {
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_SHIPMENT);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+
+        payService.reconcileRefund(record);
+
+        verifyNoInteractions(wechatPayGateway);
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus())
+                .isEqualTo(PaymentRecord.STATUS_PAID);
+    }
+
+    @Test
+    void queryWechatOrder_shouldDelegateToGateway() {
+        Transaction txn = new Transaction();
+        when(wechatPayGateway.queryOrder("OUT_QUERY")).thenReturn(txn);
+
+        assertThat(payService.queryWechatOrder("OUT_QUERY")).isSameAs(txn);
     }
 
     // ==================== M7 事务分段 ====================
@@ -330,14 +720,13 @@ class PayServiceImplTest {
     void prepay_shouldMarkClosed_whenWechatPrepayFails() {
         // M7: HTTP 失败后, 本次新建的 PENDING 记录必须真的落库为 CLOSED
         // （旧实现写在外层 @Transactional 事务内, 随 rethrow 被整体回滚, 是死代码）
-        User user = new User();
-        user.setOpenid("o-test-prepay");
-        user.setRole(1);
-        user.setStatus(1);
-        userMapper.insert(user);
+        User user = setupUser("o-test-prepay");
         Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
 
-        // wechatPayConfig 为 @MockBean: SDK 构建服务/发起调用时必然抛异常, 模拟微信下单失败
+        // 假网关模拟微信下单失败
+        when(wechatPayGateway.prepay(anyString(), any(), anyString()))
+                .thenThrow(new RuntimeException("prepay failed"));
+
         assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("创建支付订单失败");
@@ -348,7 +737,124 @@ class PayServiceImplTest {
         assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_CLOSED);
     }
 
+    // ==================== prepay 失败后复用支付记录 ====================
+
+    @Test
+    void prepay_shouldReuseClosedRecord_whenRetryAfterPrepayFailure() {
+        // 首次 prepay 失败留下一条 CLOSED; 再次支付必须复用同一行, 不能新插撞 uk_out_trade_no
+        User user = setupUser("o-test-prepay-retry");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        PaymentRecord closed = setupPaymentRecord(
+                orderId, PaymentRecord.STATUS_CLOSED, orderNoOf(orderId));
+
+        when(wechatPayGateway.prepay(anyString(), any(), anyString()))
+                .thenThrow(new RuntimeException("prepay failed"));
+
+        assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("创建支付订单失败");
+
+        java.util.List<PaymentRecord> records = paymentRecordMapper.selectList(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).getId()).isEqualTo(closed.getId());
+        assertThat(records.get(0).getStatus()).isEqualTo(PaymentRecord.STATUS_CLOSED);
+    }
+
+    @Test
+    void prepay_shouldReusePendingRecord_whenRetry() {
+        User user = setupUser("o-test-prepay-pending");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        PaymentRecord pending = setupPaymentRecord(
+                orderId, PaymentRecord.STATUS_PENDING, orderNoOf(orderId));
+
+        when(wechatPayGateway.prepay(anyString(), any(), anyString()))
+                .thenThrow(new RuntimeException("prepay failed"));
+
+        assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("创建支付订单失败");
+
+        java.util.List<PaymentRecord> records = paymentRecordMapper.selectList(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).getId()).isEqualTo(pending.getId());
+        assertThat(records.get(0).getStatus()).isEqualTo(PaymentRecord.STATUS_PENDING);
+    }
+
+    @Test
+    void prepay_shouldReject_whenRecordIsPaid() {
+        User user = setupUser("o-test-prepay-paid");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        PaymentRecord paid = setupPaymentRecord(
+                orderId, PaymentRecord.STATUS_PAID, orderNoOf(orderId));
+
+        assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已支付");
+
+        PaymentRecord pr = paymentRecordMapper.selectById(paid.getId());
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_PAID);
+    }
+
+    @Test
+    void prepay_shouldReject_whenRecordIsRefunding() {
+        User user = setupUser("o-test-prepay-refunding");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        PaymentRecord refunding = setupPaymentRecord(
+                orderId, PaymentRecord.STATUS_REFUNDING, orderNoOf(orderId));
+
+        assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("退款中");
+
+        PaymentRecord pr = paymentRecordMapper.selectById(refunding.getId());
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
+    }
+
+    @Test
+    void prepay_shouldReject_whenRecordIsRefunded() {
+        User user = setupUser("o-test-prepay-refunded");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        PaymentRecord refunded = setupPaymentRecord(
+                orderId, PaymentRecord.STATUS_REFUNDED, orderNoOf(orderId));
+
+        assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已退款");
+
+        PaymentRecord pr = paymentRecordMapper.selectById(refunded.getId());
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDED);
+    }
+
     // ==================== helper ====================
+
+    private static Refund refundWithStatus(Status status) {
+        Refund refund = new Refund();
+        refund.setStatus(status);
+        return refund;
+    }
+
+    private static ServiceException serviceException(int httpStatusCode, String errorCode, String errorMessage) {
+        ServiceException e = org.mockito.Mockito.mock(ServiceException.class);
+        when(e.getHttpStatusCode()).thenReturn(httpStatusCode);
+        when(e.getErrorCode()).thenReturn(errorCode);
+        when(e.getErrorMessage()).thenReturn(errorMessage);
+        return e;
+    }
+
+    private User setupUser(String openid) {
+        User user = new User();
+        user.setOpenid(openid);
+        user.setRole(1);
+        user.setStatus(1);
+        userMapper.insert(user);
+        return user;
+    }
+
+    private String orderNoOf(Long orderId) {
+        return orderMapper.selectById(orderId).getOrderNo();
+    }
 
     private Long setupSku(int stock) {        Sku sku = new Sku();
         sku.setSpuId(1L);

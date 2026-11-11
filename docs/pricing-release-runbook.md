@@ -8,7 +8,9 @@
 ```text
 hardware-mall-backend/src/main/resources/db/migration_2026-11-02_multi_level_pricing_release.sql
 hardware-mall-backend/src/main/resources/db/migration_2026-11-09_level_category_rate.sql
+hardware-mall-backend/src/main/resources/db/migration_2026-11-11_order_idempotency.sql
 hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql
+hardware-mall-backend/src/main/resources/db/order_idempotency_verify.sql
 scripts/pricing-release.sh
 scripts/release/smoke.sh
 docs/release/pricing-release-evidence.md
@@ -82,14 +84,19 @@ MySQL 8，然后依次执行：
 
 `preflight` 会创建 `hardware_mall_pricing_preflight`，恢复备份，再按当前 schema
 执行完整迁移：原始 schema 连续执行两个迁移文件，2026-11-02 schema 只执行
-`level_category_rate` 命名迁移。
+`level_category_rate` 命名迁移。随后在临时库执行
+`migration_2026-11-11_order_idempotency.sql` 创建 `order_idempotency` 表。
 成功条件：
 
 - 脚本退出码为 0；
 - 迁移没有输出 `legacy wholesale pricing fields detected`；
-- `verify` 的最终输出为 `PASS: pricing release schema`；
+- `verify` 的最终输出为 `PASS: pricing release schema` 和
+  `PASS: order idempotency schema`；
 - 迁移前后用户、分类、SPU、SKU 和订单行数一致；
 - `level_category_rate` 行数为 0。
+
+下单幂等表必须先迁移、后启动新应用。旧应用不引用新表；应用回滚时不需要删表。
+若 `order_idempotency` 已存在，脚本只执行只读 verify，不重复建表。
 
 如果预检失败，停止发布。不得通过删除旧列、跳过预检或修改脚本来继续。
 
@@ -184,9 +191,14 @@ RELEASE_ADMIN_BASE=http://127.0.0.1 \
 mysql --protocol=TCP --default-character-set=utf8mb4 \
   -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USERNAME" "$DB_NAME" \
   < hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql
+
+mysql --protocol=TCP --default-character-set=utf8mb4 \
+  -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USERNAME" "$DB_NAME" \
+  < hardware-mall-backend/src/main/resources/db/order_idempotency_verify.sql
 ```
 
-必须看到 `PASS: pricing release schema`。任何 `SIGNAL` 错误都表示发布未通过。
+必须同时看到 `PASS: pricing release schema` 和 `PASS: order idempotency schema`。
+任何 `SIGNAL` 错误都表示发布未通过。
 
 刚执行完 2026-11-09 重命名迁移时，还要强制验证新倍率矩阵为空：
 

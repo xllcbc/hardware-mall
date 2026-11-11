@@ -7,8 +7,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
-import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.exception.BusinessException;
+import com.example.mystore.common.exception.IdempotencyConflictException;
 import com.example.mystore.common.exception.PriceChangedException;
 import com.example.mystore.entity.db.*;
 import com.example.mystore.entity.dto.CheckoutPreviewRequest;
@@ -18,9 +18,12 @@ import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
+import com.example.mystore.service.OrderIdempotencyService;
+import com.example.mystore.service.OrderIdempotencyService.ClaimOutcome;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.PriceService;
 import com.example.mystore.service.PricingRuleService;
+import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
@@ -47,7 +50,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -95,6 +97,8 @@ class OrderServiceImplTest {
     private PricingRuleService pricingRuleService;
     @Mock
     private UserLevelService userLevelService;
+    @Mock
+    private OrderIdempotencyService orderIdempotencyService;
 
     @Spy
     private PriceService priceService = new PriceServiceImpl();
@@ -153,12 +157,14 @@ class OrderServiceImplTest {
                 .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
         lenient().when(pricingRuleService.resolveRetailLevelId()).thenReturn(1L);
         lenient().when(userLevelService.getName(any())).thenReturn("零售");
+        lenient().when(orderIdempotencyService.claim(anyLong(), anyString(), anyString()))
+                .thenReturn(new ClaimOutcome(
+                        ClaimOutcome.Kind.ACQUIRED, 10L, "owner-token", null, true));
     }
 
     @Test
     void testCreateOrder_AddressNotFound() {
         when(addressMapper.selectById(1L)).thenReturn(null);
-        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
 
         CreateOrderRequest request = new CreateOrderRequest();
         request.setAddressId(1L);
@@ -176,7 +182,6 @@ class OrderServiceImplTest {
         others.setId(1L);
         others.setUserId(99L); // 不属于当前用户
         when(addressMapper.selectById(1L)).thenReturn(others);
-        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
 
         CreateOrderRequest request = new CreateOrderRequest();
         request.setAddressId(1L);
@@ -195,7 +200,6 @@ class OrderServiceImplTest {
         disabled.setId(1L);
         disabled.setStatus(0);
         when(logisticsMapper.selectById(1L)).thenReturn(disabled);
-        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
 
         CreateOrderRequest request = new CreateOrderRequest();
         request.setAddressId(1L);
@@ -212,7 +216,6 @@ class OrderServiceImplTest {
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
         when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
-        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
 
         CreateOrderRequest.CartItem item = new CreateOrderRequest.CartItem();
         item.setSkuId(5L);
@@ -229,40 +232,170 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void createOrder_idempotentKeyReused_shouldThrow() {
-        when(redisUtil.setIfAbsent(eq(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "k1"),
-                any(), eq(RedisConstants.IDEMPOTENCY_TTL), eq(TimeUnit.SECONDS)))
-                .thenReturn(false);
-        // M8: 冲突时读回 value 比对归属 —— 自己的坑才是"重复下单"
-        when(redisUtil.get(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "k1")).thenReturn(2L);
+    void createOrder_succeededSameFingerprint_returnsOriginalOrder() {
+        when(orderIdempotencyService.claim(eq(2L), eq("k1"), anyString()))
+                .thenReturn(new ClaimOutcome(
+                        ClaimOutcome.Kind.SUCCEEDED, 10L, "owner-token", 77L, false));
+        Order existing = new Order();
+        existing.setId(77L);
+        existing.setOrderNo("SO-ORIGINAL");
+        existing.setUserId(2L);
+        existing.setAddressId(1L);
+        existing.setLogisticsId(1L);
+        existing.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+        when(orderMapper.selectById(77L)).thenReturn(existing);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
 
-        assertThatThrownBy(() -> orderService.createOrder(2L, stubValidRequest(), "k1"))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("重复");
+        OrderVO vo = orderService.createOrder(2L, stubValidRequest(), "k1");
 
+        assertThat(vo.getId()).isEqualTo(77L);
+        assertThat(vo.getOrderNo()).isEqualTo("SO-ORIGINAL");
         verify(orderMapper, never()).insert(any(Order.class));
+        verify(skuService, never()).deductStock(anyLong(), anyInt());
+        verify(orderIdempotencyService, never()).markSucceeded(any(), any(), any());
+        verify(orderIdempotencyService, never()).markFailed(any(), any());
     }
 
     @Test
-    void createOrder_idempotentKeyOwnedByOther_rejectsWithoutDelete() {
-        // M8: 坑被其他用户占用 → "请求冲突", 且不得清除(保护真正持有者)
-        when(redisUtil.setIfAbsent(eq(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "k1"),
-                any(), eq(RedisConstants.IDEMPOTENCY_TTL), eq(TimeUnit.SECONDS)))
-                .thenReturn(false);
-        when(redisUtil.get(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "k1")).thenReturn(999L);
+    @SuppressWarnings("unchecked")
+    void createOrder_success_marksRecordSucceededInOrderTransaction() {
+        stubSuccessfulOrderCreation();
+        stubOrderVo(100L);
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(1);
+        CreateOrderRequest request = new CreateOrderRequest();
+        request.setAddressId(1L);
+        request.setLogisticsId(1L);
+        request.setItems(List.of(line));
+        request.setExpectedPayAmount(new BigDecimal("219.00"));
+
+        orderService.createOrder(2L, request, "success-key");
+
+        verify(orderMapper).insert(any(Order.class));
+        verify(orderIdempotencyService).markSucceeded(10L, "owner-token", 100L);
+        verify(orderIdempotencyService).releaseLock(2L, "success-key", "owner-token", true);
+        verify(orderIdempotencyService, never()).markFailed(any(), any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void createOrder_markSucceededFails_marksFailedAndRethrows() {
+        stubSuccessfulOrderCreation();
+        doThrow(new BusinessException("幂等记录状态已变更，请重试"))
+                .when(orderIdempotencyService).markSucceeded(10L, "owner-token", 100L);
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(1);
+        CreateOrderRequest request = new CreateOrderRequest();
+        request.setAddressId(1L);
+        request.setLogisticsId(1L);
+        request.setItems(List.of(line));
+        request.setExpectedPayAmount(new BigDecimal("219.00"));
+
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "fail-key"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("幂等记录状态已变更，请重试");
+
+        verify(orderIdempotencyService).markFailed(10L, "owner-token");
+        verify(orderIdempotencyService).releaseLock(2L, "fail-key", "owner-token", true);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void createOrder_voAssemblyFails_doesNotFailOrReleaseRecord() {
+        stubSuccessfulOrderCreation();
+        when(orderMapper.selectById(100L)).thenReturn(null);
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(1);
+        CreateOrderRequest request = new CreateOrderRequest();
+        request.setAddressId(1L);
+        request.setLogisticsId(1L);
+        request.setItems(List.of(line));
+        request.setExpectedPayAmount(new BigDecimal("219.00"));
+
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "vo-key"))
+                .isInstanceOf(RuntimeException.class);
+
+        verify(orderIdempotencyService).markSucceeded(10L, "owner-token", 100L);
+        verify(orderIdempotencyService, never()).markFailed(any(), any());
+    }
+
+    private void stubSuccessfulOrderCreation() {
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+        when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+        when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+            inv.getArgument(0, Order.class).setId(100L);
+            return 1;
+        });
+    }
+
+    private void stubOrderVo(Long orderId) {
+        when(orderMapper.selectById(orderId)).thenAnswer(inv -> {
+            Order order = new Order();
+            order.setId(orderId);
+            order.setOrderNo("SO" + orderId);
+            order.setUserId(2L);
+            order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+            order.setAddressId(1L);
+            order.setLogisticsId(1L);
+            return order;
+        });
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+    }
+
+    @Test
+    void createOrder_processing_throwsProcessingWithoutInsert() {
+        when(orderIdempotencyService.claim(eq(2L), eq("k1"), anyString()))
+                .thenReturn(new ClaimOutcome(
+                        ClaimOutcome.Kind.PROCESSING, 10L, "other-owner", null, false));
 
         assertThatThrownBy(() -> orderService.createOrder(2L, stubValidRequest(), "k1"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage("请求冲突，请刷新后重试");
+                .hasMessage("订单处理中，请稍后重试");
 
-        verify(redisUtil, never()).delete(anyString());
+        verify(orderMapper, never()).insert(any(Order.class));
+        verify(orderIdempotencyService, never()).markFailed(any(), any());
+    }
+
+    @Test
+    void createOrder_conflictingFingerprint_throwsConflict() {
+        when(orderIdempotencyService.claim(eq(2L), eq("k1"), anyString()))
+                .thenReturn(new ClaimOutcome(
+                        ClaimOutcome.Kind.CONFLICT, 10L, "owner-token", null, false));
+
+        assertThatThrownBy(() -> orderService.createOrder(2L, stubValidRequest(), "k1"))
+                .isInstanceOfSatisfying(IdempotencyConflictException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(IdempotencyConflictException.CODE);
+                    assertThat(e).hasMessage("幂等键已用于其他请求，请刷新后重试");
+                });
+
+        verify(orderMapper, never()).insert(any(Order.class));
+        verify(orderIdempotencyService, never()).markFailed(any(), any());
+    }
+
+    @Test
+    void createOrder_missingIdempotencyKey_rejectedBeforeClaim() {
+        assertThatThrownBy(() -> orderService.createOrder(2L, stubValidRequest(), null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("缺少幂等键，请刷新后重试");
+
+        verifyNoInteractions(orderIdempotencyService);
         verify(orderMapper, never()).insert(any(Order.class));
     }
 
     @Test
     void createOrder_validationFails_releasesIdempotencyKey() {
         // M8: 业务失败(库存不足) = 意图未达成, 必须释放幂等坑, 允许用户立即重试
-        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
         when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
@@ -279,7 +412,9 @@ class OrderServiceImplTest {
         assertThatThrownBy(() -> orderService.createOrder(2L, request, "stock-key"))
                 .hasMessageContaining("库存不足");
 
-        verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "stock-key");
+        verify(orderIdempotencyService).markFailed(10L, "owner-token");
+        verify(orderIdempotencyService).releaseLock(2L, "stock-key", "owner-token", true);
+        verify(orderIdempotencyService, never()).markSucceeded(any(), any(), any());
     }
 
     @Test
@@ -370,8 +505,7 @@ class OrderServiceImplTest {
         try {
             when(pricingRuleService.rateFor(2L, 1L, false))
                     .thenReturn(PricingRateResolution.missing(2L));
-            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
-            when(addressMapper.selectById(1L)).thenReturn(address);
+                when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
             when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
@@ -390,7 +524,8 @@ class OrderServiceImplTest {
 
             verify(orderMapper, never()).insert(any(Order.class));
             verify(skuService, never()).deductStock(anyLong(), anyInt());
-            verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "gap-key");
+            verify(orderIdempotencyService).markFailed(10L, "owner-token");
+            verify(orderIdempotencyService).releaseLock(2L, "gap-key", "owner-token", true);
         } finally {
             UserContext.clear();
         }
@@ -404,8 +539,7 @@ class OrderServiceImplTest {
             spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
             when(pricingRuleService.rateFor(2L, 1L, true))
                     .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
-            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
-            when(addressMapper.selectById(1L)).thenReturn(address);
+                when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
             when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
@@ -455,8 +589,7 @@ class OrderServiceImplTest {
         try {
             when(pricingRuleService.rateFor(2L, 1L, false))
                     .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
-            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
-            when(addressMapper.selectById(1L)).thenReturn(address);
+                when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
             when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
@@ -480,7 +613,8 @@ class OrderServiceImplTest {
                                 .isEqualByComparingTo("350.40");
                     });
 
-            verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "changed-key");
+            verify(orderIdempotencyService).markFailed(10L, "owner-token");
+            verify(orderIdempotencyService).releaseLock(2L, "changed-key", "owner-token", true);
             verify(skuService, never()).deductStock(anyLong(), anyInt());
             verify(orderMapper, never()).insert(any(Order.class));
             verify(cartMapper, never()).update(any(), any());
@@ -492,7 +626,6 @@ class OrderServiceImplTest {
 
     @Test
     void createOrder_stockDeductionFailure_abortsBeforeOrderAndReleasesIdempotencyKey() {
-        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
 
@@ -530,7 +663,8 @@ class OrderServiceImplTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("库存扣减失败");
 
-        verify(redisUtil).delete(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "rollback-key");
+        verify(orderIdempotencyService).markFailed(10L, "owner-token");
+        verify(orderIdempotencyService).releaseLock(2L, "rollback-key", "owner-token", true);
         verify(orderMapper, never()).insert(any(Order.class));
         verify(cartMapper, never()).update(any(), any());
     }
@@ -551,6 +685,70 @@ class OrderServiceImplTest {
 
         assertThat(result.getRecords()).isEmpty();
         verify(orderMapper).selectPage(any(), any());
+    }
+
+    @Test
+    void getAdminOrderPage_batchLoadsLatestPaymentStatus() {
+        Order cancelled = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        Order shipped = orderWithStatus(2L, StatusConstants.ORDER_SHIPPED);
+        Order cancelledWithoutPayment = orderWithStatus(3L, StatusConstants.ORDER_CANCELLED);
+        Page<Order> orderPage = new Page<>(1, 20, 3);
+        orderPage.setRecords(List.of(cancelled, shipped, cancelledWithoutPayment));
+
+        when(orderMapper.selectPage(any(), any())).thenReturn(orderPage);
+        when(addressMapper.selectById(any())).thenReturn(address);
+        when(logisticsMapper.selectById(any())).thenReturn(logistics);
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        PaymentRecord latestPaid = paymentRecord(1L, PaymentRecord.STATUS_PAID);
+        PaymentRecord olderRefunded = paymentRecord(1L, PaymentRecord.STATUS_REFUNDED);
+        PaymentRecord refunded = paymentRecord(2L, PaymentRecord.STATUS_REFUNDED);
+        when(paymentRecordMapper.selectList(any())).thenReturn(List.of(latestPaid, olderRefunded, refunded));
+
+        Page<OrderVO> result = orderService.getAdminOrderPage(null, null, null, null, null, 1, 20);
+
+        assertThat(result.getRecords()).extracting(OrderVO::getPaymentStatus)
+                .containsExactly(PaymentRecord.STATUS_PAID, PaymentRecord.STATUS_REFUNDED, null);
+        assertThat(result.getRecords()).extracting(OrderVO::getPaymentStatusText)
+                .containsExactly("已支付", "已退款", "未支付");
+        verify(paymentRecordMapper, times(1)).selectList(any());
+        verify(paymentRecordMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void getAdminOrderById_exposesPaymentStatus() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(paymentRecordMapper.selectOne(any())).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+
+        OrderVO vo = orderService.getAdminOrderById(1L);
+
+        assertThat(vo.getPaymentStatus()).isEqualTo(PaymentRecord.STATUS_PAID);
+        assertThat(vo.getPaymentStatusText()).isEqualTo("已支付");
+    }
+
+    private Order orderWithStatus(Long id, int status) {
+        Order order = new Order();
+        order.setId(id);
+        order.setUserId(2L);
+        order.setOrderNo("SO" + id);
+        order.setStatus(status);
+        order.setAddressId(1L);
+        order.setLogisticsId(1L);
+        return order;
+    }
+
+    private PaymentRecord paymentRecord(Long orderId, int status) {
+        PaymentRecord record = new PaymentRecord();
+        record.setOrderId(orderId);
+        record.setStatus(status);
+        record.setAmount(new BigDecimal("100.00"));
+        record.setOutTradeNo("OUT_" + orderId);
+        record.setCreateTime(LocalDateTime.now());
+        return record;
     }
 
     private CreateOrderRequest stubValidRequest() {
@@ -756,7 +954,6 @@ class OrderServiceImplTest {
 
     @Test
     void createOrder_spuMissingFromBatch_shouldThrow() {
-        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
         when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
@@ -785,7 +982,6 @@ class OrderServiceImplTest {
     @Test
     @SuppressWarnings("unchecked")
     void createOrder_buildsItemsFromBatchSpuMap() {
-        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
 
@@ -877,7 +1073,6 @@ class OrderServiceImplTest {
     void orderWithoutLevelContextPricesAtRetail() {
         when(pricingRuleService.rateFor(isNull(), eq(1L), eq(false)))
                 .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
-        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
         when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
@@ -926,8 +1121,7 @@ class OrderServiceImplTest {
         try {
             when(pricingRuleService.rateFor(2L, 1L, false))
                     .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
-            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
-            when(addressMapper.selectById(1L)).thenReturn(address);
+                when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
 
             Sku pricedSku = new Sku();
@@ -995,8 +1189,7 @@ class OrderServiceImplTest {
     void retailUser_getsRetailPriceAndSnapshot() {
         UserContext.setLevelId(1L);
         try {
-            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
-            when(addressMapper.selectById(1L)).thenReturn(address);
+                when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
 
             Sku pricedSku = new Sku();
@@ -1104,8 +1297,7 @@ class OrderServiceImplTest {
     void order_usesBatchSkuLookupForDuplicateLines() {
         UserContext.setLevelId(1L);
         try {
-            when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
-            when(addressMapper.selectById(1L)).thenReturn(address);
+                when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
             when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(spu));
@@ -1410,6 +1602,118 @@ class OrderServiceImplTest {
         // (CAS in-list 是否含 8 的并发防护属 DB 层, 由 Testcontainers 并发测试兜底, mock 无法观测)
         verify(orderMapper).update(isNull(), any());
         verify(payService).refund(1L, "同意退款");
+    }
+
+    // ==================== 已取消订单重试退款 ====================
+
+    @Test
+    void refundOrder_cancelledAndPaid_retriesRefundWithoutChangingOrderStatus() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+        when(payService.refund(1L, "管理员重试退款")).thenReturn(RefundResult.ACCEPTED);
+
+        orderService.refundOrder(1L, "管理员重试退款");
+
+        verify(orderMapper, never()).update(any(), any());
+        verify(payService).refund(1L, "管理员重试退款");
+    }
+
+    @Test
+    void refundOrder_cancelledButUnpaid_rejectsWithoutRefund() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PENDING));
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "管理员重试退款"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不是已支付");
+
+        verify(payService, never()).refund(any(), any());
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_cancelledWithoutPaymentRecord_rejectsWithoutRefund() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(payService.queryByOrderId(1L)).thenReturn(null);
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "管理员重试退款"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不是已支付");
+
+        verify(payService, never()).refund(any(), any());
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_cancelledPaymentDefiniteFailure_returnsClearErrorAndKeepsOrderStatus() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+        when(payService.refund(1L, "管理员重试退款")).thenReturn(RefundResult.DEFINITE_FAILED);
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "管理员重试退款"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("退款确定失败");
+
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_cancelledPaymentResultUnknown_returnsNormally() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+        when(payService.refund(1L, "管理员重试退款")).thenReturn(RefundResult.UNKNOWN);
+
+        orderService.refundOrder(1L, "管理员重试退款");
+
+        verify(payService).refund(1L, "管理员重试退款");
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_activePaymentDefiniteFailure_returnsClearError() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_SHIPPED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        when(payService.refund(1L, "质量问题")).thenReturn(RefundResult.DEFINITE_FAILED);
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "质量问题"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("退款确定失败");
+    }
+
+    @Test
+    void refundOrder_activePaymentResultUnknown_returnsNormally() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_SHIPPED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        when(payService.refund(1L, "质量问题")).thenReturn(RefundResult.UNKNOWN);
+
+        orderService.refundOrder(1L, "质量问题");
+
+        verify(payService).refund(1L, "质量问题");
+    }
+
+    @Test
+    void refundOrder_legacyStatuses_keepCasRefundChain() {
+        for (int status : new int[]{
+                StatusConstants.ORDER_PENDING_SHIPMENT,
+                StatusConstants.ORDER_SHIPPED,
+                StatusConstants.ORDER_REFUND_REQUESTED,
+                StatusConstants.ORDER_REFUND_FAILED}) {
+            when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, status));
+            when(orderMapper.update(isNull(), any())).thenReturn(1);
+            when(payService.refund(1L, "质量问题")).thenReturn(RefundResult.ACCEPTED);
+
+            orderService.refundOrder(1L, "质量问题");
+        }
+
+        verify(orderMapper, times(4)).update(isNull(), any());
+        verify(payService, times(4)).refund(1L, "质量问题");
     }
 
     // ==================== rejectRefund 管理员拒绝退款申请 ====================

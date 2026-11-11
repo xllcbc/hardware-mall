@@ -4,7 +4,8 @@ package com.example.mystore.common.constant;
  * 微信协议常量(小程序 API + 消息推送 + 交易组件发货)
  *
  * <p>按域分组: {@link Api} 接口地址 / {@link Event} 消息推送事件 / {@link OrderState} 微信侧订单状态
- * / {@link Fields} JSON 字段名 / {@link Common} 通用固定值 / {@link Alert} 告警类型
+ * / {@link Fields} JSON 字段名 / {@link Common} 通用固定值 / {@link Pay} 微信支付固定值
+ * / {@link Alert} 告警类型
  *
  * <p><b>注意</b>: {@link OrderState} 是微信侧订单状态, 与本地 {@link StatusConstants} 的
  * 订单状态数值相同(如 3/4)但语义完全不同, 禁止混用。
@@ -117,6 +118,42 @@ public final class WechatConstants {
         public static final int ORDER_NUMBER_TYPE_OUT_TRADE_NO = 1;
         /** 物流模式: 统一发货 */
         public static final int DELIVERY_MODE_UNIFIED = 1;
+    }
+
+    /** 微信支付(JSAPI 下单/退款)固定值 */
+    public static final class Pay {
+
+        private Pay() {
+        }
+
+        /** 人民币币种 */
+        public static final String CURRENCY_CNY = "CNY";
+        /** 元 → 分 */
+        public static final int CENTS_PER_YUAN = 100;
+        /** 退款结果通知路径(拼接在 notify-url 后) */
+        public static final String REFUND_NOTIFY_PATH = "/refund";
+        /** 微信支付错误码: 资源不存在(退款单/订单不存在) */
+        public static final String ERROR_RESOURCE_NOT_EXISTS = "RESOURCE_NOT_EXISTS";
+
+        /** 小程序调起支付参数名 */
+        public static final String PARAM_APP_ID = "appId";
+        public static final String PARAM_TIME_STAMP = "timeStamp";
+        public static final String PARAM_NONCE_STR = "nonceStr";
+        public static final String PARAM_PACKAGE = "packageValue";
+        public static final String PARAM_SIGN_TYPE = "signType";
+        public static final String PARAM_PAY_SIGN = "paySign";
+    }
+
+    /** 微信退款单状态(退款查询/退款回调的 status 值) */
+    public static final class RefundStatus {
+
+        private RefundStatus() {
+        }
+
+        public static final String SUCCESS = "SUCCESS";
+        public static final String PROCESSING = "PROCESSING";
+        public static final String CLOSED = "CLOSED";
+        public static final String ABNORMAL = "ABNORMAL";
     }
 
     /** 钉钉告警类型 */

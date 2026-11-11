@@ -14,7 +14,7 @@ import {
 import { prepayOrder } from '@/api/pay'
 import { useCartStore } from '@/stores/cart'
 import { usePreOrderStore } from '@/stores/preOrder'
-import { ApiError, API_CODE_PRICE_CHANGED } from '@/utils/request'
+import { ApiError, API_CODE_IDEMPOTENCY_CONFLICT, API_CODE_PRICE_CHANGED } from '@/utils/request'
 import type { CartItem, CheckoutPreview, Order } from '@/types'
 
 vi.mock('@dcloudio/uni-app', () => ({
@@ -38,6 +38,12 @@ vi.mock('@/api/order', () => ({
 
 vi.mock('@/api/pay', () => ({
   prepayOrder: vi.fn()
+}))
+
+vi.mock('@/api/cart', () => ({
+  updateCartQuantity: vi.fn(),
+  removeFromCart: vi.fn(),
+  clearCart: vi.fn()
 }))
 
 vi.mock('@/utils/auth', () => ({
@@ -184,5 +190,128 @@ describe('checkout page pricing guards', () => {
     expect(uniMock.showModal).toHaveBeenCalledWith(expect.objectContaining({
       title: '订单金额异常'
     }))
+  })
+
+  it('keeps the idempotency key after a failed submit and reuses it for an unchanged retry', async () => {
+    const preOrderStore = usePreOrderStore()
+    preOrderStore.setItem({
+      skuId: 9301,
+      productId: 9201,
+      productName: '价格链路测试商品',
+      productImage: '',
+      spec: '',
+      price: 40,
+      quantity: 1
+    })
+    vi.mocked(createOrder)
+      .mockRejectedValueOnce(new Error('网络中断'))
+      .mockRejectedValueOnce(new Error('网络中断'))
+
+    const wrapper = mount(CheckoutPage)
+    await flushPromises()
+    await wrapper.find('.pay-btn').trigger('tap')
+    await flushPromises()
+    await wrapper.find('.pay-btn').trigger('tap')
+    await flushPromises()
+
+    expect(getIdempotencyToken).toHaveBeenCalledTimes(1)
+    expect(createOrder).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(createOrder).mock.calls[0][1]).toBe('idem-key')
+    expect(vi.mocked(createOrder).mock.calls[1][1]).toBe('idem-key')
+  })
+
+  it('fetches a new idempotency key when the payload changes after a failure', async () => {
+    const preOrderStore = usePreOrderStore()
+    preOrderStore.setItem({
+      skuId: 9301,
+      productId: 9201,
+      productName: '价格链路测试商品',
+      productImage: '',
+      spec: '',
+      price: 40,
+      quantity: 1
+    })
+    vi.mocked(getIdempotencyToken)
+      .mockResolvedValueOnce('key-1')
+      .mockResolvedValueOnce('key-2')
+    vi.mocked(createOrder).mockRejectedValue(new Error('网络中断'))
+
+    const wrapper = mount(CheckoutPage)
+    await flushPromises()
+    await wrapper.find('.pay-btn').trigger('tap')
+    await flushPromises()
+    await wrapper.find('.remark-input').setValue('放门口')
+    await wrapper.find('.pay-btn').trigger('tap')
+    await flushPromises()
+
+    expect(getIdempotencyToken).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(createOrder).mock.calls[0][1]).toBe('key-1')
+    expect(vi.mocked(createOrder).mock.calls[1][1]).toBe('key-2')
+  })
+
+  it('refreshes the idempotency key on conflict and asks the user to retry', async () => {
+    const preOrderStore = usePreOrderStore()
+    preOrderStore.setItem({
+      skuId: 9301,
+      productId: 9201,
+      productName: '价格链路测试商品',
+      productImage: '',
+      spec: '',
+      price: 40,
+      quantity: 1
+    })
+    vi.mocked(getIdempotencyToken)
+      .mockResolvedValueOnce('key-1')
+      .mockResolvedValueOnce('key-2')
+    vi.mocked(createOrder)
+      .mockRejectedValueOnce(new ApiError(
+        API_CODE_IDEMPOTENCY_CONFLICT,
+        '幂等键已用于其他请求，请刷新后重试'
+      ))
+      .mockRejectedValueOnce(new Error('网络中断'))
+
+    const wrapper = mount(CheckoutPage)
+    await flushPromises()
+    await wrapper.find('.pay-btn').trigger('tap')
+    await flushPromises()
+
+    expect(getIdempotencyToken).toHaveBeenCalledTimes(2)
+    expect(uniMock.showModal).toHaveBeenCalledWith(expect.objectContaining({
+      title: '订单信息已变化'
+    }))
+
+    await wrapper.find('.pay-btn').trigger('tap')
+    await flushPromises()
+
+    expect(getIdempotencyToken).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(createOrder).mock.calls[0][1]).toBe('key-1')
+    expect(vi.mocked(createOrder).mock.calls[1][1]).toBe('key-2')
+  })
+
+  it('clears the idempotency key once the order is created', async () => {
+    const cartStore = useCartStore()
+    cartStore.setItems([cartItem()])
+    vi.mocked(getIdempotencyToken)
+      .mockResolvedValueOnce('key-1')
+      .mockResolvedValueOnce('key-2')
+    vi.mocked(createOrder)
+      .mockResolvedValueOnce(order(45))
+      .mockRejectedValueOnce(new Error('网络中断'))
+
+    const wrapper = mount(CheckoutPage)
+    await flushPromises()
+    await wrapper.find('.pay-btn').trigger('tap')
+    await flushPromises()
+
+    expect(uniMock.showModal).toHaveBeenCalledWith(expect.objectContaining({
+      title: '订单金额异常'
+    }))
+
+    await wrapper.find('.pay-btn').trigger('tap')
+    await flushPromises()
+
+    expect(getIdempotencyToken).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(createOrder).mock.calls[0][1]).toBe('key-1')
+    expect(vi.mocked(createOrder).mock.calls[1][1]).toBe('key-2')
   })
 })

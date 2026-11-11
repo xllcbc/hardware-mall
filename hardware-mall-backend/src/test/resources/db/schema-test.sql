@@ -207,3 +207,17 @@ CREATE TABLE IF NOT EXISTS `order_item` (
     `subtotal` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS `order_idempotency` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `user_id` BIGINT NOT NULL,
+    `idem_key` VARCHAR(128) NOT NULL,
+    `request_hash` CHAR(64) NOT NULL,
+    `state` VARCHAR(16) NOT NULL,
+    `owner_token` VARCHAR(64) NOT NULL,
+    `order_id` BIGINT DEFAULT NULL,
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_user_idem_key` (`user_id`, `idem_key`),
+    KEY `idx_state_update` (`state`, `update_time`)
+);

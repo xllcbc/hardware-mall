@@ -44,11 +44,23 @@ public class DingTalkAlertService {
     /**
      * 发送一条钉钉告警(异步, 防抖)
      *
-     * @param type    告警类型(用作防抖 key), 如 PAY_CALLBACK_FAIL / AUTO_REFUND_FAIL / REFUND_CONFIRM_FAIL
+     * @param type    告警类型(用作防抖 key), 如 PAY_CALLBACK_FAIL / REFUND_RESULT_UNKNOWN / REFUND_DEFINITE_FAILED
      * @param message 告警内容(订单号/原因等)
      */
     public void alert(String type, String message) {
         send(type, message, "alert:dingtalk:" + type, "告警");
+    }
+
+    /**
+     * 发送一条订单维度告警(异步, 按“类型 + 订单 ID”防抖)
+     * 用于退款结果未知/确定失败等场景, 避免多笔订单同时异常时互相吞单
+     *
+     * @param type    告警类型
+     * @param orderId 订单 ID, 参与防抖 key
+     * @param message 告警内容
+     */
+    public void alert(String type, Long orderId, String message) {
+        send(type, message, "alert:dingtalk:" + type + ":" + orderId, "告警");
     }
 
     /**

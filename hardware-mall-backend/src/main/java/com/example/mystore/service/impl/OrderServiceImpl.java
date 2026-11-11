@@ -7,11 +7,12 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
-import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
+import com.example.mystore.common.exception.IdempotencyConflictException;
 import com.example.mystore.common.exception.PriceChangedException;
 import com.example.mystore.entity.db.Order;
+import com.example.mystore.entity.db.OrderIdempotency;
 import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
@@ -32,13 +33,16 @@ import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
+import com.example.mystore.service.OrderIdempotencyService;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.PriceService;
 import com.example.mystore.service.PricingRuleService;
+import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
+import com.example.mystore.util.OrderRequestFingerprint;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.UserContext;
 import com.wechat.pay.java.service.payments.model.Transaction;
@@ -85,6 +89,7 @@ public class OrderServiceImpl implements OrderService {
     private final PriceService priceService;
     private final PricingRuleService pricingRuleService;
     private final UserLevelService userLevelService;
+    private final OrderIdempotencyService orderIdempotencyService;
 
     @Value("${wechat.pay.mch-id:}")
     private String mchId;
@@ -100,17 +105,23 @@ public class OrderServiceImpl implements OrderService {
     public OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey) {
         log.info("创建订单开始, userId={}, idemKey={}, request={}", userId, idempotencyKey, request);
 
-        String idemKey = RedisConstants.PREFIX_ORDER_IDEMPOTENCY + idempotencyKey;
-        if (idempotencyKey == null || !redisUtil.setIfAbsent(idemKey, userId,
-                RedisConstants.IDEMPOTENCY_TTL, TimeUnit.SECONDS)) {
-            // M8: 冲突时校验坑的归属 —— 自己的坑是真重复下单; 别人的坑不得误伤, 也不得清除
-            Object owner = idempotencyKey == null ? null : redisUtil.get(idemKey);
-            if (owner == null || !owner.toString().equals(String.valueOf(userId))) {
-                throw new BusinessException("请求冲突，请刷新后重试");
+        String idemKey = requireIdempotencyKey(idempotencyKey);
+        String requestHash = OrderRequestFingerprint.fingerprint(request);
+        OrderIdempotencyService.ClaimOutcome claim =
+                orderIdempotencyService.claim(userId, idemKey, requestHash);
+        switch (claim.kind()) {
+            case SUCCEEDED -> {
+                // 订单已提交但上次 VO 组装失败时，同 key 同指纹重试直接返回原订单
+                return getOrderVO(claim.orderId(), userId);
             }
-            throw new BusinessException("请勿重复下单");
+            case PROCESSING -> throw new BusinessException("订单处理中，请稍后重试");
+            case CONFLICT -> throw new IdempotencyConflictException();
+            case ACQUIRED -> {
+                // 继续创建订单
+            }
         }
 
+        Long orderId;
         try {
             // ① 事务外：只读校验 + 构建订单明细快照（不占用 DB 连接事务）
             Address address = requireAddress(userId, request.getAddressId());
@@ -118,20 +129,33 @@ public class OrderServiceImpl implements OrderService {
             SettlementSnapshot settlement = buildSettlementSnapshot(request.getItems());
             requireConfirmedAmount(request.getExpectedPayAmount(), settlement);
 
-            // ② 事务内：扣减库存 + 建单 + 明细 + 删购物车 + 发布事件
-            Long orderId = new TransactionTemplate(transactionManager)
+            // ② 事务内：扣减库存 + 建单 + 明细 + 删购物车 + 幂等记录置成功 + 发布事件
+            orderId = new TransactionTemplate(transactionManager)
                     .execute(status -> persistOrder(
                             userId, address.getId(), logistics.getId(),
-                            request.getBuyerRemark(), settlement));
-
-            // ③ 事务外：组装返回 VO
-            return getOrderVO(orderId, userId);
+                            request.getBuyerRemark(), settlement, claim));
         } catch (RuntimeException e) {
-            // M8: 业务失败 = 意图未达成, 释放幂等坑允许立即重试
-            // 此刻事务已回滚、DB 零痕迹, 删坑不会造成"订单建成但坑没了"的重复下单窗口
-            redisUtil.delete(idemKey);
+            // 提交前失败：独立事务置失败，允许同一幂等键立即重试
+            orderIdempotencyService.markFailed(claim.recordId(), claim.ownerToken());
+            orderIdempotencyService.releaseLock(
+                    userId, idemKey, claim.ownerToken(), claim.lockAcquired());
             throw e;
         }
+
+        orderIdempotencyService.releaseLock(userId, idemKey, claim.ownerToken(), claim.lockAcquired());
+        // ③ 事务外：组装返回 VO；VO 失败不得把已成功的幂等记录置失败或删除
+        return getOrderVO(orderId, userId);
+    }
+
+    private String requireIdempotencyKey(String idempotencyKey) {
+        if (!StringUtils.hasText(idempotencyKey)) {
+            throw new BusinessException("缺少幂等键，请刷新后重试");
+        }
+        String idemKey = idempotencyKey.trim();
+        if (idemKey.length() > OrderIdempotency.IDEMPOTENCY_KEY_MAX_LENGTH) {
+            throw new BusinessException("幂等键过长，请刷新后重试");
+        }
+        return idemKey;
     }
 
     private Address requireAddress(Long userId, Long addressId) {
@@ -272,7 +296,8 @@ public class OrderServiceImpl implements OrderService {
 
     private Long persistOrder(
             Long userId, Long addressId, Long logisticsId,
-            String buyerRemark, SettlementSnapshot settlement) {
+            String buyerRemark, SettlementSnapshot settlement,
+            OrderIdempotencyService.ClaimOutcome idempotencyClaim) {
         // 【事务内】只扣 DB 库存 + 销量自增
         for (OrderItem item : settlement.items()) {
             boolean deducted = skuService.deductStock(item.getSkuId(), item.getQuantity());
@@ -315,6 +340,10 @@ public class OrderServiceImpl implements OrderService {
                    .set(Cart::getDeleteTime, System.currentTimeMillis());
         cartMapper.update(null, cartWrapper);
         log.info("删除购物车商品, userId={}, skuIds={}", userId, cartSkuIds);
+
+        // 幂等记录置成功必须与订单创建同事务；更新失败会回滚订单
+        orderIdempotencyService.markSucceeded(
+                idempotencyClaim.recordId(), idempotencyClaim.ownerToken(), order.getId());
 
         // 发布库存同步事件，事务提交后由监听器异步执行
         List<Long> skuIds = settlement.items().stream()
@@ -383,11 +412,29 @@ public class OrderServiceImpl implements OrderService {
 
         Page<OrderVO> voPage = new Page<>(orderPage.getCurrent(), orderPage.getSize(), orderPage.getTotal());
         List<OrderVO> voList = new ArrayList<>();
+        Map<Long, PaymentRecord> latestPayments = loadLatestPaymentRecords(orderPage.getRecords());
         for (Order order : orderPage.getRecords()) {
-            voList.add(getOrderVO(order.getId(), null));
+            voList.add(buildOrderVO(order, null, latestPayments));
         }
         voPage.setRecords(voList);
         return voPage;
+    }
+
+    private Map<Long, PaymentRecord> loadLatestPaymentRecords(List<Order> orders) {
+        if (orders.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<Long> orderIds = orders.stream().map(Order::getId).toList();
+        List<PaymentRecord> records = paymentRecordMapper.selectList(
+                new LambdaQueryWrapper<PaymentRecord>()
+                        .in(PaymentRecord::getOrderId, orderIds)
+                        .orderByDesc(PaymentRecord::getCreateTime)
+                        .orderByDesc(PaymentRecord::getId));
+        Map<Long, PaymentRecord> latestByOrderId = new HashMap<>();
+        for (PaymentRecord record : records) {
+            latestByOrderId.putIfAbsent(record.getOrderId(), record);
+        }
+        return latestByOrderId;
     }
 
     @Override
@@ -703,6 +750,11 @@ public class OrderServiceImpl implements OrderService {
         if (order == null) {
             throw new BusinessException("订单不存在");
         }
+        // 已取消订单的迟到支付: 只校验最新支付记录已支付后直接退款, 订单保持 5
+        if (order.getStatus() == StatusConstants.ORDER_CANCELLED) {
+            retryCancelledOrderRefund(orderId, reason);
+            return;
+        }
         // 预检: 明显错状态直接报错 (CAS 才是权威并发守卫, 预检仅为友好提示)
         // 8(退款申请中) 视为管理员审核通过; 9(退款失败) 允许管理员重试: 沿用同一 CAS 占位链路 →6→微信退款→回调→7
         if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT
@@ -730,7 +782,26 @@ public class OrderServiceImpl implements OrderService {
         }
         log.info("订单置退款中, orderId={}, 等待微信退款回调确认", orderId);
 
-        payService.refund(orderId, reason);
+        handleRefundResult(orderId, payService.refund(orderId, reason));
+    }
+
+    private void retryCancelledOrderRefund(Long orderId, String reason) {
+        PaymentRecord latest = payService.queryByOrderId(orderId);
+        if (latest == null || latest.getStatus() != PaymentRecord.STATUS_PAID) {
+            throw new BusinessException("已取消订单的最新支付记录不是已支付状态，无法重试退款");
+        }
+        RefundResult result = payService.refund(orderId, reason);
+        log.info("已取消订单重试退款, orderId={}, result={}", orderId, result);
+        handleRefundResult(orderId, result);
+    }
+
+    private void handleRefundResult(Long orderId, RefundResult result) {
+        if (result == RefundResult.DEFINITE_FAILED) {
+            throw new BusinessException("退款确定失败：微信明确拒绝，支付记录已回退，请稍后重试");
+        }
+        if (result == RefundResult.UNKNOWN) {
+            log.warn("退款结果未知, 等待退款回调或对账确认, orderId={}", orderId);
+        }
     }
 
     @Override
@@ -797,7 +868,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public OrderVO getAdminOrderById(Long orderId) {
-        return getOrderVO(orderId, null);
+        return buildOrderVO(orderMapper.selectById(orderId), null, null);
     }
 
     @Override
@@ -879,12 +950,15 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private OrderVO getOrderVO(Long orderId, Long userId) {
-        Order order = orderMapper.selectById(orderId);
+        return buildOrderVO(orderMapper.selectById(orderId), userId, null);
+    }
+
+    private OrderVO buildOrderVO(Order order, Long userId, Map<Long, PaymentRecord> latestPayments) {
         Address address = addressMapper.selectById(order.getAddressId());
         Logistics logistics = logisticsMapper.selectById(order.getLogisticsId());
 
         LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
-        itemWrapper.eq(OrderItem::getOrderId, orderId);
+        itemWrapper.eq(OrderItem::getOrderId, order.getId());
         List<OrderItem> items = orderItemMapper.selectList(itemWrapper);
 
         OrderVO vo = new OrderVO();
@@ -912,15 +986,34 @@ public class OrderServiceImpl implements OrderService {
         vo.setItems(items.stream().map(item -> toOrderItemVO(item, userId == null)).toList());
 
         // 微信确认收货组件所需参数(商户单号=订单号; 交易单号支付成功后回填)
-        PaymentRecord payRecord = paymentRecordMapper.selectOne(new LambdaQueryWrapper<PaymentRecord>()
-                .eq(PaymentRecord::getOrderId, orderId)
-                .orderByDesc(PaymentRecord::getCreateTime)
-                .last("LIMIT 1"));
+        PaymentRecord payRecord = latestPayments != null
+                ? latestPayments.get(order.getId())
+                : paymentRecordMapper.selectOne(new LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getOrderId, order.getId())
+                        .orderByDesc(PaymentRecord::getCreateTime)
+                        .orderByDesc(PaymentRecord::getId)
+                        .last("LIMIT 1"));
         vo.setMerchantId(mchId);
         vo.setMerchantTradeNo(payRecord != null ? payRecord.getOutTradeNo() : null);
         vo.setTransactionId(payRecord != null ? payRecord.getTransactionId() : null);
+        vo.setPaymentStatus(payRecord != null ? payRecord.getStatus() : null);
+        vo.setPaymentStatusText(getPaymentStatusText(payRecord));
 
         return vo;
+    }
+
+    private String getPaymentStatusText(PaymentRecord record) {
+        if (record == null) {
+            return "未支付";
+        }
+        return switch (record.getStatus()) {
+            case PaymentRecord.STATUS_PENDING -> "待支付";
+            case PaymentRecord.STATUS_PAID -> "已支付";
+            case PaymentRecord.STATUS_CLOSED -> "已关闭";
+            case PaymentRecord.STATUS_REFUNDED -> "已退款";
+            case PaymentRecord.STATUS_REFUNDING -> "退款中";
+            default -> "未知";
+        };
     }
 
     private OrderItemVO toOrderItemVO(OrderItem item, boolean includePricingSnapshot) {

@@ -12,6 +12,9 @@ public class OrderVO implements Serializable {
     private String orderNo;
     private Integer status;
     private String statusText;
+    /** 最新支付记录状态: 0待支付 1已支付 2已关闭 3已退款 4退款中 */
+    private Integer paymentStatus;
+    private String paymentStatusText;
     private BigDecimal totalAmount;
     private BigDecimal freightAmount;
     private BigDecimal payAmount;
