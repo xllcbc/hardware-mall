@@ -48,7 +48,7 @@ job/               — 定时任务
 3. **MyBatis-Plus 查询** — 使用 `LambdaQueryWrapper`，禁止字符串硬编码列名
 4. **Controller 不直接注入 Mapper** — 必须通过 Service 层
 5. **Redis 操作** — 统一通过 `RedisUtil`，不得直接使用 `RedisTemplate.opsForXxx()`
-6. **分布式锁** — 统一通过 `RedisLockUtil`
+6. **分布式锁** — 统一通过 `RedisLockUtil`（例外：下单幂等快锁使用 `RedisUtil` 的 ownerToken 比较删除，表达请求所有权而非可重入业务锁，见 ADR-0006）
 7. **序列化规范** — Redis 用 Fastjson2，DB JSON 列用 Jackson
 8. **遵循已有模式** — 修改已存在的类时，先观察该类已有的代码风格并保持一致
 9. **修改后验证** — 改动完成后运行 `mvn compile` 确认无编译错误

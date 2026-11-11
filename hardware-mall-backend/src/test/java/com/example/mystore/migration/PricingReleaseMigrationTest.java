@@ -35,6 +35,9 @@ class PricingReleaseMigrationTest {
             "db/migration_2026-11-09_level_category_rate.sql";
     private static final String INIT_RESOURCE = "db/init.sql";
     private static final String VERIFY_RESOURCE = "db/pricing_release_verify.sql";
+    private static final String IDEMPOTENCY_MIGRATION_RESOURCE =
+            "db/migration_2026-11-11_order_idempotency.sql";
+    private static final String IDEMPOTENCY_VERIFY_RESOURCE = "db/order_idempotency_verify.sql";
 
     @Container
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.36")
@@ -49,6 +52,8 @@ class PricingReleaseMigrationTest {
         copyResource(RATE_MIGRATION_RESOURCE, "/tmp/pricing-rate-rename.sql");
         copyResource(INIT_RESOURCE, "/tmp/init.sql");
         copyResource(VERIFY_RESOURCE, "/tmp/pricing-verify.sql");
+        copyResource(IDEMPOTENCY_MIGRATION_RESOURCE, "/tmp/order-idempotency.sql");
+        copyResource(IDEMPOTENCY_VERIFY_RESOURCE, "/tmp/order-idempotency-verify.sql");
     }
 
     @BeforeEach
@@ -61,7 +66,9 @@ class PricingReleaseMigrationTest {
         loadSnapshot(DATABASE);
 
         runMigrations(DATABASE);
+        runIdempotencyMigration(DATABASE);
         assertFinalPricingModel(DATABASE);
+        assertThat(tableExists(DATABASE, "order_idempotency")).isTrue();
         assertThat(queryStrings(DATABASE,
                 "SELECT CONCAT(name, ':', is_retail, ':', status) FROM user_level ORDER BY id"))
                 .containsExactly("零售:1:1");
@@ -70,6 +77,33 @@ class PricingReleaseMigrationTest {
         assertThat(queryStrings(DATABASE, "SELECT CAST(COUNT(*) AS CHAR) FROM user WHERE level_id = 1"))
                 .containsExactly(queryStrings(DATABASE, "SELECT CAST(COUNT(*) AS CHAR) FROM user").get(0));
         runMigrationVerify(DATABASE);
+        runIdempotencyVerify(DATABASE);
+    }
+
+    @Test
+    void idempotencyVerifyRejectsMissingUniqueKey() throws Exception {
+        loadSnapshot(DATABASE);
+        runMigrations(DATABASE);
+        runIdempotencyMigration(DATABASE);
+        execute(DATABASE, "ALTER TABLE order_idempotency DROP INDEX uk_user_idem_key");
+
+        ExecResult verification = runIdempotencyVerifyExpectFailure(DATABASE);
+
+        assertThat(verification.getExitCode()).isNotZero();
+        assertThat(verification.getStdout() + verification.getStderr())
+                .contains("uk_user_idem_key");
+    }
+
+    @Test
+    void idempotencyMigrationStopsWhenTableAlreadyExists() throws Exception {
+        loadSnapshot(DATABASE);
+        assertThat(runSqlFile(DATABASE, "/tmp/order-idempotency.sql").getExitCode()).isZero();
+
+        ExecResult repeated = runSqlFile(DATABASE, "/tmp/order-idempotency.sql");
+
+        assertThat(repeated.getExitCode()).isNotZero();
+        assertThat(repeated.getStdout() + repeated.getStderr())
+                .contains("order_idempotency already exists");
     }
 
     @Test
@@ -131,12 +165,17 @@ class PricingReleaseMigrationTest {
         assertThat(runSqlFile(null, "/tmp/init-final.sql").getExitCode()).isZero();
         assertThat(runSqlFile(migrated, "/tmp/migration-base-final.sql").getExitCode()).isZero();
         assertThat(runSqlFile(migrated, "/tmp/migration-rate-final.sql").getExitCode()).isZero();
+        runIdempotencyMigration(migrated);
 
         assertThat(pricingModelDefinition(initialized))
                 .isEqualTo(pricingModelDefinition(migrated));
+        assertThat(idempotencyModelDefinition(initialized))
+                .isEqualTo(idempotencyModelDefinition(migrated));
         assertFinalPricingModel(initialized);
         assertFinalPricingModel(migrated);
         runMigrationVerify(migrated);
+        runIdempotencyVerify(initialized);
+        runIdempotencyVerify(migrated);
     }
 
     @Test
@@ -249,6 +288,39 @@ class PricingReleaseMigrationTest {
         assertThat(verification.getExitCode())
                 .as(verification.getStdout() + verification.getStderr())
                 .isZero();
+    }
+
+    private static void runIdempotencyMigration(String schema) throws Exception {
+        ExecResult migration = runSqlFile(schema, "/tmp/order-idempotency.sql");
+        assertThat(migration.getExitCode())
+                .as(migration.getStdout() + migration.getStderr())
+                .isZero();
+    }
+
+    private static void runIdempotencyVerify(String schema) throws Exception {
+        ExecResult verification = runIdempotencyVerifyExpectFailure(schema);
+        assertThat(verification.getExitCode())
+                .as(verification.getStdout() + verification.getStderr())
+                .isZero();
+    }
+
+    private static ExecResult runIdempotencyVerifyExpectFailure(String schema) throws Exception {
+        return mysql(schema, "-e", "SOURCE /tmp/order-idempotency-verify.sql");
+    }
+
+    private static List<String> idempotencyModelDefinition(String schema) throws SQLException {
+        List<String> definition = new ArrayList<>(queryStrings(schema,
+                "SELECT CONCAT(column_name, ':', column_type, ':', is_nullable, ':', " +
+                        "COALESCE(column_default, '<null>')) " +
+                        "FROM information_schema.columns " +
+                        "WHERE table_schema = DATABASE() AND table_name = 'order_idempotency' " +
+                        "ORDER BY ordinal_position"));
+        definition.addAll(queryStrings(schema,
+                "SELECT CONCAT(index_name, ':', non_unique, ':', seq_in_index, ':', column_name) " +
+                        "FROM information_schema.statistics " +
+                        "WHERE table_schema = DATABASE() AND table_name = 'order_idempotency' " +
+                        "ORDER BY index_name, seq_in_index"));
+        return definition;
     }
 
     private static ExecResult runVerify(String schema, boolean expectEmptyRateTable) throws Exception {

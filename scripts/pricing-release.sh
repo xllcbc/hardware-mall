@@ -6,6 +6,8 @@ DB_DIR="${PRICING_RELEASE_DB_DIR:-$ROOT_DIR/hardware-mall-backend/src/main/resou
 BASE_MIGRATION="${PRICING_RELEASE_MIGRATION:-$DB_DIR/migration_2026-11-02_multi_level_pricing_release.sql}"
 RATE_MIGRATION="${PRICING_RATE_MIGRATION:-$DB_DIR/migration_2026-11-09_level_category_rate.sql}"
 VERIFY="${PRICING_RELEASE_VERIFY:-$DB_DIR/pricing_release_verify.sql}"
+IDEMPOTENCY_MIGRATION="${ORDER_IDEMPOTENCY_MIGRATION:-$DB_DIR/migration_2026-11-11_order_idempotency.sql}"
+IDEMPOTENCY_VERIFY="${ORDER_IDEMPOTENCY_VERIFY:-$DB_DIR/order_idempotency_verify.sql}"
 
 DB_PORT="${DB_PORT:-3306}"
 REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
@@ -115,6 +117,24 @@ apply_pricing_migrations() {
   esac
 }
 
+idempotency_state() {
+  local schema="$1"
+  "${MYSQL[@]}" -N -B "$schema" -e "
+    SELECT COUNT(*) FROM information_schema.tables
+     WHERE table_schema = DATABASE() AND table_name = 'order_idempotency';
+  "
+}
+
+apply_idempotency_migration() {
+  local schema="$1"
+  if [[ "$(idempotency_state "$schema")" == "0" ]]; then
+    "${MYSQL[@]}" "$schema" < "$IDEMPOTENCY_MIGRATION"
+  else
+    echo "Order idempotency schema already present."
+  fi
+  "${MYSQL[@]}" "$schema" < "$IDEMPOTENCY_VERIFY"
+}
+
 verify_backup_checksum() {
   local backup="$1"
   if [[ ! -s "$backup.sha256" ]]; then
@@ -140,12 +160,15 @@ case "${1:-}" in
     require_file "$BASE_MIGRATION"
     require_file "$RATE_MIGRATION"
     require_file "$VERIFY"
+    require_file "$IDEMPOTENCY_MIGRATION"
+    require_file "$IDEMPOTENCY_VERIFY"
     verify_backup_checksum "$backup"
     scratch="${DB_NAME}_pricing_preflight"
     "${MYSQL[@]}" -e "DROP DATABASE IF EXISTS \`$scratch\`; CREATE DATABASE \`$scratch\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
     "${MYSQL[@]}" "$scratch" < "$backup"
     apply_pricing_migrations "$scratch"
     "${MYSQL[@]}" "$scratch" < "$VERIFY"
+    apply_idempotency_migration "$scratch"
     echo "Preflight database retained for inspection: $scratch"
     ;;
   migrate)
@@ -155,8 +178,11 @@ case "${1:-}" in
     require_file "$BASE_MIGRATION"
     require_file "$RATE_MIGRATION"
     require_file "$VERIFY"
+    require_file "$IDEMPOTENCY_MIGRATION"
+    require_file "$IDEMPOTENCY_VERIFY"
     verify_backup_checksum "$backup"
     apply_pricing_migrations "$DB_NAME"
+    apply_idempotency_migration "$DB_NAME"
     ;;
   schema-state)
     require_db_env
@@ -165,7 +191,9 @@ case "${1:-}" in
   verify)
     require_db_env
     require_file "$VERIFY"
+    require_file "$IDEMPOTENCY_VERIFY"
     "${MYSQL[@]}" "$DB_NAME" < "$VERIFY"
+    "${MYSQL[@]}" "$DB_NAME" < "$IDEMPOTENCY_VERIFY"
     ;;
   restore)
     require_db_env
