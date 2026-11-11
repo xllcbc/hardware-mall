@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.mystore.common.constant.PaymentAlertConstants;
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
@@ -45,6 +46,8 @@ public class PayServiceImpl implements PayService {
     private static final int HTTP_STATUS_BAD_REQUEST = 400;
     private static final int HTTP_STATUS_NOT_FOUND = 404;
     private static final int HTTP_STATUS_SERVER_ERROR = 500;
+    /** 对账补发退款的展示原因(不参与资金计算) */
+    private static final String RECONCILE_REFUND_REASON = "退款对账补发";
 
     private final PaymentRecordMapper paymentRecordMapper;
     private final OrderMapper orderMapper;
@@ -227,7 +230,7 @@ public class PayServiceImpl implements PayService {
                 return Map.of("code", "FAIL", "message", "支付记录状态异常");
             }
 
-            if (!"SUCCESS".equals(refundStatus)) {
+            if (!WechatConstants.RefundStatus.SUCCESS.equals(refundStatus)) {
                 // 微信明确退款失败/异常 → 回退: 订单置 9(退款失败) 待管理员处理, payment_record 回 PAID
                 log.error("退款未成功, outTradeNo={}, outRefundNo={}, refundStatus={}",
                         outTradeNo, outRefundNo, refundStatus);
@@ -373,14 +376,7 @@ public class PayServiceImpl implements PayService {
 
         // claim-first: CAS PAID→REFUNDING 提前到外呼之前。
         // 外呼结果未知(超时/响应丢失)时本地已记录"已发起", 由退款回调或对账查询判定最终结果。
-        int claimed = paymentRecordMapper.update(null,
-                new LambdaUpdateWrapper<PaymentRecord>()
-                        .eq(PaymentRecord::getId, record.getId())
-                        .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_PAID)
-                        .set(PaymentRecord::getStatus, PaymentRecord.STATUS_REFUNDING)
-                        .set(PaymentRecord::getRefundAmount, record.getAmount())
-                        .set(PaymentRecord::getUpdateTime, LocalDateTime.now()));
-        if (claimed == 0) {
+        if (!claimPaidRefund(record)) {
             log.info("退款记录已被并发处理, 按结果未知处理, orderId={}", orderId);
             dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_RESULT_UNKNOWN, orderId,
                     "订单=" + orderId + " 退款已被并发受理, 结果未知, 待回调或对账确认");
@@ -438,6 +434,7 @@ public class PayServiceImpl implements PayService {
                             .eq(PaymentRecord::getId, record.getId())
                             .in(PaymentRecord::getStatus, PaymentRecord.STATUS_PAID, PaymentRecord.STATUS_REFUNDING)
                             .set(PaymentRecord::getStatus, PaymentRecord.STATUS_REFUNDED)
+                            .set(PaymentRecord::getRefundAmount, record.getAmount())
                             .set(PaymentRecord::getRefundTime, now)
                             .set(PaymentRecord::getUpdateTime, now));
 
@@ -494,49 +491,153 @@ public class PayServiceImpl implements PayService {
     }
 
     /**
-     * 退款对账: 对滞留"退款中"订单查询微信退款权威状态并收敛。
+     * 退款对账: 按支付记录状态查询微信权威结果并收敛。
+     * 退款中: 成功确认 / 处理中保留 / 无退款单重发 / 明确失败回退 / 查询异常保留告警。
+     * 已支付且订单已取消: 先查退款单; 无退款单时补发; 查询异常保留。
      * 供 RefundReconcileJob 调用; 单条异常上抛由 Job 隔离。
      */
     @Override
-    public void reconcileRefund(Long orderId) {
-        PaymentRecord record = queryByOrderId(orderId);
+    public void reconcileRefund(PaymentRecord record) {
         if (record == null) {
-            log.warn("退款对账: 未找到支付记录, orderId={}", orderId);
             return;
         }
-        String outRefundNo = "REFUND_" + record.getOutTradeNo();
-        Refund refund;
-        try {
-            refund = wechatPayGateway.queryRefund(outRefundNo);
-        } catch (ServiceException e) {
-            if (e.getHttpStatusCode() != HTTP_STATUS_NOT_FOUND) {
-                // 网络异常/5xx/其他错误不得误判为“无退款单”, 保持退款中并告警
-                log.error("退款对账: 查询微信退款单失败, 保持退款中, orderId={}, outRefundNo={}, code={}, msg={}",
-                        orderId, outRefundNo, e.getErrorCode(), e.getErrorMessage(), e);
-                dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_RESULT_UNKNOWN, orderId,
-                        "退款对账查询微信退款单失败, 保持退款中, outRefundNo=" + outRefundNo
-                                + ", error=" + e.getErrorMessage());
+        if (record.getStatus() == PaymentRecord.STATUS_PAID) {
+            if (!isCancelledOrder(record)) {
                 return;
             }
-            // 微信无此退款单(404 RESOURCE_NOT_EXISTS) → 从未受理 → 回退
-            log.warn("退款对账: 微信无此退款单, orderId={}, outRefundNo={}, code={}, msg={}",
-                    orderId, outRefundNo, e.getErrorCode(), e.getErrorMessage());
-            rollbackRefund(record, "对账:微信无此退款单");
-            dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_ROLLBACK, orderId,
-                    "退款对账发现微信无此退款单, 已回退待人工处理, outRefundNo=" + outRefundNo);
+        } else if (record.getStatus() != PaymentRecord.STATUS_REFUNDING) {
+            log.info("退款对账: 支付记录状态无需处理, recordId={}, status={}",
+                    record.getId(), record.getStatus());
             return;
         }
-        // 用字符串比较规避 SDK 各版本 Status 类型差异(枚举常量名: SUCCESS/PROCESSING/CLOSED/ABNORMAL)
-        String refundStatus = String.valueOf(refund.getStatus());
-        if ("SUCCESS".equals(refundStatus)) {
-            confirmRefundSuccess(record, outRefundNo);
-        } else if ("PROCESSING".equals(refundStatus)) {
-            log.info("退款对账: 退款处理中, 保留待下轮, orderId={}, outRefundNo={}", orderId, outRefundNo);
-        } else {
-            rollbackRefund(record, "对账:微信退款状态=" + refundStatus);
-            dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_ROLLBACK, orderId,
-                    "退款对账发现微信退款状态=" + refundStatus + ", 已回退待人工处理, outRefundNo=" + outRefundNo);
+
+        String outRefundNo = "REFUND_" + record.getOutTradeNo();
+        RefundQuery query = queryRefundForReconcile(record, outRefundNo);
+        switch (query.outcome()) {
+            case FAILED -> {
+                return;
+            }
+            case MISSING -> resubmitRefund(record, outRefundNo);
+            case FOUND -> applyRefundStatus(record, outRefundNo, String.valueOf(query.refund().getStatus()));
         }
     }
 
+    /** 已支付记录只有订单已取消才属于迟到支付退款 */
+    private boolean isCancelledOrder(PaymentRecord record) {
+        Order order = orderMapper.selectById(record.getOrderId());
+        if (order == null || order.getStatus() != StatusConstants.ORDER_CANCELLED) {
+            log.info("退款对账: 已支付记录订单未取消, 跳过, recordId={}, orderId={}",
+                    record.getId(), record.getOrderId());
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 查询微信退款单。仅 404 + RESOURCE_NOT_EXISTS 表示微信无此退款单, 交由调用方补发;
+     * 网络异常/5xx/其他 404/响应异常一律告警并保持现状, 不得误判为无退款单。
+     */
+    private RefundQuery queryRefundForReconcile(PaymentRecord record, String outRefundNo) {
+        try {
+            return new RefundQuery(RefundQueryOutcome.FOUND, wechatPayGateway.queryRefund(outRefundNo));
+        } catch (ServiceException e) {
+            if (e.getHttpStatusCode() == HTTP_STATUS_NOT_FOUND
+                    && WechatConstants.Pay.ERROR_RESOURCE_NOT_EXISTS.equals(e.getErrorCode())) {
+                log.warn("退款对账: 微信无此退款单, 准备补发, orderId={}, outRefundNo={}, code={}, msg={}",
+                        record.getOrderId(), outRefundNo, e.getErrorCode(), e.getErrorMessage());
+                return new RefundQuery(RefundQueryOutcome.MISSING, null);
+            }
+            alertRefundQueryFailed(record, outRefundNo, e.getErrorMessage());
+            return new RefundQuery(RefundQueryOutcome.FAILED, null);
+        } catch (Exception e) {
+            alertRefundQueryFailed(record, outRefundNo, e.getMessage());
+            return new RefundQuery(RefundQueryOutcome.FAILED, null);
+        }
+    }
+
+    private void alertRefundQueryFailed(PaymentRecord record, String outRefundNo, String error) {
+        log.error("退款对账: 查询微信退款单失败, 保持现状, orderId={}, outRefundNo={}, error={}",
+                record.getOrderId(), outRefundNo, error);
+        dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_RESULT_UNKNOWN, record.getOrderId(),
+                "退款对账查询微信退款单失败, 保持现状, outRefundNo=" + outRefundNo + ", error=" + error);
+    }
+
+    /** 用字符串比较规避 SDK 各版本 Status 类型差异(枚举常量名: SUCCESS/PROCESSING/CLOSED/ABNORMAL) */
+    private void applyRefundStatus(PaymentRecord record, String outRefundNo, String refundStatus) {
+        if (WechatConstants.RefundStatus.SUCCESS.equals(refundStatus)) {
+            confirmRefundSuccess(record, outRefundNo);
+            return;
+        }
+        if (WechatConstants.RefundStatus.PROCESSING.equals(refundStatus)) {
+            if (record.getStatus() == PaymentRecord.STATUS_PAID) {
+                claimPaidRefund(record);
+            }
+            log.info("退款对账: 退款处理中, 保留待下轮, orderId={}, outRefundNo={}",
+                    record.getOrderId(), outRefundNo);
+            return;
+        }
+        if (record.getStatus() == PaymentRecord.STATUS_PAID) {
+            // 已支付+已取消: 本地没有退款中状态可回退, 保持已支付待人工处理
+            log.error("退款对账: 微信退款明确失败, 支付记录保持已支付, orderId={}, outRefundNo={}, status={}",
+                    record.getOrderId(), outRefundNo, refundStatus);
+            dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_DEFINITE_FAILED, record.getOrderId(),
+                    "微信退款状态=" + refundStatus + " 明确失败, 已取消订单支付记录保持已支付, 待人工处理, outRefundNo="
+                            + outRefundNo);
+            return;
+        }
+        rollbackRefund(record, "对账:微信退款状态=" + refundStatus);
+        dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_ROLLBACK, record.getOrderId(),
+                "退款对账发现微信退款状态=" + refundStatus + ", 已回退待人工处理, outRefundNo=" + outRefundNo);
+    }
+
+    /**
+     * 微信无退款单: 用同一退款单号重新发起。已支付记录先 CAS 认领为退款中。
+     * 受理成功保持退款中; 确定失败回退; 结果未知保持退款中并告警。
+     */
+    private void resubmitRefund(PaymentRecord record, String outRefundNo) {
+        if (record.getStatus() == PaymentRecord.STATUS_PAID && !claimPaidRefund(record)) {
+            log.info("退款对账: 支付记录已被并发处理, 跳过补发, orderId={}", record.getOrderId());
+            return;
+        }
+
+        try {
+            wechatPayGateway.createRefund(record.getOutTradeNo(), outRefundNo,
+                    record.getAmount(), RECONCILE_REFUND_REASON);
+            log.info("退款对账: 补发退款受理成功, orderId={}, outRefundNo={}",
+                    record.getOrderId(), outRefundNo);
+        } catch (Exception e) {
+            if (isDefiniteFailure(e)) {
+                log.error("退款对账: 补发退款确定失败, 回退支付记录, orderId={}, outRefundNo={}",
+                        record.getOrderId(), outRefundNo, e);
+                rollbackRefund(record, "对账补发退款确定失败: " + e.getMessage());
+                dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_DEFINITE_FAILED,
+                        record.getOrderId(), "订单=" + record.getOrderId() + " 对账补发退款确定失败已回退, outRefundNo="
+                                + outRefundNo + ", error=" + e.getMessage());
+                return;
+            }
+            log.error("退款对账: 补发退款结果未知, 保持退款中待回调/下轮对账, orderId={}, outRefundNo={}",
+                    record.getOrderId(), outRefundNo, e);
+            dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_RESULT_UNKNOWN,
+                    record.getOrderId(), "退款对账补发结果未知, outRefundNo=" + outRefundNo
+                            + ", error=" + e.getMessage());
+        }
+    }
+
+    /** CAS 已支付 → 退款中, 返回是否认领成功 */
+    private boolean claimPaidRefund(PaymentRecord record) {
+        int claimed = paymentRecordMapper.update(null,
+                new LambdaUpdateWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getId, record.getId())
+                        .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_PAID)
+                        .set(PaymentRecord::getStatus, PaymentRecord.STATUS_REFUNDING)
+                        .set(PaymentRecord::getRefundAmount, record.getAmount())
+                        .set(PaymentRecord::getUpdateTime, LocalDateTime.now()));
+        return claimed > 0;
+    }
+
+    private enum RefundQueryOutcome {
+        FOUND, MISSING, FAILED
+    }
+
+    private record RefundQuery(RefundQueryOutcome outcome, Refund refund) {}
 }

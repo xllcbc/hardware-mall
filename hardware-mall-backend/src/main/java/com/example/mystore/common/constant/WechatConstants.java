@@ -132,6 +132,8 @@ public final class WechatConstants {
         public static final int CENTS_PER_YUAN = 100;
         /** 退款结果通知路径(拼接在 notify-url 后) */
         public static final String REFUND_NOTIFY_PATH = "/refund";
+        /** 微信支付错误码: 资源不存在(退款单/订单不存在) */
+        public static final String ERROR_RESOURCE_NOT_EXISTS = "RESOURCE_NOT_EXISTS";
 
         /** 小程序调起支付参数名 */
         public static final String PARAM_APP_ID = "appId";
@@ -140,6 +142,18 @@ public final class WechatConstants {
         public static final String PARAM_PACKAGE = "packageValue";
         public static final String PARAM_SIGN_TYPE = "signType";
         public static final String PARAM_PAY_SIGN = "paySign";
+    }
+
+    /** 微信退款单状态(退款查询/退款回调的 status 值) */
+    public static final class RefundStatus {
+
+        private RefundStatus() {
+        }
+
+        public static final String SUCCESS = "SUCCESS";
+        public static final String PROCESSING = "PROCESSING";
+        public static final String CLOSED = "CLOSED";
+        public static final String ABNORMAL = "ABNORMAL";
     }
 
     /** 钉钉告警类型 */
