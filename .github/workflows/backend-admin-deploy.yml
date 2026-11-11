@@ -81,7 +81,9 @@ jobs:
             scripts/release/smoke.sh \
             hardware-mall-backend/src/main/resources/db/migration_2026-11-02_multi_level_pricing_release.sql \
             hardware-mall-backend/src/main/resources/db/migration_2026-11-09_level_category_rate.sql \
-            hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql
+            hardware-mall-backend/src/main/resources/db/pricing_release_verify.sql \
+            hardware-mall-backend/src/main/resources/db/migration_2026-11-11_order_idempotency.sql \
+            hardware-mall-backend/src/main/resources/db/order_idempotency_verify.sql
 
       - name: Upload release kit
         uses: appleboy/scp-action@v0.1.7
@@ -194,6 +196,16 @@ jobs:
                 exit 1
                 ;;
             esac
+
+            idempotency_tables="$(mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" \
+              -u "$DB_USERNAME" -N -B "$DB_NAME" -e "
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'order_idempotency';
+              ")"
+            if [[ "$idempotency_tables" -eq 0 ]]; then
+              migration_needed=1
+            fi
 
             docker pull "$REGISTRY/$NAMESPACE/hardware-mall-backend:$previous_tag"
             docker pull "$REGISTRY/$NAMESPACE/hardware-mall-admin:$previous_tag"
