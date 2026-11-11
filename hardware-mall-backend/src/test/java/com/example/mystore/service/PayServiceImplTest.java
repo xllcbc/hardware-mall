@@ -15,9 +15,10 @@ import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.impl.DingTalkAlertService;
 import com.example.mystore.service.impl.PayServiceImpl;
-import com.wechat.pay.java.core.Config;
+import com.wechat.pay.java.core.exception.ServiceException;
 import com.wechat.pay.java.core.notification.NotificationParser;
 import com.wechat.pay.java.core.notification.RequestParam;
+import com.wechat.pay.java.service.payments.model.Transaction;
 import com.wechat.pay.java.service.refund.model.RefundNotification;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,7 +53,7 @@ import static org.mockito.Mockito.when;
 @Sql(scripts = "/db/schema-test.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
 class PayServiceImplTest {
 
-    @MockBean Config wechatPayConfig;
+    @MockBean WechatPayGateway wechatPayGateway;
     @MockBean NotificationParser notificationParser;
     @MockBean DingTalkAlertService dingTalkAlertService;
 
@@ -303,13 +304,109 @@ class PayServiceImplTest {
         Long orderId = setupOrder(StatusConstants.ORDER_PENDING_SHIPMENT);
         setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
 
-        // wechatPayConfig 为 @MockBean: SDK 外呼必然抛异常, 模拟超时/响应丢失
+        // 假网关模拟超时/响应丢失
+        doThrow(new RuntimeException("timeout")).when(wechatPayGateway)
+                .createRefund(anyString(), anyString(), any(), anyString());
+
         payService.refund(orderId, "测试退款");
 
         PaymentRecord pr = paymentRecordMapper.selectOne(
                 new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
         assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
         verify(dingTalkAlertService).alert(eq("REFUND_FAIL"), anyString());
+    }
+
+    // ==================== 微信支付网关接缝 ====================
+
+    @Test
+    void prepay_shouldReturnWechatParams_whenGatewayAccepts() {
+        User user = setupUser("o-test-prepay-ok");
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
+        Map<String, String> params = Map.of(
+                "appId", "wx-test-appid-for-ci",
+                "timeStamp", "1700000000",
+                "nonceStr", "nonce",
+                "packageValue", "prepay_id=wx001",
+                "signType", "RSA",
+                "paySign", "sign");
+        when(wechatPayGateway.prepay(anyString(), any(), eq("o-test-prepay-ok"))).thenReturn(params);
+
+        Map<String, String> result = payService.prepay(user.getId(), orderId);
+
+        assertThat(result).isEqualTo(params);
+        verify(wechatPayGateway).prepay(anyString(), eq(new BigDecimal("100.00")), eq("o-test-prepay-ok"));
+    }
+
+    @Test
+    void refund_shouldRemainRefundingWithoutAlert_whenGatewayAccepts() {
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_SHIPMENT);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+
+        payService.refund(orderId, "测试退款");
+
+        PaymentRecord pr = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        verify(wechatPayGateway).createRefund(
+                eq(record.getOutTradeNo()), eq("REFUND_" + record.getOutTradeNo()),
+                eq(new BigDecimal("100.00")), eq("测试退款"));
+        verify(dingTalkAlertService, never()).alert(eq("REFUND_FAIL"), anyString());
+    }
+
+    @Test
+    void refund_shouldStayRefunding_whenGatewayRejectsWith4xx() {
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_SHIPMENT);
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        ServiceException rejected = serviceException("PARAM_ERROR", "参数错误");
+        doThrow(rejected).when(wechatPayGateway)
+                .createRefund(anyString(), anyString(), any(), anyString());
+
+        payService.refund(orderId, "测试退款");
+
+        PaymentRecord pr = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_REFUNDING);
+        verify(dingTalkAlertService).alert(eq("REFUND_FAIL"), anyString());
+    }
+
+    @Test
+    void reconcileRefund_shouldRollback_whenWechatHasNoRefundOrder() {
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, uniqueOutTradeNo());
+        ServiceException notFound = serviceException("RESOURCE_NOT_EXISTS", "退款单不存在");
+        doThrow(notFound).when(wechatPayGateway).queryRefund("REFUND_" + record.getOutTradeNo());
+
+        payService.reconcileRefund(orderId);
+
+        PaymentRecord pr = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_PAID);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_REFUND_FAILED);
+        verify(dingTalkAlertService).alert(eq("REFUND_ROLLBACK"), anyString());
+    }
+
+    @Test
+    void reconcileRefund_shouldRollback_whenWechatQueryReturns5xx() {
+        // 现状: 任何 ServiceException 都按"无此退款单"回退, 保持行为不变
+        Long orderId = setupOrder(StatusConstants.ORDER_REFUNDING);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_REFUNDING, uniqueOutTradeNo());
+        ServiceException serverError = serviceException("SYSTEM_ERROR", "系统错误");
+        doThrow(serverError).when(wechatPayGateway).queryRefund("REFUND_" + record.getOutTradeNo());
+
+        payService.reconcileRefund(orderId);
+
+        PaymentRecord pr = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>().eq(PaymentRecord::getOrderId, orderId));
+        assertThat(pr.getStatus()).isEqualTo(PaymentRecord.STATUS_PAID);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_REFUND_FAILED);
+    }
+
+    @Test
+    void queryWechatOrder_shouldDelegateToGateway() {
+        Transaction txn = new Transaction();
+        when(wechatPayGateway.queryOrder("OUT_QUERY")).thenReturn(txn);
+
+        assertThat(payService.queryWechatOrder("OUT_QUERY")).isSameAs(txn);
     }
 
     // ==================== M7 事务分段 ====================
@@ -330,14 +427,13 @@ class PayServiceImplTest {
     void prepay_shouldMarkClosed_whenWechatPrepayFails() {
         // M7: HTTP 失败后, 本次新建的 PENDING 记录必须真的落库为 CLOSED
         // （旧实现写在外层 @Transactional 事务内, 随 rethrow 被整体回滚, 是死代码）
-        User user = new User();
-        user.setOpenid("o-test-prepay");
-        user.setRole(1);
-        user.setStatus(1);
-        userMapper.insert(user);
+        User user = setupUser("o-test-prepay");
         Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
 
-        // wechatPayConfig 为 @MockBean: SDK 构建服务/发起调用时必然抛异常, 模拟微信下单失败
+        // 假网关模拟微信下单失败
+        when(wechatPayGateway.prepay(anyString(), any(), anyString()))
+                .thenThrow(new RuntimeException("prepay failed"));
+
         assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("创建支付订单失败");
@@ -349,6 +445,22 @@ class PayServiceImplTest {
     }
 
     // ==================== helper ====================
+
+    private static ServiceException serviceException(String errorCode, String errorMessage) {
+        ServiceException e = org.mockito.Mockito.mock(ServiceException.class);
+        when(e.getErrorCode()).thenReturn(errorCode);
+        when(e.getErrorMessage()).thenReturn(errorMessage);
+        return e;
+    }
+
+    private User setupUser(String openid) {
+        User user = new User();
+        user.setOpenid(openid);
+        user.setRole(1);
+        user.setStatus(1);
+        userMapper.insert(user);
+        return user;
+    }
 
     private Long setupSku(int stock) {        Sku sku = new Sku();
         sku.setSpuId(1L);

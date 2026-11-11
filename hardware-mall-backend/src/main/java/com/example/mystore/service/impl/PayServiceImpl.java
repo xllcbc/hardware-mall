@@ -15,25 +15,15 @@ import com.example.mystore.mapper.PaymentRecordMapper;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.SkuService;
-import com.wechat.pay.java.core.Config;
+import com.example.mystore.service.WechatPayGateway;
 import com.wechat.pay.java.core.exception.ServiceException;
 import com.wechat.pay.java.core.notification.NotificationParser;
 import com.wechat.pay.java.core.notification.RequestParam;
-import com.wechat.pay.java.service.payments.jsapi.JsapiServiceExtension;
-import com.wechat.pay.java.service.payments.jsapi.model.Amount;
-import com.wechat.pay.java.service.payments.jsapi.model.Payer;
-import com.wechat.pay.java.service.payments.jsapi.model.PrepayRequest;
-import com.wechat.pay.java.service.payments.jsapi.model.PrepayWithRequestPaymentResponse;
 import com.wechat.pay.java.service.payments.model.Transaction;
-import com.wechat.pay.java.service.refund.RefundService;
-import com.wechat.pay.java.service.refund.model.CreateRequest;
-import com.wechat.pay.java.service.refund.model.AmountReq;
-import com.wechat.pay.java.service.refund.model.QueryByOutRefundNoRequest;
 import com.wechat.pay.java.service.refund.model.Refund;
 import com.wechat.pay.java.service.refund.model.RefundNotification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -53,21 +43,12 @@ public class PayServiceImpl implements PayService {
     private final OrderMapper orderMapper;
     private final OrderItemMapper orderItemMapper;
     private final UserMapper userMapper;
-    private final Config wechatPayConfig;
+    private final WechatPayGateway wechatPayGateway;
     private final NotificationParser notificationParser;
     private final DingTalkAlertService dingTalkAlertService;
     private final SkuService skuService;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final PlatformTransactionManager transactionManager;
-
-    @Value("${wechat.appid}")
-    private String appId;
-
-    @Value("${wechat.pay.mch-id}")
-    private String mchId;
-
-    @Value("${wechat.pay.notify-url}")
-    private String notifyUrl;
 
     @Override
     public Map<String, String> prepay(Long userId, Long orderId) {
@@ -77,16 +58,7 @@ public class PayServiceImpl implements PayService {
                 .execute(status -> preparePrepay(userId, orderId));
 
         try {
-            PrepayWithRequestPaymentResponse response =
-                    callWechatPrepay(prep.outTradeNo(), prep.amount(), prep.openid());
-            Map<String, String> params = new HashMap<>();
-            params.put("appId", response.getAppId());
-            params.put("timeStamp", response.getTimeStamp());
-            params.put("nonceStr", response.getNonceStr());
-            params.put("packageValue", response.getPackageVal());
-            params.put("signType", response.getSignType());
-            params.put("paySign", response.getPaySign());
-            return params;
+            return wechatPayGateway.prepay(prep.outTradeNo(), prep.amount(), prep.openid());
         } catch (Exception e) {
             log.error("微信统一下单失败, orderId={}, outTradeNo={}", orderId, prep.outTradeNo(), e);
             if (prep.created()) {
@@ -285,20 +257,12 @@ public class PayServiceImpl implements PayService {
     }
 
     /**
-     * 查询微信支付订单状态(⑥⑦ 共用)
-     * 调用 JsapiServiceExtension.queryOrderByOutTradeNo, 返回 Transaction(含 tradeState / transactionId)
+     * 查询微信支付订单状态(⑥⑦ 共用): 返回 Transaction(含 tradeState / transactionId)
      * 异常直接上抛, 由调用方决定是否跳过/重试
      */
     @Override
     public Transaction queryWechatOrder(String outTradeNo) {
-        JsapiServiceExtension jsapiService = new JsapiServiceExtension.Builder()
-                .config(wechatPayConfig)
-                .build();
-        com.wechat.pay.java.service.payments.jsapi.model.QueryOrderByOutTradeNoRequest request =
-                new com.wechat.pay.java.service.payments.jsapi.model.QueryOrderByOutTradeNoRequest();
-        request.setOutTradeNo(outTradeNo);
-        request.setMchid(mchId);
-        return jsapiService.queryOrderByOutTradeNo(request);
+        return wechatPayGateway.queryOrder(outTradeNo);
     }
 
     /**
@@ -421,21 +385,7 @@ public class PayServiceImpl implements PayService {
 
         String outRefundNo = "REFUND_" + record.getOutTradeNo();
         try {
-            CreateRequest refundRequest = new CreateRequest();
-            refundRequest.setOutTradeNo(record.getOutTradeNo());
-            refundRequest.setOutRefundNo(outRefundNo);
-            refundRequest.setReason(reason);
-            refundRequest.setNotifyUrl(notifyUrl + "/refund");
-            AmountReq amountReq = new AmountReq();
-            amountReq.setRefund(record.getAmount().multiply(new BigDecimal("100")).longValue());
-            amountReq.setTotal(record.getAmount().multiply(new BigDecimal("100")).longValue());
-            amountReq.setCurrency("CNY");
-            refundRequest.setAmount(amountReq);
-
-            RefundService refundService = new RefundService.Builder()
-                    .config(wechatPayConfig)
-                    .build();
-            refundService.create(refundRequest);
+            wechatPayGateway.createRefund(record.getOutTradeNo(), outRefundNo, record.getAmount(), reason);
 
             log.info("退款受理成功, orderId={}, outRefundNo={}, 待回调确认", orderId, outRefundNo);
         } catch (Exception e) {
@@ -518,18 +468,6 @@ public class PayServiceImpl implements PayService {
     }
 
     /**
-     * 查询微信退款单真实状态(由商户退款单号)
-     */
-    private Refund queryRefund(String outRefundNo) {
-        RefundService refundService = new RefundService.Builder()
-                .config(wechatPayConfig)
-                .build();
-        QueryByOutRefundNoRequest request = new QueryByOutRefundNoRequest();
-        request.setOutRefundNo(outRefundNo);
-        return refundService.queryByOutRefundNo(request);
-    }
-
-    /**
      * 退款对账: 对滞留"退款中"订单查询微信退款权威状态并收敛。
      * 供 RefundReconcileJob 调用; 单条异常上抛由 Job 隔离。
      */
@@ -543,7 +481,7 @@ public class PayServiceImpl implements PayService {
         String outRefundNo = "REFUND_" + record.getOutTradeNo();
         Refund refund;
         try {
-            refund = queryRefund(outRefundNo);
+            refund = wechatPayGateway.queryRefund(outRefundNo);
         } catch (ServiceException e) {
             // 微信无此退款单(404 RESOURCE_NOT_EXISTS 等) → 从未受理 → 回退
             log.warn("退款对账: 微信无此退款单, orderId={}, outRefundNo={}, code={}, msg={}",
@@ -562,27 +500,4 @@ public class PayServiceImpl implements PayService {
         }
     }
 
-    private PrepayWithRequestPaymentResponse callWechatPrepay(String outTradeNo, BigDecimal amount, String openid) {
-        JsapiServiceExtension jsapiService = new JsapiServiceExtension.Builder()
-                .config(wechatPayConfig)
-                .build();
-
-        PrepayRequest prepayRequest = new PrepayRequest();
-        prepayRequest.setAppid(appId);
-        prepayRequest.setMchid(mchId);
-        prepayRequest.setDescription("五金商城-订单支付");
-        prepayRequest.setOutTradeNo(outTradeNo);
-        prepayRequest.setNotifyUrl(notifyUrl);
-
-        Amount reqAmount = new Amount();
-        reqAmount.setTotal(amount.multiply(new BigDecimal("100")).intValueExact());
-        reqAmount.setCurrency("CNY");
-        prepayRequest.setAmount(reqAmount);
-
-        Payer payer = new Payer();
-        payer.setOpenid(openid);
-        prepayRequest.setPayer(payer);
-
-        return jsapiService.prepayWithRequestPayment(prepayRequest);
-    }
 }
