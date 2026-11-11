@@ -747,6 +747,9 @@ class PayServiceImplTest {
         PaymentRecord closed = setupPaymentRecord(
                 orderId, PaymentRecord.STATUS_CLOSED, orderNoOf(orderId));
 
+        when(wechatPayGateway.prepay(anyString(), any(), anyString()))
+                .thenThrow(new RuntimeException("prepay failed"));
+
         assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("创建支付订单失败");
@@ -764,6 +767,9 @@ class PayServiceImplTest {
         Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT, user.getId());
         PaymentRecord pending = setupPaymentRecord(
                 orderId, PaymentRecord.STATUS_PENDING, orderNoOf(orderId));
+
+        when(wechatPayGateway.prepay(anyString(), any(), anyString()))
+                .thenThrow(new RuntimeException("prepay failed"));
 
         assertThatThrownBy(() -> payService.prepay(user.getId(), orderId))
                 .isInstanceOf(BusinessException.class)
