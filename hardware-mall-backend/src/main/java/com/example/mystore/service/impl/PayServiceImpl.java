@@ -89,8 +89,8 @@ public class PayServiceImpl implements PayService {
             return params;
         } catch (Exception e) {
             log.error("微信统一下单失败, orderId={}, outTradeNo={}", orderId, prep.outTradeNo(), e);
-            if (prep.created()) {
-                // 本次新建的记录标 CLOSED(独立小事务保证落库)
+            if (prep.closeOnFailure()) {
+                // 本次新建或重新激活的记录标 CLOSED(独立小事务保证落库)
                 // 旧实现在 @Transactional 方法内 catch 后标 CLOSED 再 rethrow, 被整体回滚, 是死代码
                 new TransactionTemplate(transactionManager).executeWithoutResult(status ->
                         paymentRecordMapper.update(null,
@@ -105,7 +105,10 @@ public class PayServiceImpl implements PayService {
     }
 
     /**
-     * prepay 段1（事务内）: 校验订单归属/状态 + 查或建 PENDING 支付记录
+     * prepay 段1（事务内）: 校验订单归属/状态 + 复用或新建支付记录。
+     *
+     * 每个订单只保留一条支付记录(out_trade_no=orderNo 唯一), 失败重试必须复用同一行:
+     * 待支付直接复用; 已关闭 CAS 回待支付后复用; 已支付/退款中/已退款拒绝; 不存在才新建。
      */
     private PendingPrepay preparePrepay(Long userId, Long orderId) {
         Order order = orderMapper.selectById(orderId);
@@ -124,14 +127,35 @@ public class PayServiceImpl implements PayService {
             throw new BusinessException("用户信息异常，请重新登录");
         }
 
-        LambdaQueryWrapper<PaymentRecord> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(PaymentRecord::getOrderId, orderId)
-               .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_PENDING);
-        PaymentRecord existingRecord = paymentRecordMapper.selectOne(wrapper);
-
-        if (existingRecord != null) {
-            // 复用既有 PENDING 记录(上次 prepay HTTP 失败可重试), 失败时不标 CLOSED
-            return new PendingPrepay(existingRecord.getOutTradeNo(), user.getOpenid(), order.getPayAmount(), false);
+        PaymentRecord existing = queryByOrderId(orderId);
+        if (existing != null) {
+            if (existing.getStatus() == PaymentRecord.STATUS_PENDING) {
+                // 复用既有 PENDING 记录(上次 prepay HTTP 失败可重试), 失败时不标 CLOSED
+                return new PendingPrepay(existing.getOutTradeNo(), user.getOpenid(), order.getPayAmount(), false);
+            }
+            if (existing.getStatus() == PaymentRecord.STATUS_CLOSED) {
+                // CAS 回待支付: 并发下只有一方能把同一行重新激活
+                int reopened = paymentRecordMapper.update(null,
+                        new LambdaUpdateWrapper<PaymentRecord>()
+                                .eq(PaymentRecord::getId, existing.getId())
+                                .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_CLOSED)
+                                .set(PaymentRecord::getStatus, PaymentRecord.STATUS_PENDING)
+                                .set(PaymentRecord::getUpdateTime, LocalDateTime.now()));
+                if (reopened == 0) {
+                    throw new BusinessException("支付记录状态已变化，请重试");
+                }
+                return new PendingPrepay(existing.getOutTradeNo(), user.getOpenid(), order.getPayAmount(), true);
+            }
+            if (existing.getStatus() == PaymentRecord.STATUS_PAID) {
+                throw new BusinessException("订单已支付，无法重新发起支付");
+            }
+            if (existing.getStatus() == PaymentRecord.STATUS_REFUNDING) {
+                throw new BusinessException("订单退款中，无法重新发起支付");
+            }
+            if (existing.getStatus() == PaymentRecord.STATUS_REFUNDED) {
+                throw new BusinessException("订单已退款，无法重新发起支付");
+            }
+            throw new BusinessException("支付记录状态异常，无法重新发起支付");
         }
 
         // 商户单号统一为订单号: 微信侧"商户单号" == 我们的订单号, 两端一致
@@ -147,7 +171,7 @@ public class PayServiceImpl implements PayService {
         return new PendingPrepay(outTradeNo, user.getOpenid(), order.getPayAmount(), true);
     }
 
-    private record PendingPrepay(String outTradeNo, String openid, BigDecimal amount, boolean created) {}
+    private record PendingPrepay(String outTradeNo, String openid, BigDecimal amount, boolean closeOnFailure) {}
 
     @Override
     public Map<String, String> callback(String body, String signature, String nonce, String timestamp, String serial) {
