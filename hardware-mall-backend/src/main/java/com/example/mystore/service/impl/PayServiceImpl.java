@@ -2,18 +2,21 @@ package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.example.mystore.common.constant.PaymentAlertConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
 import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.entity.db.User;
+import com.example.mystore.event.LatePaymentRefundEvent;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.mapper.PaymentRecordMapper;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.PayService;
+import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.WechatPayGateway;
 import com.wechat.pay.java.core.exception.ServiceException;
@@ -38,6 +41,10 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class PayServiceImpl implements PayService {
+
+    private static final int HTTP_STATUS_BAD_REQUEST = 400;
+    private static final int HTTP_STATUS_NOT_FOUND = 404;
+    private static final int HTTP_STATUS_SERVER_ERROR = 500;
 
     private final PaymentRecordMapper paymentRecordMapper;
     private final OrderMapper orderMapper;
@@ -172,7 +179,7 @@ public class PayServiceImpl implements PayService {
             return Map.of("code", "SUCCESS", "message", "成功");
         } catch (Exception e) {
             log.error("支付回调处理失败", e);
-            dingTalkAlertService.alert("PAY_CALLBACK_FAIL", "支付回调异常: " + e.getMessage());
+            dingTalkAlertService.alert(PaymentAlertConstants.Alert.PAY_CALLBACK_FAIL, "支付回调异常: " + e.getMessage());
             return Map.of("code", "FAIL", "message", "处理异常");
         }
     }
@@ -225,6 +232,9 @@ public class PayServiceImpl implements PayService {
                 log.error("退款未成功, outTradeNo={}, outRefundNo={}, refundStatus={}",
                         outTradeNo, outRefundNo, refundStatus);
                 rollbackRefund(record, "微信退款状态=" + refundStatus);
+                dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_DEFINITE_FAILED, record.getOrderId(),
+                        "订单=" + record.getOrderId() + " 退款未成功, outRefundNo=" + outRefundNo
+                                + ", refundStatus=" + refundStatus + ", 已回退待处理");
                 return Map.of("code", "SUCCESS", "message", "成功");
             }
 
@@ -232,7 +242,7 @@ public class PayServiceImpl implements PayService {
             return Map.of("code", "SUCCESS", "message", "成功");
         } catch (Exception e) {
             log.error("退款回调处理失败", e);
-            dingTalkAlertService.alert("REFUND_CALLBACK_FAIL",
+            dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_CALLBACK_FAIL,
                     "退款回调处理异常: " + e.getMessage());
             return Map.of("code", "FAIL", "message", "处理异常");
         }
@@ -276,7 +286,7 @@ public class PayServiceImpl implements PayService {
      *   - 已 PAID 直接返回 false(已被处理过)
      *   - SQL 条件 update WHERE id AND status=0, 并发下仅一个 affect=1, 其余 false
      *
-     * 已取消订单收到支付(回调迟到/补单)的 ④ 兜底自动退款也在此处理, 退款失败只 log
+     * 已取消订单收到支付(回调迟到/补单)的 ④ 兜底只发布自动退款事件, 微信外呼在事务提交后异步执行
      *
      * @return true 表示本次成功推进了支付状态(无论是否触发自动退款)
      *         false 表示无需处理(无记录 / 已 PAID / 并发竞争失败) —— 调用方直接 Ack 或跳过
@@ -329,20 +339,14 @@ public class PayServiceImpl implements PayService {
                 record.getOrderId(), transactionId, orderRows);
 
         // ④ 已取消订单(回调迟到/lazy sync 补单) → payment_record 已 PAID 但订单 5(已取消)
-        // 直接 refund(), 不调 orderService.refundOrder() 避免重复恢复库存(自动取消时已恢复)
+        // 事务内只发布事件, 微信退款在提交后由监听器异步发起, 支付回调立即 Ack
         if (orderRows == 0) {
             Order order = orderMapper.selectById(record.getOrderId());
             if (order != null && order.getStatus() == StatusConstants.ORDER_CANCELLED) {
-                log.warn("订单已自动取消但收到支付, 自动退款, orderId={}, transactionId={}",
+                log.warn("订单已自动取消但收到支付, 提交后自动退款, orderId={}, transactionId={}",
                         record.getOrderId(), transactionId);
-                try {
-                    refund(record.getOrderId(), "订单已超时取消,支付迟到,自动退款");
-                } catch (Exception refundErr) {
-                    log.error("自动退款失败, orderId={}, payment_record=PAID 待人工介入",
-                            record.getOrderId(), refundErr);
-                    dingTalkAlertService.alert("AUTO_REFUND_FAIL",
-                            "订单=" + record.getOrderId() + " 已取消但支付回调迟到, 自动退款发起失败: " + refundErr.getMessage());
-                }
+                applicationEventPublisher.publishEvent(
+                        new LatePaymentRefundEvent(record.getOrderId(), outTradeNo));
             }
         }
 
@@ -350,15 +354,14 @@ public class PayServiceImpl implements PayService {
     }
 
     /**
-     * 退款受理: 读记录 → 微信 HTTP → CAS PAID→REFUNDING, 三步各自自动提交（M7 去 @Transactional）
-     * 并发安全: outRefundNo 相同微信侧幂等; 双请求下第二个 CAS affect=0 无害
+     * 退款受理: 读记录 → CAS PAID→REFUNDING → 微信 HTTP, 返回三态结果。
+     * 并发安全: outRefundNo 相同微信侧幂等; 双请求下第二个 CAS affect=0, 按结果未知处理。
      *
-     * 注意: processPaymentSuccess 的 ④ 自动退款路径在事务内 this-调用本方法, HTTP 仍短暂占用外层事务连接 ——
-     * 不套 REQUIRES_NEW 是有意的: 挂起外层事务后新连接读不到未提交的 PAID, 会直接抛"未找到已支付的支付记录";
-     * 该路径罕见(回调迟到兜底)且有钉钉告警兜底, 保持现状
+     * 判定保守: 只有请求未发出(本地校验/签名/配置错误)或微信明确 4xx 业务拒绝才算确定失败并立即回退;
+     * 超时/网络/5xx/响应丢失一律按结果未知, 保持退款中交由回调或对账收敛。
      */
     @Override
-    public void refund(Long orderId, String reason) {
+    public RefundResult refund(Long orderId, String reason) {
         LambdaQueryWrapper<PaymentRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(PaymentRecord::getOrderId, orderId)
                .eq(PaymentRecord::getStatus, PaymentRecord.STATUS_PAID);
@@ -369,8 +372,7 @@ public class PayServiceImpl implements PayService {
         }
 
         // claim-first: CAS PAID→REFUNDING 提前到外呼之前。
-        // 外呼结果未知(超时/响应丢失)时本地已记录"已发起", 由退款回调或对账查询判定最终结果,
-        // 不再停留在 PAID 导致"确定失败"与"响应丢失"无法区分。
+        // 外呼结果未知(超时/响应丢失)时本地已记录"已发起", 由退款回调或对账查询判定最终结果。
         int claimed = paymentRecordMapper.update(null,
                 new LambdaUpdateWrapper<PaymentRecord>()
                         .eq(PaymentRecord::getId, record.getId())
@@ -379,23 +381,47 @@ public class PayServiceImpl implements PayService {
                         .set(PaymentRecord::getRefundAmount, record.getAmount())
                         .set(PaymentRecord::getUpdateTime, LocalDateTime.now()));
         if (claimed == 0) {
-            log.info("退款记录已被并发处理, 跳过本次受理, orderId={}", orderId);
-            return;
+            log.info("退款记录已被并发处理, 按结果未知处理, orderId={}", orderId);
+            dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_RESULT_UNKNOWN, orderId,
+                    "订单=" + orderId + " 退款已被并发受理, 结果未知, 待回调或对账确认");
+            return RefundResult.UNKNOWN;
         }
 
         String outRefundNo = "REFUND_" + record.getOutTradeNo();
         try {
             wechatPayGateway.createRefund(record.getOutTradeNo(), outRefundNo, record.getAmount(), reason);
-
             log.info("退款受理成功, orderId={}, outRefundNo={}, 待回调确认", orderId, outRefundNo);
+            return RefundResult.ACCEPTED;
         } catch (Exception e) {
+            if (isDefiniteFailure(e)) {
+                log.error("退款确定失败, 回退支付记录, orderId={}, outRefundNo={}",
+                        orderId, outRefundNo, e);
+                rollbackRefund(record, "退款确定失败: " + e.getMessage());
+                dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_DEFINITE_FAILED, orderId,
+                        "订单=" + orderId + " 退款确定失败已回退, outRefundNo=" + outRefundNo
+                                + ", error=" + e.getMessage());
+                return RefundResult.DEFINITE_FAILED;
+            }
             // 无法区分"确定失败/响应丢失": 保持 REFUNDING, 交由退款回调或对账查询判定; 不向上抛
             log.error("退款受理结果未知, orderId={}, outRefundNo={}, 保持 REFUNDING 待回调/对账",
                     orderId, outRefundNo, e);
-            dingTalkAlertService.alert("REFUND_FAIL",
-                    "退款受理结果未知, orderId=" + orderId + ", outRefundNo=" + outRefundNo
-                            + ", error=" + e.getMessage());
+            dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_RESULT_UNKNOWN, orderId,
+                    "退款受理结果未知, outRefundNo=" + outRefundNo + ", error=" + e.getMessage());
+            return RefundResult.UNKNOWN;
         }
+    }
+
+    /** 只有请求未发出或微信明确 4xx 业务错误才算确定失败; 其余(超时/网络/5xx/响应校验失败)一律未知 */
+    private static boolean isDefiniteFailure(Exception e) {
+        if (e instanceof IllegalArgumentException) {
+            // 本地校验/签名/配置错误: 请求尚未发出
+            return true;
+        }
+        if (e instanceof ServiceException serviceException) {
+            int statusCode = serviceException.getHttpStatusCode();
+            return statusCode >= HTTP_STATUS_BAD_REQUEST && statusCode < HTTP_STATUS_SERVER_ERROR;
+        }
+        return false;
     }
 
     /**
@@ -443,6 +469,8 @@ public class PayServiceImpl implements PayService {
     /**
      * 退款失败回退: payment_record REFUNDING→PAID(回到可重试态), 订单 6→9(退款失败)。
      * 库存不回补(退款从未发生); cancel_reason 复用记录失败原因, 管理端可见。
+     * 已取消订单(5)的 6→9 条件更新不命中, 订单保持已取消。
+     * 告警由调用方按业务类型发出, 便于区分退款受理失败与对账回退。
      */
     private void rollbackRefund(PaymentRecord record, String reason) {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
@@ -463,8 +491,6 @@ public class PayServiceImpl implements PayService {
                             .set(Order::getUpdateTime, now));
             log.warn("退款失败回退, orderId={}, reason={}, orderAffected={}", record.getOrderId(), reason, orderRows);
         });
-        dingTalkAlertService.alert("REFUND_ROLLBACK",
-                "退款确认失败, 订单已置退款失败(9)待人工处理, orderId=" + record.getOrderId() + ", reason=" + reason);
     }
 
     /**
@@ -483,10 +509,21 @@ public class PayServiceImpl implements PayService {
         try {
             refund = wechatPayGateway.queryRefund(outRefundNo);
         } catch (ServiceException e) {
-            // 微信无此退款单(404 RESOURCE_NOT_EXISTS 等) → 从未受理 → 回退
+            if (e.getHttpStatusCode() != HTTP_STATUS_NOT_FOUND) {
+                // 网络异常/5xx/其他错误不得误判为“无退款单”, 保持退款中并告警
+                log.error("退款对账: 查询微信退款单失败, 保持退款中, orderId={}, outRefundNo={}, code={}, msg={}",
+                        orderId, outRefundNo, e.getErrorCode(), e.getErrorMessage(), e);
+                dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_RESULT_UNKNOWN, orderId,
+                        "退款对账查询微信退款单失败, 保持退款中, outRefundNo=" + outRefundNo
+                                + ", error=" + e.getErrorMessage());
+                return;
+            }
+            // 微信无此退款单(404 RESOURCE_NOT_EXISTS) → 从未受理 → 回退
             log.warn("退款对账: 微信无此退款单, orderId={}, outRefundNo={}, code={}, msg={}",
                     orderId, outRefundNo, e.getErrorCode(), e.getErrorMessage());
             rollbackRefund(record, "对账:微信无此退款单");
+            dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_ROLLBACK, orderId,
+                    "退款对账发现微信无此退款单, 已回退待人工处理, outRefundNo=" + outRefundNo);
             return;
         }
         // 用字符串比较规避 SDK 各版本 Status 类型差异(枚举常量名: SUCCESS/PROCESSING/CLOSED/ABNORMAL)
@@ -497,6 +534,8 @@ public class PayServiceImpl implements PayService {
             log.info("退款对账: 退款处理中, 保留待下轮, orderId={}, outRefundNo={}", orderId, outRefundNo);
         } else {
             rollbackRefund(record, "对账:微信退款状态=" + refundStatus);
+            dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_ROLLBACK, orderId,
+                    "退款对账发现微信退款状态=" + refundStatus + ", 已回退待人工处理, outRefundNo=" + outRefundNo);
         }
     }
 
