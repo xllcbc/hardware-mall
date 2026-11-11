@@ -164,7 +164,7 @@
               link 
               type="warning" 
               v-if="row.status === ORDER_STATUS.REFUND_FAILED
-                || (row.status === ORDER_STATUS.CANCELLED && row.paymentStatus === PAYMENT_STATUS.PAID)" 
+                || (row.status === ORDER_STATUS.CANCELLED && row.paymentStatus === PAYMENT_STATUS.PAID)"
               @click="handleRetryRefund(row)"
             >
               重试退款
