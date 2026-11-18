@@ -121,6 +121,20 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- Flyway CLI 版本与部署镜像保持一致，仅测试使用 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <version>13.12.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+            <version>13.12.2</version>
+            <scope>test</scope>
+        </dependency>
+
 
         <dependency>
             <groupId>com.alibaba.fastjson2</groupId>
