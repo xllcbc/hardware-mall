@@ -60,6 +60,13 @@ job/               — 定时任务
 9. **修改后验证** — 改动完成后运行 `mvn compile` 确认无编译错误
 10. **常量组织** — 第三方协议常量（微信/支付等）按域拆分为嵌套静态类分组（参照 `WechatConstants` 的 `Api`/`Event`/`OrderState`/`Fields`/`Common`/`Alert`），禁止硬编码字符串与魔数；跨域同名不同义的常量（如微信 `order_state` 与本地订单状态）必须物理隔离在不同类中
 
+## 发布与迁移
+
+- 数据库结构只通过 `db/migration/V*.sql` + Flyway 变更；已发布的迁移文件禁止修改。
+- 禁止在 CI workflow 中硬编码迁移文件名，或加入 issue 专属的停写/备份/校验/整库回滚逻辑。
+- 任何 issue 引入的临时发布逻辑（专用迁移、停写窗口、一次性校验脚本）必须在该 issue 收尾时删除或转正。
+- 迁移必须向后兼容（expand/contract）；失败回滚只回镜像，不整库覆盖。
+
 ## Agent skills
 
 ### Issue tracker

@@ -24,8 +24,9 @@ src/main/java/com/example/mystore/
 ## 运行
 
 ```bash
-# 1. 建表 + 初始化基础数据
-mysql -u root -p < src/main/resources/db/init.sql
+# 1. 建库并执行 V1 基线（后续结构变更走 db/migration/V*.sql）
+mysql -u root -p < ../db/bootstrap/00_create_database.sql
+mysql -u root -p hardware_mall < ../db/migration/V1__baseline.sql
 
 # 2. 配置环境变量（.env 不入库）
 cp ../.env.example .env
