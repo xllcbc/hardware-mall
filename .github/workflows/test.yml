@@ -24,8 +24,10 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17.0.21'
           cache: maven
+      - name: Verify JDK trust store (CVE-2026-91403)
+        run: sh hardware-mall-backend/scripts/check-jdk-truststore.sh
       - name: Run pure unit tests
         working-directory: hardware-mall-backend
         env:
@@ -51,8 +53,10 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17.0.21'
           cache: maven
+      - name: Verify JDK trust store (CVE-2026-91403)
+        run: sh hardware-mall-backend/scripts/check-jdk-truststore.sh
       - name: Run Spring H2 tests
         working-directory: hardware-mall-backend
         env:
@@ -81,8 +85,10 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17.0.21'
           cache: maven
+      - name: Verify JDK trust store (CVE-2026-91403)
+        run: sh hardware-mall-backend/scripts/check-jdk-truststore.sh
       - name: Run Testcontainers MySQL and real Redis tests
         working-directory: hardware-mall-backend
         env:

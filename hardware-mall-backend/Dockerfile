@@ -1,13 +1,21 @@
 # syntax=docker/dockerfile:1.6
 FROM maven:3.9-eclipse-temurin-17 AS builder
 WORKDIR /build
+# 构建阶段同样校验：Maven 依赖下载也走 JDK 信任库
+COPY scripts/check-jdk-truststore.sh /usr/local/bin/check-jdk-truststore.sh
+RUN sh /usr/local/bin/check-jdk-truststore.sh
 COPY pom.xml .
 RUN mvn -B -q dependency:resolve
 COPY src ./src
 RUN mvn -B -q clean package -DskipTests
 
-FROM eclipse-temurin:17-jre-alpine
+# 固定补丁版本：17.0.21+9 起 Temurin 已从信任库移除被泄的 eMudhra/Sectigo 根证书
+# （CVE-2026-91403 / CVE-2026-114820，详见 docs/security/CVE-2026-91403.md）。
+# 升级 JDK 时改这里的 tag；脚本会兜底，基础镜像若回退到未修复版本，构建直接失败。
+FROM eclipse-temurin:17.0.21_9-jre-alpine
 WORKDIR /app
+COPY scripts/check-jdk-truststore.sh /usr/local/bin/check-jdk-truststore.sh
+RUN sh /usr/local/bin/check-jdk-truststore.sh
 RUN apk add --no-cache tzdata curl && \
     cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone
