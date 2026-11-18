@@ -26,7 +26,7 @@ run_expect() {
   local expected="$1"
   local command="$2"
   local out
-  out="$("$SCRIPT" "$command")"
+  out="$(bash "$SCRIPT" "$command")"
   if [[ "$out" != "$expected" ]]; then
     echo "expected [$expected] from '$command', got [$out]" >&2
     exit 1
@@ -55,7 +55,7 @@ HISTORY_EXISTS=1 APPLIED=1 run_expect "2,10" pending
 # 6) 非空库、无 history -> require-baseline exit 3
 export HISTORY_EXISTS=0 TABLE_COUNT=7
 set +e
-"$SCRIPT" require-baseline >/dev/null 2>&1
+bash "$SCRIPT" require-baseline >/dev/null 2>&1
 code=$?
 set -e
 [[ "$code" -eq 3 ]] || { echo "expected exit 3, got $code"; exit 1; }
