@@ -65,6 +65,20 @@ bash scripts/release/db-migrate.sh status
 
 任何 `.sql` 文件名都不应出现在 `backend-admin-deploy.yml`；`scripts/ci/check-deploy-workflow.sh` 会在 `ci` 的 `workflow-policy` job 中强制检查。
 
+备份前 `db-backup.sh` 会查询库大小并要求目标磁盘剩余空间 ≥ 2.5 倍库大小（`RELEASE_MIN_FREE_PERCENT` 可覆盖），否则直接失败，避免在 2c/2g 主机上把磁盘写满。
+
+### 清理 scratch 库
+
+预检成功会自动删除 `${DB_NAME}_release_preflight`；失败会保留供排查。`baseline-check.sh` 成功时删除 `${DB_NAME}_baseline_check`，`rollback-drill.sh` 成功时删除 `${DB_NAME}_rollback_drill`。如果失败后需要人工清理：
+
+```sql
+DROP DATABASE IF EXISTS `hardware_mall_release_preflight`;
+DROP DATABASE IF EXISTS `hardware_mall_baseline_check`;
+DROP DATABASE IF EXISTS `hardware_mall_rollback_drill`;
+```
+
+清理前先确认库名以 `${DB_NAME}_` 开头，绝不能对 `hardware_mall` 执行。
+
 ## 5. 失败处理
 
 | 阶段 | 行为 | 人工动作 |
@@ -99,7 +113,7 @@ RELEASE_API_BASE=http://127.0.0.1:8080 RELEASE_ADMIN_BASE=http://127.0.0.1 \
   bash scripts/release/smoke.sh
 ```
 
-两次 smoke 都应通过；数据库保持当前结构。
+两次 smoke 都应通过；数据库保持当前结构。演练成功后脚本会自动删除 `${DB_NAME}_rollback_drill`。
 
 ## 7. Flyway 镜像进入私有仓库
 

@@ -13,6 +13,10 @@ MYSQLDUMP_BIN="${MYSQLDUMP_BIN:-mysqldump}"
 : "${FLYWAY_IMAGE:?set FLYWAY_IMAGE}"
 
 scratch="${DB_NAME}_baseline_check"
+if [[ "$scratch" != "${DB_NAME}_"* || "$scratch" == "$DB_NAME" ]]; then
+  echo "refusing to touch non-scratch database: $scratch" >&2
+  exit 4
+fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 

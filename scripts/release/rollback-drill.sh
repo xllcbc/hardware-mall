@@ -29,6 +29,10 @@ if [[ -n "$previous_image" ]] && ! "$DOCKER_BIN" image inspect "$previous_image"
 fi
 
 scratch="${DB_NAME}_rollback_drill"
+if [[ "$scratch" != "${DB_NAME}_"* || "$scratch" == "$DB_NAME" ]]; then
+  echo "refusing to touch non-scratch database: $scratch" >&2
+  exit 4
+fi
 MYSQL=("$MYSQL_BIN" --protocol=TCP --default-character-set=utf8mb4
   -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USERNAME")
 
@@ -48,3 +52,5 @@ echo "PASS: rollback backup restored to $scratch (${table_count} tables)"
 if [[ -n "$previous_image" ]]; then
   echo "PASS: previous release image present: $previous_image"
 fi
+"${MYSQL[@]}" -e "DROP DATABASE \`$scratch\`"
+echo "Cleaned scratch database: $scratch"
