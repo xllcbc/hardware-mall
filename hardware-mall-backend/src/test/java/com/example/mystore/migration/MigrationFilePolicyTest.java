@@ -20,20 +20,25 @@ class MigrationFilePolicyTest {
     void everyMigration_mustNotCreateOrSwitchDatabase() throws IOException {
         for (Path migration : migrationFiles()) {
             for (String line : Files.readAllLines(migration)) {
-                String trimmed = line.strip();
-                if (trimmed.isEmpty() || trimmed.startsWith("--")) {
+                String withoutComment = line.replaceFirst("--.*$", "");
+                if (withoutComment.isBlank()) {
                     continue;
                 }
-                String upper = trimmed.toUpperCase(Locale.ROOT);
-                assertThat(upper)
-                        .as("%s must not create or switch databases", migration.getFileName())
-                        .doesNotContain("CREATE DATABASE");
-                assertThat(upper)
-                        .as("%s must not switch databases", migration.getFileName())
-                        .doesNotStartWith("USE ");
-                assertThat(upper)
-                        .as("%s must not switch databases", migration.getFileName())
-                        .doesNotStartWith("USE`");
+                for (String statement : withoutComment.split(";")) {
+                    String upper = statement.strip().toUpperCase(Locale.ROOT);
+                    if (upper.isEmpty()) {
+                        continue;
+                    }
+                    assertThat(upper)
+                            .as("%s must not create or switch databases", migration.getFileName())
+                            .doesNotContain("CREATE DATABASE");
+                    assertThat(upper)
+                            .as("%s must not switch databases", migration.getFileName())
+                            .doesNotStartWith("USE ");
+                    assertThat(upper)
+                            .as("%s must not switch databases", migration.getFileName())
+                            .doesNotStartWith("USE`");
+                }
             }
         }
     }
@@ -49,9 +54,11 @@ class MigrationFilePolicyTest {
     }
 
     private static List<Path> migrationFiles() throws IOException {
-        try (Stream<Path> files = Files.list(MIGRATION_DIR)) {
+        try (Stream<Path> files = Files.walk(MIGRATION_DIR)) {
             return files
-                    .filter(path -> path.getFileName().toString().matches("V[^_]+__.*\\.sql"))
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString()
+                            .matches("(V[^_]+|R)__.*\\.sql"))
                     .sorted()
                     .toList();
         }
