@@ -9,6 +9,7 @@ mkdir -p "$tmp/bin" "$tmp/migrations"
 cat > "$tmp/bin/mysql" <<'STUB'
 #!/usr/bin/env bash
 sql="${*: -1}"
+echo "$*" >> "${MYSQL_CALLS:-/dev/null}"
 case "$sql" in
   *"table_name = 'flyway_schema_history'"*) echo "${HISTORY_EXISTS:-0}" ;;
   *"FROM flyway_schema_history"*) printf '%s\n' ${APPLIED:-} ;;
@@ -17,8 +18,15 @@ case "$sql" in
 esac
 STUB
 chmod +x "$tmp/bin/mysql"
+cat > "$tmp/bin/docker" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$DOCKER_ARGS"
+exit 0
+STUB
+chmod +x "$tmp/bin/docker"
 
 export MYSQL_BIN="$tmp/bin/mysql" MIGRATION_DIR="$tmp/migrations"
+export DOCKER_BIN="$tmp/bin/docker" DOCKER_ARGS="$tmp/docker.args" MYSQL_CALLS="$tmp/mysql.calls"
 export DB_HOST=127.0.0.1 DB_PORT=3306 DB_NAME=hardware_mall DB_USERNAME=test MYSQL_PWD=test
 export FLYWAY_IMAGE=example/flyway:13.12.2
 
@@ -52,7 +60,49 @@ HISTORY_EXISTS=1 APPLIED=1 run_expect "2" pending
 touch "$tmp/migrations/V10__later.sql"
 HISTORY_EXISTS=1 APPLIED=1 run_expect "2,10" pending
 
-# 6) 非空库、无 history -> require-baseline exit 3
+# 6) 递归目录中的迁移同样必须被发现
+mkdir -p "$tmp/migrations/sub"
+touch "$tmp/migrations/sub/V20__nested.sql"
+HISTORY_EXISTS=1 APPLIED=1 run_expect "2,10,20" pending
+rm -rf "$tmp/migrations/sub"
+
+# 7) 只读检查不依赖 Flyway 镜像
+out="$(env -u FLYWAY_IMAGE HISTORY_EXISTS=1 APPLIED=1 bash "$SCRIPT" pending)"
+[[ "$out" == "2,10" ]] || { echo "pending without FLYWAY_IMAGE: got [$out]"; exit 1; }
+
+# 8) Flyway 密码不得出现在 docker 命令行参数中
+MYSQL_PWD=super-secret bash "$SCRIPT" migrate-schema scratch >/dev/null
+grep -qxF 'FLYWAY_PASSWORD' "$DOCKER_ARGS" \
+  || { echo "expected bare FLYWAY_PASSWORD env reference"; exit 1; }
+if grep -qF 'super-secret' "$DOCKER_ARGS"; then
+  echo "password leaked into docker argv" >&2
+  exit 1
+fi
+
+# 9) repeatable 迁移不能被静默跳过
+touch "$tmp/migrations/R__refresh.sql"
+set +e
+bash "$SCRIPT" pending >/dev/null 2>&1
+code=$?
+set -e
+rm -f "$tmp/migrations/R__refresh.sql"
+[[ "$code" -eq 4 ]] || { echo "repeatable migration expected exit 4, got $code"; exit 1; }
+
+# 10) 预检库名必须与生产库隔离
+printf 'SELECT 1;\n' > "$tmp/backup.sql"
+sha256sum "$tmp/backup.sql" > "$tmp/backup.sql.sha256"
+: > "$MYSQL_CALLS"
+set +e
+PREFLIGHT_DB=hardware_mall bash "$SCRIPT" preflight "$tmp/backup.sql" >/dev/null 2>&1
+code=$?
+set -e
+[[ "$code" -eq 4 ]] || { echo "same-name preflight expected exit 4, got $code"; exit 1; }
+if grep -q "DROP DATABASE" "$MYSQL_CALLS"; then
+  echo "preflight dropped a database before validating its name" >&2
+  exit 1
+fi
+
+# 11) 非空库、无 history -> require-baseline exit 3
 export HISTORY_EXISTS=0 TABLE_COUNT=7
 set +e
 bash "$SCRIPT" require-baseline >/dev/null 2>&1

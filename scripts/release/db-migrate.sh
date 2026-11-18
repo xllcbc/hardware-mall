@@ -5,7 +5,6 @@ ROOT_DIR="${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 MIGRATION_DIR="${MIGRATION_DIR:-$ROOT_DIR/db/migration}"
 MYSQL_BIN="${MYSQL_BIN:-mysql}"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
-FLYWAY_IMAGE="${FLYWAY_IMAGE:?set FLYWAY_IMAGE}"
 
 : "${DB_HOST:?set DB_HOST}"
 : "${DB_PORT:?set DB_PORT}"
@@ -53,8 +52,12 @@ table_count() {
 }
 
 migration_versions() {
-  find "$MIGRATION_DIR" -maxdepth 1 -type f -name 'V*__*.sql' -printf '%f\n' \
+  find "$MIGRATION_DIR" -type f -name 'V*__*.sql' -printf '%f\n' \
     | sed -E 's/^V([^_]+)__.*/\1/' | sort -V
+}
+
+repeatable_migrations() {
+  find "$MIGRATION_DIR" -type f -name 'R__*.sql' -print -quit
 }
 
 applied_versions() {
@@ -63,20 +66,33 @@ applied_versions() {
 
 flyway_run() {
   local url="$1"
+  local image="${FLYWAY_IMAGE:?set FLYWAY_IMAGE}"
   shift
-  "$DOCKER_BIN" run --rm --network host \
-    -v "$MIGRATION_DIR:/flyway/sql:ro" \
-    -e FLYWAY_URL="$url" \
-    -e FLYWAY_USER="$DB_USERNAME" \
-    -e FLYWAY_PASSWORD="$MYSQL_PWD" \
-    -e FLYWAY_CONNECT_RETRIES=10 \
-    "$FLYWAY_IMAGE" -locations=filesystem:/flyway/sql "$@"
+  # Pass the password via the docker client's environment, never in argv.
+  FLYWAY_URL="$url" \
+  FLYWAY_USER="$DB_USERNAME" \
+  FLYWAY_PASSWORD="$MYSQL_PWD" \
+    "$DOCKER_BIN" run --rm --network host \
+      -v "$MIGRATION_DIR:/flyway/sql:ro" \
+      -e FLYWAY_URL \
+      -e FLYWAY_USER \
+      -e FLYWAY_PASSWORD \
+      -e FLYWAY_CONNECT_RETRIES=10 \
+      "$image" -locations=filesystem:/flyway/sql "$@"
 }
 
 require_migrations() {
   if [[ ! -d "$MIGRATION_DIR" ]]; then
     echo "Migration directory is missing: $MIGRATION_DIR" >&2
     exit 2
+  fi
+}
+
+assert_scratch_name() {
+  local scratch="$1"
+  if [[ "$scratch" != "${DB_NAME}_"* || "$scratch" == "$DB_NAME" ]]; then
+    echo "refusing to touch non-scratch database: $scratch" >&2
+    exit 4
   fi
 }
 
@@ -106,6 +122,11 @@ require_baseline() {
 case "${1:-}" in
   pending)
     require_migrations
+    repeatable="$(repeatable_migrations)"
+    if [[ -n "$repeatable" ]]; then
+      echo "repeatable migrations are not supported by pending detection: $repeatable" >&2
+      exit 4
+    fi
     if history_exists; then
       pending="$(pending_versions)"
       if [[ -z "$pending" ]]; then
@@ -134,6 +155,7 @@ case "${1:-}" in
   preflight)
     backup="${2:?backup path required}"
     require_migrations
+    assert_scratch_name "$PREFLIGHT_DB"
     if [[ ! -s "$backup" ]]; then
       echo "Required backup is missing or empty: $backup" >&2
       exit 2
