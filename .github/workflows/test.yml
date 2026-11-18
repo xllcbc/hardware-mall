@@ -200,6 +200,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Reject issue-specific release logic
         run: bash scripts/ci/check-deploy-workflow.sh
+      - name: Run release script tests
+        run: |
+          bash scripts/release/tests/test-db-migrate.sh
+          bash scripts/release/tests/test-db-scripts.sh
 
   release-gate:
     name: release-gate
