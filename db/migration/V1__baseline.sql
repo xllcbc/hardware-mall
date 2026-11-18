@@ -1,13 +1,7 @@
--- 五金商城系统数据库建表脚本 V2.1
+-- V1 baseline：生产当前结构。已发布，禁止修改。
+-- 新建库先执行 db/bootstrap/00_create_database.sql，再执行本文件（或 flyway migrate）。
 -- 仅包含 DDL（建表）+ 管理员账号 + 物流方式
--- 执行方式: mysql -u root -p < init.sql
 -- 真实商品数据请另执行: mysql -u root -p < seed_real_products.sql
-
-CREATE DATABASE IF NOT EXISTS `hardware_mall`
-    DEFAULT CHARACTER SET utf8mb4
-    COLLATE utf8mb4_general_ci;
-
-USE `hardware_mall`;
 
 -- 用户等级表
 CREATE TABLE IF NOT EXISTS `user_level` (
@@ -297,7 +291,7 @@ INSERT INTO `logistics` (`name`, `code`, `phones`, `sort_order`, `status`) VALUE
 -- 真实商品数据请执行: mysql -u root -p < db/seed_real_products.sql
 
 -- 支付记录表
-CREATE TABLE `payment_record` (
+CREATE TABLE IF NOT EXISTS `payment_record` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `order_id` bigint NOT NULL COMMENT '订单ID',
   `out_trade_no` varchar(64) NOT NULL COMMENT '商户订单号',
