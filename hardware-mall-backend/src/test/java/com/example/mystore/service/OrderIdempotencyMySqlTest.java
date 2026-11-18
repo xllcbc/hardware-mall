@@ -19,7 +19,9 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.MountableFile;
 
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -46,7 +48,9 @@ class OrderIdempotencyMySqlTest {
             .withDatabaseName("hardware_mall")
             .withUsername("test")
             .withPassword("idempotency-test")
-            .withInitScript("db/init.sql");
+            .withCopyFileToContainer(
+                    MountableFile.forHostPath(Path.of("..", "db", "migration", "V1__baseline.sql")),
+                    "/docker-entrypoint-initdb.d/01-v1-baseline.sql");
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {
