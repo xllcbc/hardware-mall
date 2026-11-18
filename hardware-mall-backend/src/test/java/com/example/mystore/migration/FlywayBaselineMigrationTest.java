@@ -58,6 +58,7 @@ class FlywayBaselineMigrationTest {
     @Test
     void arbitraryV2_appliesWithoutAnyPricingFingerprint() throws IOException, SQLException {
         execute("CREATE DATABASE probe");
+        execute("GRANT ALL PRIVILEGES ON probe.* TO '" + MYSQL.getUsername() + "'@'%'");
         Path probeDir = Files.createTempDirectory("flyway-probe");
         Files.copy(MIGRATIONS.resolve("V1__baseline.sql"), probeDir.resolve("V1__baseline.sql"));
         Files.writeString(probeDir.resolve("V2__probe.sql"),
