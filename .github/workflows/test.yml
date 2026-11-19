@@ -1,4 +1,4 @@
-name: pricing-release-gate
+name: ci
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pricing-release-gate-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -24,8 +24,10 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17.0.21'
           cache: maven
+      - name: Verify JDK trust store (CVE-2026-91403)
+        run: sh hardware-mall-backend/scripts/check-jdk-truststore.sh
       - name: Run pure unit tests
         working-directory: hardware-mall-backend
         env:
@@ -51,8 +53,10 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17.0.21'
           cache: maven
+      - name: Verify JDK trust store (CVE-2026-91403)
+        run: sh hardware-mall-backend/scripts/check-jdk-truststore.sh
       - name: Run Spring H2 tests
         working-directory: hardware-mall-backend
         env:
@@ -81,8 +85,10 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17.0.21'
           cache: maven
+      - name: Verify JDK trust store (CVE-2026-91403)
+        run: sh hardware-mall-backend/scripts/check-jdk-truststore.sh
       - name: Run Testcontainers MySQL and real Redis tests
         working-directory: hardware-mall-backend
         env:
@@ -91,6 +97,8 @@ jobs:
           REDIS_PORT: 6379
           JWT_SECRET: ${{ secrets.JWT_SECRET_FOR_TEST || 'ci_test_jwt_secret_32_bytes_long' }}
           TESTCONTAINERS_RYUK_DISABLED: "false"
+          # Testcontainers 1.21.3 pins docker-java to API 1.32; Docker 29 requires >= 1.40.
+          JAVA_TOOL_OPTIONS: "-Dapi.version=1.44"
         run: mvn -B -Pintegration-tests test
 
   admin-build:
@@ -152,7 +160,7 @@ jobs:
 
   browser-e2e:
     name: isolated browser acceptance
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -186,6 +194,19 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  workflow-policy:
+    name: deploy workflow policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject issue-specific release logic
+        run: bash scripts/ci/check-deploy-workflow.sh
+      - name: Run release script tests
+        run: |
+          bash scripts/release/tests/test-db-migrate.sh
+          bash scripts/release/tests/test-db-scripts.sh
+
   release-gate:
     name: release-gate
     if: always()
@@ -197,6 +218,7 @@ jobs:
       - uniapp-h5-build
       - uniapp-mp-build
       - browser-e2e
+      - workflow-policy
     runs-on: ubuntu-latest
     steps:
       - name: Verify every required gate passed
@@ -208,4 +230,5 @@ jobs:
           test "${{ needs.uniapp-h5-build.result }}" = "success"
           test "${{ needs.uniapp-mp-build.result }}" = "success"
           test "${{ needs.browser-e2e.result }}" = "success"
-          echo "All pricing release gates passed."
+          test "${{ needs.workflow-policy.result }}" = "success"
+          echo "All release gates passed."

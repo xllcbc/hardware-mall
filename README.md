@@ -92,8 +92,11 @@ hardware-mall/
 ```bash
 cd hardware-mall-backend
 
-# 建表 + 初始化管理员/物流基础数据
-mysql -u root -p < src/main/resources/db/init.sql
+# 建库
+mysql -u root -p < ../db/bootstrap/00_create_database.sql
+
+# 建表 + 初始化管理员/物流基础数据（后续结构变更走 db/migration/V*.sql）
+mysql -u root -p hardware_mall < ../db/migration/V1__baseline.sql
 
 # 在 hardware-mall-backend/ 下创建 .env，填入数据库、Redis、JWT、微信、OSS 等变量
 #（变量清单见《部署说明》），.env 不会被提交

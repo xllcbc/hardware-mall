@@ -1,5 +1,8 @@
 # 多级用户定价发布 Runbook
 
+> **历史文档（多级定价已上线）**：本文保留用于追溯当时的迁移窗口与验证步骤。
+> 通用发布流程见 `docs/release-runbook.md`；数据库结构变更统一通过 `db/migration/V*.sql` + Flyway 执行。
+
 本文用于 MySQL 8 维护窗口。迁移只接受 production 原始 schema；发现旧批发价
 字段、目标定价结构或关键表缺失时，脚本会在第一条 DDL 前中止。
 

@@ -13,6 +13,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -29,15 +31,17 @@ class PricingReleaseMigrationTest {
 
     private static final String DATABASE = "hardware_mall";
     private static final String SNAPSHOT_RESOURCE = "db/production-original-schema.sql";
-    private static final String BASE_MIGRATION_RESOURCE =
-            "db/migration_2026-11-02_multi_level_pricing_release.sql";
-    private static final String RATE_MIGRATION_RESOURCE =
-            "db/migration_2026-11-09_level_category_rate.sql";
-    private static final String INIT_RESOURCE = "db/init.sql";
-    private static final String VERIFY_RESOURCE = "db/pricing_release_verify.sql";
-    private static final String IDEMPOTENCY_MIGRATION_RESOURCE =
-            "db/migration_2026-11-11_order_idempotency.sql";
-    private static final String IDEMPOTENCY_VERIFY_RESOURCE = "db/order_idempotency_verify.sql";
+    private static final Path LEGACY = Path.of("..", "db", "legacy");
+    private static final Path BASE_MIGRATION =
+            LEGACY.resolve("pricing/2026-11-02_multi_level_pricing_release.sql");
+    private static final Path RATE_MIGRATION =
+            LEGACY.resolve("pricing/2026-11-09_level_category_rate.sql");
+    private static final Path PRICING_VERIFY = LEGACY.resolve("pricing/pricing_release_verify.sql");
+    private static final Path IDEMPOTENCY_MIGRATION =
+            LEGACY.resolve("idempotency/2026-11-11_order_idempotency.sql");
+    private static final Path IDEMPOTENCY_VERIFY =
+            LEGACY.resolve("idempotency/order_idempotency_verify.sql");
+    private static final Path V1 = Path.of("..", "db", "migration", "V1__baseline.sql");
 
     @Container
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.36")
@@ -48,12 +52,12 @@ class PricingReleaseMigrationTest {
     @BeforeAll
     static void copyScriptsToContainer() throws IOException {
         copyResource(SNAPSHOT_RESOURCE, "/tmp/production-original-schema.sql");
-        copyResource(BASE_MIGRATION_RESOURCE, "/tmp/pricing-release.sql");
-        copyResource(RATE_MIGRATION_RESOURCE, "/tmp/pricing-rate-rename.sql");
-        copyResource(INIT_RESOURCE, "/tmp/init.sql");
-        copyResource(VERIFY_RESOURCE, "/tmp/pricing-verify.sql");
-        copyResource(IDEMPOTENCY_MIGRATION_RESOURCE, "/tmp/order-idempotency.sql");
-        copyResource(IDEMPOTENCY_VERIFY_RESOURCE, "/tmp/order-idempotency-verify.sql");
+        copyResource(BASE_MIGRATION, "/tmp/pricing-release.sql");
+        copyResource(RATE_MIGRATION, "/tmp/pricing-rate-rename.sql");
+        copyResource(PRICING_VERIFY, "/tmp/pricing-verify.sql");
+        copyResource(IDEMPOTENCY_MIGRATION, "/tmp/order-idempotency.sql");
+        copyResource(IDEMPOTENCY_VERIFY, "/tmp/order-idempotency-verify.sql");
+        copyResource(V1, "/tmp/v1-baseline.sql");
     }
 
     @BeforeEach
@@ -158,13 +162,12 @@ class PricingReleaseMigrationTest {
         String migrated = "hardware_mall_migrated";
         String initialized = "hardware_mall_initialized";
         loadSnapshot(migrated);
-        copyModifiedResource(INIT_RESOURCE, "/tmp/init-final.sql", DATABASE, initialized);
-        copyModifiedResource(BASE_MIGRATION_RESOURCE, "/tmp/migration-base-final.sql", null, null);
-        copyModifiedResource(RATE_MIGRATION_RESOURCE, "/tmp/migration-rate-final.sql", null, null);
+        assertThat(mysql("-e", "CREATE DATABASE `" + initialized +
+                "` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;").getExitCode()).isZero();
 
-        assertThat(runSqlFile(null, "/tmp/init-final.sql").getExitCode()).isZero();
-        assertThat(runSqlFile(migrated, "/tmp/migration-base-final.sql").getExitCode()).isZero();
-        assertThat(runSqlFile(migrated, "/tmp/migration-rate-final.sql").getExitCode()).isZero();
+        assertThat(runSqlFile(initialized, "/tmp/v1-baseline.sql").getExitCode()).isZero();
+        assertThat(runSqlFile(migrated, "/tmp/pricing-release.sql").getExitCode()).isZero();
+        assertThat(runSqlFile(migrated, "/tmp/pricing-rate-rename.sql").getExitCode()).isZero();
         runIdempotencyMigration(migrated);
 
         assertThat(pricingModelDefinition(initialized))
@@ -395,6 +398,12 @@ class PricingReleaseMigrationTest {
         try (var input = new ClassPathResource(resource).getInputStream()) {
             MYSQL.copyFileToContainer(Transferable.of(input.readAllBytes()), destination);
         }
+    }
+
+    private static void copyResource(Path path, String destination) throws IOException {
+        MYSQL.copyFileToContainer(
+                Transferable.of(Files.readAllBytes(path)),
+                destination);
     }
 
     private static void copyModifiedResource(

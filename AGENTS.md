@@ -12,10 +12,16 @@
 
 ## 构建环境
 - **必须使用 JDK 17 构建**。Lombok 1.18.30 不兼容 JDK 21+，在 JDK 25 上注解处理会静默失效，导致全项目出现大量「找不到 getter/setter」编译错误
-- 若本机 `JAVA_HOME` 指向 JDK 25，需临时切换后再构建（Windows/WSL 示例）：
+- **JDK 17 必须使用已修复的构建（Temurin ≥ `17.0.21+9`）**。更早版本的内置信任库仍信任被泄的 eMudhra/Sectigo 根证书（CVE-2026-91403 / CVE-2026-114820），会危及微信登录/支付的出站 TLS。**版本号本身不能当判据**（Oracle 的 `17.0.21` 就在受影响列表里，Temurin 的 `17.0.21+9` 才是修复版），以脚本校验为准：`sh hardware-mall-backend/scripts/check-jdk-truststore.sh`（CI 与 Docker 构建均已接入），背景见 `docs/security/CVE-2026-91403.md`
+- 本机已装 Temurin `17.0.21+9`：Windows `C:\Users\xllcbc\.jdks\jdk-17.0.21.9`，WSL `~/.local/opt/jdk-17.0.21+9`。若 `JAVA_HOME` 指向 JDK 25 或旧的 `jdk-17.0.3.1`，构建前切换：
   ```
-  cmd.exe /c 'set JAVA_HOME=C:\Progra~1\Java\jdk-17.0.3.1&& mvn -DskipTests compile'
+  cmd.exe /c 'set "JAVA_HOME=C:\Users\xllcbc\.jdks\jdk-17.0.21.9" && mvn -DskipTests compile'
   ```
+  WSL 内直接构建：
+  ```
+  JAVA_HOME=~/.local/opt/jdk-17.0.21+9 mvn -DskipTests compile
+  ```
+- 在 Windows 与 WSL 之间切换构建后若报 `Error reading old mojo status ... inputFiles.lst: Input length = 1`，是另一侧生成的增量编译缓存编码不一致，先 `mvn clean` 再构建
 
 ## 项目结构
 - `hardware-mall-backend/` — Spring Boot 后端
@@ -53,6 +59,13 @@ job/               — 定时任务
 8. **遵循已有模式** — 修改已存在的类时，先观察该类已有的代码风格并保持一致
 9. **修改后验证** — 改动完成后运行 `mvn compile` 确认无编译错误
 10. **常量组织** — 第三方协议常量（微信/支付等）按域拆分为嵌套静态类分组（参照 `WechatConstants` 的 `Api`/`Event`/`OrderState`/`Fields`/`Common`/`Alert`），禁止硬编码字符串与魔数；跨域同名不同义的常量（如微信 `order_state` 与本地订单状态）必须物理隔离在不同类中
+
+## 发布与迁移
+
+- 数据库结构只通过 `db/migration/V*.sql` + Flyway 变更；已发布的迁移文件禁止修改。
+- 禁止在 CI workflow 中硬编码迁移文件名，或加入 issue 专属的停写/备份/校验/整库回滚逻辑。
+- 任何 issue 引入的临时发布逻辑（专用迁移、停写窗口、一次性校验脚本）必须在该 issue 收尾时删除或转正。
+- 迁移必须向后兼容（expand/contract）；失败回滚只回镜像，不整库覆盖。
 
 ## Agent skills
 
