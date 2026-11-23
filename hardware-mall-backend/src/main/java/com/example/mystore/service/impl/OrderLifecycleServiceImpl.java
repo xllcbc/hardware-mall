@@ -31,6 +31,9 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
     /** 确认收货: 仅已发货可推进（自动确认收货复用同一前驱集合） */
     static final Set<Integer> CONFIRM_RECEIVE_FROM = Set.of(StatusConstants.ORDER_SHIPPED);
 
+    /** 发货: 仅待发货可发货 */
+    static final Set<Integer> SHIP_FROM = Set.of(StatusConstants.ORDER_PENDING_SHIPMENT);
+
     /** 用户申请退款: 待发货或已发货可申请 */
     static final Set<Integer> APPLY_REFUND_FROM = Set.of(
             StatusConstants.ORDER_PENDING_SHIPMENT, StatusConstants.ORDER_SHIPPED);
@@ -51,12 +54,7 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
 
     @Override
     public void confirmReceive(Long userId, Long orderId) {
-        Order order = requireOwnedOrder(userId, orderId);
-        if (!CONFIRM_RECEIVE_FROM.contains(order.getStatus())) {
-            throw new BusinessException("只能确认收货已发货的订单");
-        }
-        int affected = completeReceive(orderId);
-        requireAffected(affected);
+        confirmReceiveLocally(userId, orderId);
     }
 
     @Override
@@ -141,7 +139,7 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
     @Override
     public void shipOrder(Long orderId, Integer deliveryType, Long logisticsId) {
         Order order = requireOrder(orderId);
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT) {
+        if (!SHIP_FROM.contains(order.getStatus())) {
             throw new BusinessException("只能发货待发货的订单");
         }
 
@@ -165,7 +163,7 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
 
         // CAS 条件更新: 仅当状态仍为待发货时置为已发货, 防与并发申请退款(2→8)/直退(2→6)/重复发货互相覆盖
         int affected = OrderStatusTransition.apply(
-                orderMapper, orderId, Set.of(StatusConstants.ORDER_PENDING_SHIPMENT), StatusConstants.ORDER_SHIPPED,
+                orderMapper, orderId, SHIP_FROM, StatusConstants.ORDER_SHIPPED,
                 wrapper -> wrapper
                         .set(Order::getDeliveryType, deliveryType)
                         .set(Order::getLogisticsId, finalLogisticsId)
@@ -187,7 +185,7 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
         if (order.getStatus() == StatusConstants.ORDER_COMPLETED) {
             return; // 已完成, 幂等
         }
-        if (order.getStatus() != StatusConstants.ORDER_SHIPPED) {
+        if (!CONFIRM_RECEIVE_FROM.contains(order.getStatus())) {
             throw new BusinessException("当前订单状态不支持确认收货");
         }
         // 以微信 order_state 为准: 仅 确认收货/交易完成 才算数
@@ -201,13 +199,22 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
                 .eq(Order::getId, orderId)
                 .set(Order::getWechatOrderState, state)
                 .set(Order::getUpdateTime, LocalDateTime.now()));
-        // 经生命周期命令执行本地确认收货; confirmReceive 无事务注解, 内部调用不涉及代理语义
-        confirmReceive(userId, orderId);
+        // 复用同一确认收货命令, 避免公共方法自调用导致未来事务注解失效
+        confirmReceiveLocally(userId, orderId);
     }
 
     /** 同城配送单号: 后端自动生成, 前缀 PS + 雪花ID */
-    String generateDeliveryNo() {
+    private String generateDeliveryNo() {
         return "PS" + IdWorker.getIdStr();
+    }
+
+    /** 确认收货公共步骤: 所有权/前驱预检 + 单语句 3→4; 供用户确认与微信确认共用 */
+    private void confirmReceiveLocally(Long userId, Long orderId) {
+        Order order = requireOwnedOrder(userId, orderId);
+        if (!CONFIRM_RECEIVE_FROM.contains(order.getStatus())) {
+            throw new BusinessException("只能确认收货已发货的订单");
+        }
+        requireAffected(completeReceive(orderId));
     }
 
     private int completeReceive(Long orderId) {

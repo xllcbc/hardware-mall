@@ -44,6 +44,9 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class OrderLifecycleServiceImplTest {
 
+    /** 未定义的发货方式: 发货方式规则只接受同城/自提 */
+    private static final int UNSUPPORTED_DELIVERY_TYPE = 1;
+
     @Mock
     private OrderMapper orderMapper;
     @Mock
@@ -398,15 +401,10 @@ class OrderLifecycleServiceImplTest {
     }
 
     @Test
-    void generateDeliveryNo_keepsBackendPrefix() {
-        assertThat(lifecycleService.generateDeliveryNo()).startsWith("PS");
-    }
-
-    @Test
     void shipOrder_invalidDeliveryType_rejectsBeforeWrite() {
         when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_SHIPMENT));
 
-        assertThatThrownBy(() -> lifecycleService.shipOrder(1L, 1, null))
+        assertThatThrownBy(() -> lifecycleService.shipOrder(1L, UNSUPPORTED_DELIVERY_TYPE, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("不支持的发货方式");
 
@@ -585,9 +583,10 @@ class OrderLifecycleServiceImplTest {
                 .contains(wechatState,
                         StatusConstants.ORDER_SHIPPED,
                         StatusConstants.ORDER_COMPLETED);
-        assertThat(capturedSqlSets(2))
-                .anySatisfy(sqlSet -> assertThat(sqlSet).contains("wechat_order_state="))
-                .anySatisfy(sqlSet -> assertThat(sqlSet).contains("receive_time="));
+        // 先记录微信状态, 再执行本地 3→4
+        java.util.List<String> sqlSets = capturedSqlSets(2);
+        assertThat(sqlSets.get(0)).contains("wechat_order_state=");
+        assertThat(sqlSets.get(1)).contains("receive_time=");
     }
 
     private Logistics enabledLogistics(Long id) {
