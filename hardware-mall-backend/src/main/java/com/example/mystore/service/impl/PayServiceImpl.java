@@ -111,6 +111,9 @@ public class PayServiceImpl implements PayService {
 
         // 金额在事务内先换算：子分/负数直接回滚，不留下支付记录，也不把业务错误包装成网关失败
         long amountInCents = MoneyUtil.yuanToCents(order.getPayAmount());
+        if (amountInCents > WechatConstants.Pay.MAX_TOTAL_CENTS) {
+            throw new BusinessException("订单金额超出微信支付上限");
+        }
 
         PaymentRecord existing = queryByOrderId(orderId);
         if (existing != null) {
@@ -193,7 +196,9 @@ public class PayServiceImpl implements PayService {
 
             long expectedAmountInCents = MoneyUtil.yuanToCents(record.getAmount());
             if (totalAmount.longValue() != expectedAmountInCents) {
-                log.error("支付金额不一致, outTradeNo={}, 期望分={}, 实际分={}", outTradeNo, expectedAmountInCents, totalAmount);
+                log.error("支付金额不一致, outTradeNo={}, 期望={}分({}元), 实际={}分({}元)", outTradeNo,
+                        expectedAmountInCents, MoneyUtil.centsToYuan(expectedAmountInCents),
+                        totalAmount, MoneyUtil.centsToYuan(totalAmount));
                 return Map.of("code", "FAIL", "message", "支付金额不一致");
             }
 
@@ -625,7 +630,17 @@ public class PayServiceImpl implements PayService {
      * 受理成功保持退款中; 确定失败回退; 结果未知保持退款中并告警。
      */
     private void resubmitRefund(PaymentRecord record, String outRefundNo) {
-        long amountInCents = MoneyUtil.yuanToCents(record.getAmount());
+        long amountInCents;
+        try {
+            amountInCents = MoneyUtil.yuanToCents(record.getAmount());
+        } catch (BusinessException e) {
+            // 金额非法属于本地校验失败，与微信明确拒绝同样处理：回退并告警，避免每轮对账静默重试
+            rollbackRefund(record, "退款对账金额非法: " + e.getMessage());
+            dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_DEFINITE_FAILED,
+                    record.getOrderId(), "订单=" + record.getOrderId() + " 退款对账金额非法已回退, outRefundNo="
+                            + outRefundNo + ", error=" + e.getMessage());
+            return;
+        }
         if (record.getStatus() == PaymentRecord.STATUS_PAID && !claimPaidRefund(record)) {
             log.info("退款对账: 支付记录已被并发处理, 跳过补发, orderId={}", record.getOrderId());
             return;

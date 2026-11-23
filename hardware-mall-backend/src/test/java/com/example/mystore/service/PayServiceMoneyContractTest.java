@@ -13,6 +13,7 @@ import com.example.mystore.mapper.PaymentRecordMapper;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.impl.DingTalkAlertService;
 import com.example.mystore.service.impl.PayServiceImpl;
+import com.wechat.pay.java.core.exception.ServiceException;
 import com.wechat.pay.java.core.notification.NotificationParser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
@@ -31,6 +32,11 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -95,6 +101,20 @@ class PayServiceMoneyContractTest {
     }
 
     @Test
+    void prepayRejectsAmountBeyondWechatIntegerTotalWithoutCallingGateway() {
+        Order order = newOrder("30000000.00");
+        when(orderMapper.selectById(order.getId())).thenReturn(order);
+        when(userMapper.selectById(order.getUserId())).thenReturn(newUser(order.getUserId()));
+        when(transactionManager.getTransaction(any())).thenReturn(transactionStatus);
+
+        assertThatThrownBy(() -> payService.prepay(order.getUserId(), order.getId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("微信支付上限");
+
+        verifyNoInteractions(wechatPayGateway);
+    }
+
+    @Test
     void refundSendsPaymentAmountInCentsToGateway() {
         PaymentRecord record = newPaidRecord("88.88");
         when(paymentRecordMapper.selectOne(any())).thenReturn(record);
@@ -118,6 +138,29 @@ class PayServiceMoneyContractTest {
 
         verifyNoInteractions(wechatPayGateway);
         verify(paymentRecordMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void reconcileRefundAlertsAndRollsBackWhenAmountIsSubCent() {
+        PaymentRecord record = newPaidRecord("88.881");
+        record.setStatus(PaymentRecord.STATUS_REFUNDING);
+        doThrow(serviceException(404, "RESOURCE_NOT_EXISTS", "退款单不存在"))
+                .when(wechatPayGateway).queryRefund("REFUND_" + record.getOutTradeNo());
+        when(transactionManager.getTransaction(any())).thenReturn(transactionStatus);
+
+        payService.reconcileRefund(record);
+
+        verify(wechatPayGateway, never()).createRefund(anyString(), anyString(), anyLong(), anyString());
+        verify(paymentRecordMapper, atLeastOnce()).update(any(), any());
+        verify(dingTalkAlertService).alert(eq("REFUND_DEFINITE_FAILED"), eq(record.getOrderId()), anyString());
+    }
+
+    private static ServiceException serviceException(int httpStatus, String errorCode, String errorMessage) {
+        ServiceException e = org.mockito.Mockito.mock(ServiceException.class);
+        when(e.getHttpStatusCode()).thenReturn(httpStatus);
+        when(e.getErrorCode()).thenReturn(errorCode);
+        when(e.getErrorMessage()).thenReturn(errorMessage);
+        return e;
     }
 
     private static Order newOrder(String payAmount) {

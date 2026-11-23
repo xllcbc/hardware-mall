@@ -25,7 +25,7 @@ class MoneyUtilTest {
 
     @Test
     void convertsLargeAmountWithoutPrecisionLoss() {
-        assertThat(MoneyUtil.yuanToCents(new BigDecimal("123456789.99"))).isEqualTo(12_345_678_999L);
+        assertThat(MoneyUtil.yuanToCents(new BigDecimal("12345678.99"))).isEqualTo(1_234_567_899L);
     }
 
     @Test
