@@ -764,17 +764,21 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void testCancelOrder_NotPending() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setUserId(2L);
-        order.setStatus(StatusConstants.ORDER_SHIPPED); // 已发货，不是待付款
+    void cancelOrder_delegatesToLifecycleModule() {
+        orderService.cancelOrder(2L, 1L, "不想要了");
 
-        when(orderMapper.selectById(1L)).thenReturn(order);
+        verify(orderLifecycleService).cancelOrder(2L, 1L, "不想要了");
+        verifyNoInteractions(orderMapper);
+    }
 
-        assertThatThrownBy(() -> orderService.cancelOrder(2L, 1L, "不想要了"))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("只能取消待付款的订单");
+    @Test
+    void autoCancelOrder_delegatesToLifecycleModule() {
+        when(orderLifecycleService.autoCancelOrder(1L, "超时未支付")).thenReturn(true);
+
+        assertThat(orderService.autoCancelOrder(1L, "超时未支付")).isTrue();
+
+        verify(orderLifecycleService).autoCancelOrder(1L, "超时未支付");
+        verifyNoInteractions(orderMapper);
     }
 
     @Test
@@ -783,33 +787,6 @@ class OrderServiceImplTest {
 
         verify(orderLifecycleService).shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 2L);
         verifyNoInteractions(orderMapper, logisticsMapper);
-    }
-
-    @Test
-    void testAutoCancelOrder_Idempotent_AlreadyCancelled() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_CANCELLED); // 已取消
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-
-        boolean result = orderService.autoCancelOrder(1L, "超时未支付");
-
-        assertThat(result).isFalse();
-        verify(orderMapper, never()).updateById(org.mockito.Mockito.<Order>any());
-    }
-
-    @Test
-    void testAutoCancelOrder_Idempotent_NotPending() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_COMPLETED); // 已完成
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-
-        boolean result = orderService.autoCancelOrder(1L, "超时未支付");
-
-        assertThat(result).isFalse();
     }
 
     @Test
