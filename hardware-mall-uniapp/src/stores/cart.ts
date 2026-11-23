@@ -22,6 +22,10 @@ export const useCartStore = defineStore('cart', () => {
     sellableItems.value.filter(item => item.selected)
   )
 
+  const pickedItems = computed(() =>
+    items.value.filter(item => item.selected)
+  )
+
   const selectedTotal = computed(() =>
     selectedItems.value.reduce((sum, item) => sum + subtotalOf(item), 0)
   )
@@ -69,7 +73,9 @@ export const useCartStore = defineStore('cart', () => {
   }
 
   async function clearSelected() {
-    const selectedIds = items.value.filter(item => item.selected).map(i => i.cartId!)
+    const selectedIds = items.value
+      .filter(item => item.selected && item.sellable !== false)
+      .map(i => i.cartId!)
     try {
       for (const cartId of selectedIds) {
         await removeFromCart(cartId)
@@ -94,6 +100,7 @@ export const useCartStore = defineStore('cart', () => {
     count,
     sellableItems,
     selectedItems,
+    pickedItems,
     selectedTotal,
     addItem,
     updateQuantity,

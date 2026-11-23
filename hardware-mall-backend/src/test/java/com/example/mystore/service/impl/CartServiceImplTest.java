@@ -5,24 +5,25 @@ import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Cart;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
-import com.example.mystore.entity.dto.LevelRateTable;
+import com.example.mystore.entity.dto.LevelPricing;
+import com.example.mystore.entity.dto.ProductPricingFacts;
 import com.example.mystore.entity.vo.CartItemVO;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.mapper.CartMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.LevelPricingService;
-import com.example.mystore.service.PriceService;
-import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.util.UserContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -30,12 +31,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * 购物车模块与等级定价模块的接线测试：断言购物车如何采纳模块的可售性与等级结算价，
+ * 倍率、缺口与取整规则本身由等级定价模块契约测试覆盖。
+ */
 @ExtendWith(MockitoExtension.class)
 class CartServiceImplTest {
 
@@ -46,16 +53,12 @@ class CartServiceImplTest {
     @Mock
     private SpuMapper spuMapper;
     @Mock
-    private PricingRuleService pricingRuleService;
-
-    private final PriceService priceService = new PriceServiceImpl();
+    private LevelPricingService levelPricingService;
 
     private CartServiceImpl cartService;
 
     @BeforeEach
     void setUp() {
-        LevelPricingService levelPricingService =
-                new LevelPricingServiceImpl(pricingRuleService, priceService);
         cartService = new CartServiceImpl(cartMapper, skuService, spuMapper, levelPricingService);
     }
 
@@ -65,10 +68,11 @@ class CartServiceImplTest {
     }
 
     @Test
-    void customLevel_cartUsesCategoryRate() {
+    void cartAdoptsModuleSettlementPriceForSellableLine() {
         UserContext.setLevelId(2L);
-        stubRateTable(2L, Map.of(1L, new BigDecimal("0.8000")));
         stubSingleCart(sku(), spu());
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(priced(2L, "20.00")));
 
         List<CartItemVO> result = cartService.getCartList(1L);
 
@@ -76,20 +80,17 @@ class CartServiceImplTest {
         assertThat(vo.isSellable()).isTrue();
         assertThat(vo.getPrice()).isEqualByComparingTo("20.00");
         assertThat(vo.getSubtotal()).isEqualByComparingTo("40.00");
-    }
+        assertThat(vo.getMinPrice()).isEqualByComparingTo("20.00");
+        assertThat(vo.getMaxPrice()).isEqualByComparingTo("20.00");
 
-    @Test
-    void retailUser_cartShowsRetailPriceAndSubtotal() {
-        UserContext.setLevelId(1L);
-        stubRateTable(1L, Map.of(1L, BigDecimal.ONE));
-        stubSingleCart(sku(), spu());
-
-        List<CartItemVO> result = cartService.getCartList(1L);
-
-        CartItemVO vo = result.get(0);
-        assertThat(vo.isSellable()).isTrue();
-        assertThat(vo.getPrice()).isEqualByComparingTo("25.00");
-        assertThat(vo.getSubtotal()).isEqualByComparingTo("50.00");
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ProductPricingFacts>> facts =
+                ArgumentCaptor.forClass(List.class);
+        verify(levelPricingService).priceAll(eq(2L), facts.capture());
+        assertThat(facts.getValue()).hasSize(1);
+        assertThat(facts.getValue().get(0).categoryId()).isEqualTo(1L);
+        assertThat(facts.getValue().get(0).basePriceMin()).isEqualByComparingTo("25.00");
+        assertThat(facts.getValue().get(0).excludeDiscount()).isFalse();
     }
 
     @Test
@@ -100,10 +101,11 @@ class CartServiceImplTest {
 
         assertThat(result).isEmpty();
         verify(skuService, never()).getSkuMapByIds(any());
+        verify(levelPricingService, never()).priceAll(any(), anyList());
     }
 
     @Test
-    void offShelfSpu_lineIsSkipped() {
+    void offShelfSpu_lineIsSkippedWithoutPricing() {
         UserContext.setLevelId(1L);
         when(cartMapper.selectList(any())).thenReturn(List.of(cart()));
         when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
@@ -114,10 +116,11 @@ class CartServiceImplTest {
         List<CartItemVO> result = cartService.getCartList(1L);
 
         assertThat(result).isEmpty();
+        verify(levelPricingService, never()).priceAll(any(), anyList());
     }
 
     @Test
-    void cartList_usesBatchSkuLookup() {
+    void cartList_usesOneBatchLookupAndOneModuleCall() {
         UserContext.setLevelId(1L);
         Cart first = cart();
         Cart second = cart();
@@ -132,21 +135,23 @@ class CartServiceImplTest {
                 .thenReturn(Map.of(1L, firstSku, 2L, secondSku));
         when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(spu()));
         when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(firstSku));
-        stubRateTable(1L, Map.of(1L, BigDecimal.ONE));
+        when(levelPricingService.priceAll(eq(1L), anyList()))
+                .thenAnswer(invocation -> pricedAll(invocation.getArgument(1), 1L, "25.00"));
 
         List<CartItemVO> result = cartService.getCartList(1L);
 
         assertThat(result).hasSize(2);
         verify(skuService, times(1)).getSkuMapByIds(any());
         verify(skuService, never()).getSkuById(any());
-        verify(pricingRuleService, times(1)).rateTable(1L);
+        verify(levelPricingService, times(1)).priceAll(eq(1L), anyList());
     }
 
     @Test
     void gapLineIsReturnedUnsellableWithoutFailingThePage() {
         UserContext.setLevelId(2L);
-        stubRateTable(2L, Map.of());
         stubSingleCart(sku(), spu());
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(LevelPricing.missing(2L)));
 
         List<CartItemVO> result = cartService.getCartList(1L);
 
@@ -185,7 +190,15 @@ class CartServiceImplTest {
         when(spuMapper.selectBatchIds(any())).thenReturn(List.of(normalSpu, gapSpu));
         when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(normalSku));
         when(skuService.getSkusBySpu(2L, 1)).thenReturn(List.of(gapSku));
-        stubRateTable(2L, Map.of(1L, new BigDecimal("0.8000")));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenAnswer(invocation -> {
+                    List<ProductPricingFacts> facts = invocation.getArgument(1);
+                    return facts.stream()
+                            .map(fact -> fact.categoryId().equals(1L)
+                                    ? priced(2L, "20.00")
+                                    : LevelPricing.missing(2L))
+                            .toList();
+                });
 
         List<CartItemVO> result = cartService.getCartList(1L);
 
@@ -210,11 +223,32 @@ class CartServiceImplTest {
     }
 
     @Test
-    void addToCart_gapIsRejected() {
+    void addToCart_passesCurrentLevelAndSkuBasePriceToModule() {
         UserContext.setLevelId(2L);
-        stubRateTable(2L, Map.of());
         when(skuService.getSkuById(1L)).thenReturn(sku());
         when(spuMapper.selectById(1L)).thenReturn(spu());
+        when(levelPricingService.price(eq(2L), any(ProductPricingFacts.class)))
+                .thenReturn(priced(2L, "20.00"));
+        when(cartMapper.selectOne(any())).thenReturn(cart());
+
+        Cart result = cartService.addToCart(1L, 1L, 2);
+
+        assertThat(result).isNotNull();
+        verify(cartMapper).insertOrUpdateQuantity(1L, 1L, 2);
+        ArgumentCaptor<ProductPricingFacts> facts =
+                ArgumentCaptor.forClass(ProductPricingFacts.class);
+        verify(levelPricingService).price(eq(2L), facts.capture());
+        assertThat(facts.getValue().basePriceMin()).isEqualByComparingTo("25.00");
+        assertThat(facts.getValue().excludeDiscount()).isFalse();
+    }
+
+    @Test
+    void addToCart_gapIsRejected() {
+        UserContext.setLevelId(2L);
+        when(skuService.getSkuById(1L)).thenReturn(sku());
+        when(spuMapper.selectById(1L)).thenReturn(spu());
+        when(levelPricingService.price(eq(2L), any(ProductPricingFacts.class)))
+                .thenReturn(LevelPricing.missing(2L));
 
         assertThatThrownBy(() -> cartService.addToCart(1L, 1L, 2))
                 .isInstanceOf(BusinessException.class)
@@ -223,53 +257,39 @@ class CartServiceImplTest {
     }
 
     @Test
-    void addToCart_excludeDiscountResolvesRetailPricing() {
+    void addToCart_excludeDiscountPassesRetailFactToModule() {
         UserContext.setLevelId(2L);
         Spu excluded = spu();
         excluded.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
         when(skuService.getSkuById(1L)).thenReturn(sku());
         when(spuMapper.selectById(1L)).thenReturn(excluded);
-        when(pricingRuleService.resolveRetailLevelId()).thenReturn(1L);
-        stubRateTable(1L, Map.of(1L, BigDecimal.ONE));
+        when(levelPricingService.price(eq(2L), any(ProductPricingFacts.class)))
+                .thenReturn(LevelPricing.priced(1L, BigDecimal.ONE, new BigDecimal("25.00"), new BigDecimal("25.00")));
         when(cartMapper.selectOne(any())).thenReturn(cart());
 
         Cart result = cartService.addToCart(1L, 1L, 2);
 
         assertThat(result).isNotNull();
         verify(cartMapper).insertOrUpdateQuantity(1L, 1L, 2);
+        ArgumentCaptor<ProductPricingFacts> facts =
+                ArgumentCaptor.forClass(ProductPricingFacts.class);
+        verify(levelPricingService).price(eq(2L), facts.capture());
+        assertThat(facts.getValue().excludeDiscount()).isTrue();
     }
 
     @Test
     void updateQuantity_gapIsRejected() {
         UserContext.setLevelId(2L);
-        stubRateTable(2L, Map.of());
         when(cartMapper.selectById(1L)).thenReturn(cart());
         when(skuService.getSkuById(1L)).thenReturn(sku());
         when(spuMapper.selectById(1L)).thenReturn(spu());
+        when(levelPricingService.price(eq(2L), any(ProductPricingFacts.class)))
+                .thenReturn(LevelPricing.missing(2L));
 
         assertThatThrownBy(() -> cartService.updateQuantity(1L, 1L, 3))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("商品暂不可售");
         verify(cartMapper, never()).updateById(any(Cart.class));
-    }
-
-    @Test
-    void retailUser_excludeDiscountCartUsesRetailRate() {
-        UserContext.setLevelId(2L);
-        Spu excluded = spu();
-        excluded.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
-        when(cartMapper.selectList(any())).thenReturn(List.of(cart()));
-        when(skuService.getSkuMapByIds(List.of(1L))).thenReturn(Map.of(1L, sku()));
-        when(spuMapper.selectBatchIds(List.of(1L))).thenReturn(List.of(excluded));
-        when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(sku()));
-        when(pricingRuleService.resolveRetailLevelId()).thenReturn(1L);
-        stubRateTable(1L, Map.of(1L, BigDecimal.ONE));
-
-        List<CartItemVO> result = cartService.getCartList(1L);
-
-        assertThat(result.get(0).isSellable()).isTrue();
-        assertThat(result.get(0).getPrice()).isEqualByComparingTo("25.00");
-        assertThat(result.get(0).getSubtotal()).isEqualByComparingTo("50.00");
     }
 
     private void stubSingleCart(Sku sku, Spu spu) {
@@ -279,9 +299,14 @@ class CartServiceImplTest {
         when(skuService.getSkusBySpu(1L, 1)).thenReturn(List.of(sku));
     }
 
-    private void stubRateTable(long levelId, Map<Long, BigDecimal> rates) {
-        when(pricingRuleService.rateTable(levelId))
-                .thenReturn(new LevelRateTable(levelId, rates));
+    private LevelPricing priced(Long levelId, String price) {
+        BigDecimal value = new BigDecimal(price);
+        return LevelPricing.priced(levelId, BigDecimal.ONE, value, value);
+    }
+
+    private List<LevelPricing> pricedAll(
+            List<ProductPricingFacts> facts, Long levelId, String price) {
+        return Collections.nCopies(facts.size(), priced(levelId, price));
     }
 
     private Cart cart() {

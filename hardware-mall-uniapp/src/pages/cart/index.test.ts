@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CartPage from './index.vue'
-import { getCartList } from '@/api/cart'
+import { getCartList, removeFromCart } from '@/api/cart'
 import { useCartStore } from '@/stores/cart'
 import { requireLogin } from '@/utils/auth'
 import type { CartItem } from '@/types'
@@ -120,5 +120,27 @@ describe('cart page unsellable rows', () => {
 
     expect(requireLogin).not.toHaveBeenCalled()
     expect(uniMock.navigateTo).not.toHaveBeenCalled()
+  })
+
+  it('still lets the user select and delete a gap row in manage mode', async () => {
+    vi.mocked(getCartList).mockResolvedValue([gapItem()])
+
+    const wrapper = mountCart()
+    await flushPromises()
+
+    await wrapper.find('.manage-btn').trigger('tap')
+    const gapRow = wrapper.find('.cart-item')
+    await gapRow.find('.item-checkbox').trigger('tap')
+    expect(gapRow.find('.checkbox').classes()).toContain('checked')
+
+    await wrapper.find('.delete-btn').trigger('tap')
+    expect(uniMock.showModal).toHaveBeenCalled()
+    const modal = uniMock.showModal.mock.calls[0][0] as {
+      success: (res: { confirm: boolean; cancel: boolean }) => void
+    }
+    modal.success({ confirm: true, cancel: false })
+    await flushPromises()
+
+    expect(removeFromCart).toHaveBeenCalledWith(2)
   })
 })

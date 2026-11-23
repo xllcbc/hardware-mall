@@ -19,7 +19,7 @@
 
       <scroll-view class="cart-list" scroll-y>
         <view class="cart-item" v-for="item in cartStore.items" :key="item.skuId" :class="{ unsellable: item.sellable === false }">
-          <view class="item-checkbox" :class="{ disabled: item.sellable === false }" @tap="toggleSelect(item)">
+          <view class="item-checkbox" :class="{ disabled: item.sellable === false && !manageMode }" @tap="toggleSelect(item)">
             <view class="checkbox" :class="{ checked: item.selected }">
               <text v-if="item.selected" class="check-icon">✓</text>
             </view>
@@ -82,7 +82,7 @@
           </template>
           <template v-else>
             <view class="favorite-btn" @tap="moveToFavorites">添加收藏</view>
-            <view class="delete-btn" :class="{ disabled: !cartStore.selectedItems.length }" @tap="deleteSelected">
+            <view class="delete-btn" :class="{ disabled: !cartStore.pickedItems.length }" @tap="deleteSelected">
               删除
             </view>
           </template>
@@ -136,8 +136,12 @@ const goLogin = () => {
   uni.navigateTo({ url: '/pages/login/index' })
 }
 
+const selectableItems = computed(() =>
+  manageMode.value ? cartStore.items : cartStore.sellableItems
+)
+
 const isSelectAll = computed(() =>
-  cartStore.sellableItems.length > 0 && cartStore.sellableItems.every(item => item.selected)
+  selectableItems.value.length > 0 && selectableItems.value.every(item => item.selected)
 )
 
 const formatPrice = (price: number | null) => (price ?? 0).toFixed(2)
@@ -156,13 +160,13 @@ const toggleManageMode = () => {
 }
 
 const toggleSelect = (item: CartItem) => {
-  if (item.sellable === false) return
+  if (item.sellable === false && !manageMode.value) return
   item.selected = !item.selected
 }
 
 const toggleSelectAll = () => {
   const allSelected = isSelectAll.value
-  cartStore.sellableItems.forEach(item => {
+  selectableItems.value.forEach(item => {
     item.selected = !allSelected
   })
 }
@@ -172,13 +176,14 @@ const updateQuantity = (item: CartItem, quantity: number) => {
 }
 
 const deleteSelected = () => {
-  if (!cartStore.selectedItems.length) return
+  const pickedItems = cartStore.pickedItems
+  if (!pickedItems.length) return
   uni.showModal({
     title: '提示',
-    content: `确定删除选中的 ${cartStore.selectedItems.length} 件商品?`,
+    content: `确定删除选中的 ${pickedItems.length} 件商品?`,
     success: (res) => {
       if (res.confirm) {
-        const itemsToDelete = [...cartStore.selectedItems]
+        const itemsToDelete = [...pickedItems]
         itemsToDelete.forEach(item => {
           cartStore.removeItem(item.skuId)
         })
@@ -188,7 +193,7 @@ const deleteSelected = () => {
 }
 
 const moveToFavorites = () => {
-  const selectedItems = cartStore.selectedItems
+  const selectedItems = cartStore.pickedItems.filter(item => item.sellable !== false)
   if (selectedItems.length === 0) {
     uni.showToast({ title: '请先选择商品', icon: 'none' })
     return
@@ -198,8 +203,8 @@ const moveToFavorites = () => {
       id: item.productId,
       name: item.productName,
       image: item.productImage,
-      minPrice: item.minPrice ?? item.price ?? 0,
-      originalPrice: item.maxPrice ?? undefined
+      minPrice: item.minPrice ?? item.price,
+      originalPrice: item.maxPrice
     })
   })
   uni.showToast({ title: '已移入收藏夹', icon: 'success' })

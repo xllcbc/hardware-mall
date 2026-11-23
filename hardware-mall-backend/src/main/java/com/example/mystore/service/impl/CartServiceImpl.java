@@ -240,8 +240,9 @@ public class CartServiceImpl implements CartService {
             factSkuIds.add(sku.getId());
         }
 
-        List<LevelPricing> pricings = levelPricingService.priceAll(
-                UserContext.getLevelId(), facts);
+        List<LevelPricing> pricings = facts.isEmpty()
+                ? List.of()
+                : levelPricingService.priceAll(UserContext.getLevelId(), facts);
         Map<Long, LevelPricing> pricingBySku = new HashMap<>();
         for (int i = 0; i < factSkuIds.size(); i++) {
             pricingBySku.put(factSkuIds.get(i), pricings.get(i));
