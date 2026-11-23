@@ -143,4 +143,19 @@ describe('cart page unsellable rows', () => {
 
     expect(removeFromCart).toHaveBeenCalledWith(2)
   })
+
+  it('clears a gap selection when leaving manage mode', async () => {
+    vi.mocked(getCartList).mockResolvedValue([gapItem()])
+
+    const wrapper = mountCart()
+    await flushPromises()
+
+    await wrapper.find('.manage-btn').trigger('tap')
+    const gapRow = wrapper.find('.cart-item')
+    await gapRow.find('.item-checkbox').trigger('tap')
+    expect(gapRow.find('.checkbox').classes()).toContain('checked')
+
+    await wrapper.find('.manage-btn').trigger('tap')
+    expect(gapRow.find('.checkbox').classes()).not.toContain('checked')
+  })
 })

@@ -157,10 +157,15 @@ const goProductDetail = (id: number) => {
 
 const toggleManageMode = () => {
   manageMode.value = !manageMode.value
+  if (!manageMode.value) {
+    cartStore.items
+      .filter(item => item.sellable === false)
+      .forEach(item => { item.selected = false })
+  }
 }
 
 const toggleSelect = (item: CartItem) => {
-  if (item.sellable === false && !manageMode.value) return
+  if (item.sellable === false && !manageMode.value && !item.selected) return
   item.selected = !item.selected
 }
 
