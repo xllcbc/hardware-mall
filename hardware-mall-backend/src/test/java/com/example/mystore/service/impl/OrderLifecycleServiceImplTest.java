@@ -749,6 +749,10 @@ class OrderLifecycleServiceImplTest {
         verify(applicationEventPublisher, never()).publishEvent(any());
     }
 
+    /**
+     * 取消与自动取消必须自己持有事务: 先还库存再条件更新, CAS 未命中抛异常才能回滚已还库存。
+     * 事务注解无法从命令返回值观察, 且监听器的 AFTER_COMMIT 依赖它, 故在此钉住这条契约。
+     */
     @Test
     void cancelCommands_areTransactionalSoCasMissRollsBackRestoredStock() throws Exception {
         assertThat(isTransactional("cancelOrder", Long.class, Long.class, String.class)).isTrue();
@@ -764,6 +768,7 @@ class OrderLifecycleServiceImplTest {
 
     private OrderItem orderItem(Long skuId, int quantity) {
         OrderItem item = new OrderItem();
+        item.setOrderId(1L);
         item.setSkuId(skuId);
         item.setQuantity(quantity);
         return item;

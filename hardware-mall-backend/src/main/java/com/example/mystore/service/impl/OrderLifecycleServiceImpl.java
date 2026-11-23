@@ -76,14 +76,10 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
 
         // 先还库存; CAS 未命中时抛异常, 由事务回滚已还库存
         List<OrderItem> items = selectOrderItems(orderId);
-        restoreStock(items, null);
+        restoreStock(items, false);
 
         // CAS 最终确认: 仅当状态仍为待付款时置为已取消, 防与并发支付回调(1→2)互相覆盖
-        requireAffected(OrderStatusTransition.apply(
-                orderMapper, orderId, CANCEL_FROM, StatusConstants.ORDER_CANCELLED,
-                wrapper -> wrapper
-                        .set(Order::getCancelReason, reason)
-                        .set(Order::getCancelTime, LocalDateTime.now())));
+        requireAffected(claimCancelled(orderId, reason));
 
         publishStockCacheEvent(items);
     }
@@ -104,15 +100,13 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
 
         // 先还库存; CAS 未命中时抛异常触发事务回滚, 撤销上方已执行的恢复库存
         List<OrderItem> items = selectOrderItems(orderId);
-        restoreStock(items, orderId);
+        restoreStock(items, true);
 
         // CAS 最终确认：仅当状态仍为待付款时置为已取消，防与并发支付回调(1→2)互相覆盖
-        int affected = OrderStatusTransition.apply(
-                orderMapper, orderId, CANCEL_FROM, StatusConstants.ORDER_CANCELLED,
-                wrapper -> wrapper
-                        .set(Order::getCancelReason, cancelReason)
-                        .set(Order::getCancelTime, LocalDateTime.now()));
+        int affected = claimCancelled(orderId, cancelReason);
         if (affected == 0) {
+            // 定时任务方向的 CAS 未命中仍需回滚已还库存, 因此抛异常而非返回 false;
+            // OrderCancelStaleJob 把 BusinessException 计为“跳过”, 失败语义与改造前一致
             log.info("自动取消跳过（CAS 未命中，订单状态已变更）, orderId={}", orderId);
             throw new BusinessException("订单状态已变更，跳过取消");
         }
@@ -283,15 +277,26 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
                 .eq(OrderItem::getOrderId, orderId));
     }
 
+    /** 取消类命令共用的条件更新: 待付款 → 已取消, 记录原因与时间 */
+    private int claimCancelled(Long orderId, String reason) {
+        return OrderStatusTransition.apply(
+                orderMapper, orderId, CANCEL_FROM, StatusConstants.ORDER_CANCELLED,
+                wrapper -> wrapper
+                        .set(Order::getCancelReason, reason)
+                        .set(Order::getCancelTime, LocalDateTime.now()));
+    }
+
     /**
-     * 取消前还库存。{@code logOrderId} 非空时逐项记录恢复日志（定时任务排障用）。
+     * 取消前还库存。
+     *
+     * @param logEach 是否逐项记录恢复日志（定时任务排障用）
      */
-    private void restoreStock(List<OrderItem> items, Long logOrderId) {
+    private void restoreStock(List<OrderItem> items, boolean logEach) {
         for (OrderItem item : items) {
             skuService.restoreStock(item.getSkuId(), item.getQuantity());
-            if (logOrderId != null) {
+            if (logEach) {
                 log.info("恢复DB库存, orderId={}, skuId={}, quantity={}",
-                        logOrderId, item.getSkuId(), item.getQuantity());
+                        item.getOrderId(), item.getSkuId(), item.getQuantity());
             }
         }
     }
