@@ -1,5 +1,6 @@
 package com.example.mystore.service.impl;
 
+import com.example.mystore.common.cache.BatchCacheLoader;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.mapper.SkuMapper;
@@ -161,8 +162,8 @@ class StockCacheIntegrationTest {
                 mock(SpecItemService.class),
                 mock(OssService.class),
                 redisUtil,
-                redisLockUtil,
                 mock(ProductCacheService.class),
+                new BatchCacheLoader(redisUtil, redisLockUtil),
                 mock(ApplicationEventPublisher.class));
         ReflectionTestUtils.setField(service, "stockLockWaitMillis", lockWaitMillis);
         return service;

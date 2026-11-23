@@ -1,42 +1,25 @@
 package com.example.mystore.runner;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.example.mystore.common.constant.RedisConstants;
-import com.example.mystore.entity.db.Sku;
-import com.example.mystore.mapper.SkuMapper;
-import com.example.mystore.util.RedisUtil;
+import com.example.mystore.service.SkuService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
-import java.util.concurrent.TimeUnit;
-
+/**
+ * 启动时触发一次库存预热；预热规则（只写正库存、TTL 与写入路径）由 SKU 服务承担。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class StockWarmupRunner implements CommandLineRunner {
 
-    private final SkuMapper skuMapper;
-    private final RedisUtil redisUtil;
+    private final SkuService skuService;
 
     @Override
     public void run(String... args) {
         log.info("开始库存预热...");
-        LambdaQueryWrapper<Sku> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Sku::getDeleteTime, 0).eq(Sku::getStatus, 1);
-        var skus = skuMapper.selectList(wrapper);
-        int count = 0;
-        for (Sku sku : skus) {
-            if (sku.getStock() != null && sku.getStock() > 0) {
-                redisUtil.set(
-                        RedisConstants.PREFIX_SKU_STOCK + sku.getId(),
-                        sku.getStock(),
-                        RedisConstants.SKU_STOCK_TTL_SECONDS,
-                        TimeUnit.SECONDS);
-                count++;
-            }
-        }
+        int count = skuService.warmUpStockCache();
         log.info("库存预热完成，共加载 {} 个SKU库存到Redis", count);
     }
 }
