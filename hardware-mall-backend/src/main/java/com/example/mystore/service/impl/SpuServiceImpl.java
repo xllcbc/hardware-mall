@@ -19,7 +19,6 @@ import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.entity.vo.ProductSkuVO;
 import com.example.mystore.entity.dto.LevelPricing;
 import com.example.mystore.entity.dto.ProductPricingFacts;
-import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
@@ -238,7 +237,7 @@ public class SpuServiceImpl implements SpuService {
                 return new Page<>(page, limit, 0);
             }
             Page<ProductListVO> voPage = new Page<>(page, limit, result.getTotal());
-            voPage.setRecords(toUserPricingViews(result.getRecords()));
+            voPage.setRecords(toUserLevelPricingViews(result.getRecords()));
             return voPage;
         }
         ProductListResult result = productCacheService.searchProducts(
@@ -248,7 +247,7 @@ public class SpuServiceImpl implements SpuService {
             return new Page<>(page, limit, 0);
         }
         Page<ProductListVO> voPage = new Page<>(page, limit, result.getTotal());
-        voPage.setRecords(toUserPricingViews(result.getRecords()));
+        voPage.setRecords(toUserLevelPricingViews(result.getRecords()));
         return voPage;
     }
 
@@ -289,7 +288,7 @@ public class SpuServiceImpl implements SpuService {
         if (result == null || result.getRecords() == null) {
             return Collections.emptyList();
         }
-        List<ProductListVO> userPricingViews = toUserPricingViews(result.getRecords());
+        List<ProductListVO> userPricingViews = toUserLevelPricingViews(result.getRecords());
         if (limit != null && userPricingViews.size() > limit) {
             return userPricingViews.subList(0, limit);
         }
@@ -456,16 +455,6 @@ public class SpuServiceImpl implements SpuService {
         return result;
     }
 
-    private PriceRange resolvePriceRange(BigDecimal baseMin, BigDecimal baseMax, PricingRateResolution pricing) {
-        if (pricing.isMissing()) {
-            return new PriceRange(null, null);
-        }
-        BigDecimal rate = pricing.rate();
-        return new PriceRange(
-                baseMin == null ? null : priceService.resolveUnitPrice(baseMin, rate),
-                baseMax == null ? null : priceService.resolveUnitPrice(baseMax, rate));
-    }
-
     private ProductListCacheItem convertToProductListCacheItem(Spu spu) {
         ProductListCacheItem item = new ProductListCacheItem();
         item.setId(spu.getId());
@@ -479,12 +468,15 @@ public class SpuServiceImpl implements SpuService {
         return item;
     }
 
-    private List<ProductListVO> toUserPricingViews(List<ProductListCacheItem> records) {
+    private List<ProductListVO> toUserLevelPricingViews(List<ProductListCacheItem> records) {
         if (records == null || records.isEmpty()) {
             return Collections.emptyList();
         }
-        Long levelId = UserContext.getLevelId();
-        return records.stream().map(source -> {
+        List<LevelPricing> pricings = priceListItems(UserContext.getLevelId(), records);
+        List<ProductListVO> views = new ArrayList<>(records.size());
+        for (int i = 0; i < records.size(); i++) {
+            ProductListCacheItem source = records.get(i);
+            LevelPricing pricing = pricings.get(i);
             ProductListVO target = new ProductListVO();
             target.setId(source.getId());
             target.setCategoryId(source.getCategoryId());
@@ -493,19 +485,36 @@ public class SpuServiceImpl implements SpuService {
             target.setImages(source.getImages());
             target.setOriginalPrice(source.getOriginalPrice());
             target.setStatus(source.getStatus());
-            PricingRateResolution pricing = pricingRuleService.rateFor(
-                    levelId,
-                    source.getCategoryId(),
-                    DiscountConstants.isExcluded(source.getExcludeDiscount()));
-            PriceRange range = resolvePriceRange(source.getBasePriceMin(), source.getBasePriceMax(), pricing);
-            target.setMinPrice(range.min());
-            target.setMaxPrice(range.max());
-            target.setSellable(!pricing.isMissing());
-            if (pricing.isMissing()) {
+            target.setMinPrice(pricing.minPrice());
+            target.setMaxPrice(pricing.maxPrice());
+            target.setSellable(pricing.sellable());
+            if (!pricing.sellable()) {
                 target.setOriginalPrice(null);
             }
-            return target;
-        }).collect(Collectors.toList());
+            views.add(target);
+        }
+        return views;
+    }
+
+    /**
+     * 列表类读取面共用的批量报价：一次取齐该等级的倍率表，按分类为整页商品匹配。
+     */
+    private List<LevelPricing> priceListItems(Long levelId, List<ProductListCacheItem> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        List<ProductPricingFacts> facts = items.stream()
+                .map(this::toPricingFacts)
+                .collect(Collectors.toList());
+        return levelPricingService.priceAll(levelId, facts);
+    }
+
+    private ProductPricingFacts toPricingFacts(ProductListCacheItem item) {
+        return ProductPricingFacts.range(
+                item.getCategoryId(),
+                item.getBasePriceMin(),
+                item.getBasePriceMax(),
+                DiscountConstants.isExcluded(item.getExcludeDiscount()));
     }
 
     @Override
@@ -596,7 +605,12 @@ public class SpuServiceImpl implements SpuService {
         if (result == null || result.getRecords() == null) {
             return voPage;
         }
-        List<UserLevelProductPreviewVO> records = result.getRecords().stream().map(item -> {
+        List<ProductListCacheItem> items = result.getRecords();
+        List<LevelPricing> pricings = priceListItems(levelId, items);
+        List<UserLevelProductPreviewVO> records = new ArrayList<>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            ProductListCacheItem item = items.get(i);
+            LevelPricing pricing = pricings.get(i);
             UserLevelProductPreviewVO vo = new UserLevelProductPreviewVO();
             vo.setId(item.getId());
             vo.setCategoryId(item.getCategoryId());
@@ -606,19 +620,21 @@ public class SpuServiceImpl implements SpuService {
             vo.setRetailMinPrice(item.getBasePriceMin());
             vo.setRetailMaxPrice(item.getBasePriceMax());
             vo.setExcludeDiscount(item.getExcludeDiscount());
-            PricingRateResolution pricing = pricingRuleService.rateFor(
-                    levelId, item.getCategoryId(), DiscountConstants.isExcluded(item.getExcludeDiscount()));
-            PriceRange range = resolvePriceRange(item.getBasePriceMin(), item.getBasePriceMax(), pricing);
             vo.setPricingRate(pricing.rate());
-            vo.setMinPrice(range.min());
-            vo.setMaxPrice(range.max());
-            return vo;
-        }).collect(Collectors.toList());
+            vo.setMinPrice(pricing.minPrice());
+            vo.setMaxPrice(pricing.maxPrice());
+            vo.setSellable(pricing.sellable());
+            if (!pricing.sellable()) {
+                // 等级预览与列表、推荐、详情同属缺口遮价面：缺口时不展示任何批发基价字段。
+                // 管理端价格视角（AdminProductPricingVO）保留批发基价，由 #66 的管理入口单独组装。
+                vo.setOriginalPrice(null);
+                vo.setRetailMinPrice(null);
+                vo.setRetailMaxPrice(null);
+            }
+            records.add(vo);
+        }
         voPage.setRecords(records);
         return voPage;
-    }
-
-    private record PriceRange(BigDecimal min, BigDecimal max) {
     }
 
     private void publishSpuChanged(Long spuId, boolean recommendAffected) {

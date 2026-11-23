@@ -10,7 +10,6 @@ import com.example.mystore.entity.vo.ProductListCacheItem;
 import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.entity.vo.ProductListVO;
 import com.example.mystore.entity.dto.LevelPricing;
-import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
@@ -77,8 +76,9 @@ class SpuServiceImplTest {
                 1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         when(productCacheService.getProductList(eq(1L), eq(1), eq(10), eq(1), any()))
                 .thenReturn(new ProductListResult(List.of(item), 1));
-        when(pricingRuleService.rateFor(2L, 1L, false))
-                .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        2L, new BigDecimal("0.8000"), new BigDecimal("80.00"), new BigDecimal("160.00"))));
         UserContext.setLevelId(2L);
 
         var result = spuService.getProductListVO(1L, null, 1, 10, 1);
@@ -96,8 +96,10 @@ class SpuServiceImplTest {
                 1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
         when(productCacheService.getProductList(any(), anyInt(), anyInt(), anyInt(), any()))
                 .thenReturn(new ProductListResult(List.of(item), 1));
-        when(pricingRuleService.rateFor(2L, 1L, true))
-                .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
+        when(levelPricingService.priceAll(eq(2L), argThat(facts -> facts.size() == 1
+                && facts.get(0).excludeDiscount())))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE, new BigDecimal("100.00"), new BigDecimal("200.00"))));
         UserContext.setLevelId(2L);
 
         ProductListVO vo = spuService.getProductListVO(1L, null, 1, 10, 1)
@@ -113,8 +115,8 @@ class SpuServiceImplTest {
                 1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         when(productCacheService.getProductList(any(), anyInt(), anyInt(), anyInt(), any()))
                 .thenReturn(new ProductListResult(List.of(item), 1));
-        when(pricingRuleService.rateFor(2L, 1L, false))
-                .thenReturn(PricingRateResolution.missing(2L));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(LevelPricing.missing(2L)));
         UserContext.setLevelId(2L);
 
         ProductListVO vo = spuService.getProductListVO(1L, null, 1, 10, 1)
@@ -124,6 +126,74 @@ class SpuServiceImplTest {
         assertThat(vo.getMaxPrice()).isNull();
         assertThat(vo.isSellable()).isFalse();
         assertThat(vo.getOriginalPrice()).isNull();
+    }
+
+    @Test
+    void productListBatchPricesWholePageWithoutPerProductRateReads() {
+        ProductListCacheItem normal = listItem(
+                1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        normal.setId(1L);
+        ProductListCacheItem otherCategory = listItem(
+                3L, "50.00", "60.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        otherCategory.setId(2L);
+        ProductListCacheItem gap = listItem(
+                2L, "10.00", "20.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        gap.setId(3L);
+        when(productCacheService.getProductList(any(), anyInt(), anyInt(), anyInt(), any()))
+                .thenReturn(new ProductListResult(List.of(normal, otherCategory, gap), 3));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(
+                        LevelPricing.priced(2L, new BigDecimal("0.8000"),
+                                new BigDecimal("80.00"), new BigDecimal("160.00")),
+                        LevelPricing.priced(2L, new BigDecimal("1.0000"),
+                                new BigDecimal("50.00"), new BigDecimal("60.00")),
+                        LevelPricing.missing(2L)));
+        UserContext.setLevelId(2L);
+
+        List<ProductListVO> records = spuService.getProductListVO(null, null, 1, 10, 1)
+                .getRecords();
+
+        assertThat(records).hasSize(3);
+        assertThat(records.get(0).isSellable()).isTrue();
+        assertThat(records.get(0).getOriginalPrice()).isEqualByComparingTo("300.00");
+        assertThat(records.get(1).getMinPrice()).isEqualByComparingTo("50.00");
+        assertThat(records.get(1).isSellable()).isTrue();
+        assertThat(records.get(2).isSellable()).isFalse();
+        assertThat(records.get(2).getMinPrice()).isNull();
+        assertThat(records.get(2).getOriginalPrice()).isNull();
+        verify(levelPricingService, times(1)).priceAll(eq(2L), argThat(facts -> facts.size() == 3
+                && facts.get(0).categoryId().equals(1L)
+                && facts.get(1).categoryId().equals(3L)
+                && facts.get(2).categoryId().equals(2L)
+                && facts.get(2).basePriceMin().compareTo(new BigDecimal("10.00")) == 0
+                && facts.get(2).basePriceMax().compareTo(new BigDecimal("20.00")) == 0));
+        verify(pricingRuleService, never()).rateFor(any(), any(), anyBoolean());
+    }
+
+    @Test
+    void recommendBatchPricesWholeListWithoutPerProductRateReads() {
+        ProductListCacheItem normal = listItem(
+                1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        ProductListCacheItem gap = listItem(
+                2L, "10.00", "20.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        when(productCacheService.getRecommend(any()))
+                .thenReturn(new ProductListResult(List.of(normal, gap), 2));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(
+                        LevelPricing.priced(2L, new BigDecimal("0.8000"),
+                                new BigDecimal("80.00"), new BigDecimal("160.00")),
+                        LevelPricing.missing(2L)));
+        UserContext.setLevelId(2L);
+
+        List<ProductListVO> records = spuService.getRecommendProductListVO(10);
+
+        assertThat(records).hasSize(2);
+        assertThat(records.get(0).getMinPrice()).isEqualByComparingTo("80.00");
+        assertThat(records.get(0).isSellable()).isTrue();
+        assertThat(records.get(1).isSellable()).isFalse();
+        assertThat(records.get(1).getOriginalPrice()).isNull();
+        verify(levelPricingService, times(1)).priceAll(eq(2L), anyList());
+        verify(pricingRuleService, never()).rateFor(any(), any(), anyBoolean());
     }
 
     @Test
@@ -228,8 +298,9 @@ class SpuServiceImplTest {
                 1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         when(productCacheService.getProductList(any(), anyInt(), anyInt(), anyInt(), any()))
                 .thenReturn(new ProductListResult(List.of(item), 1));
-        when(pricingRuleService.rateFor(2L, 1L, false))
-                .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.7000")));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        2L, new BigDecimal("0.7000"), new BigDecimal("70.00"), new BigDecimal("140.00"))));
 
         var page = spuService.getUserLevelProductPreview(2L, null, 1, 10);
 
@@ -237,6 +308,48 @@ class SpuServiceImplTest {
         assertThat(vo.getPricingRate()).isEqualByComparingTo("0.7000");
         assertThat(vo.getMinPrice()).isEqualByComparingTo("70.00");
         assertThat(vo.getMaxPrice()).isEqualByComparingTo("140.00");
+        assertThat(vo.isSellable()).isTrue();
+        assertThat(vo.getOriginalPrice()).isEqualByComparingTo("300.00");
+        assertThat(vo.getRetailMinPrice()).isEqualByComparingTo("100.00");
+        assertThat(vo.getRetailMaxPrice()).isEqualByComparingTo("200.00");
+    }
+
+    @Test
+    void levelPreviewBatchPricesPageAndMasksBasePriceOnGap() {
+        ProductListCacheItem normal = listItem(
+                1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        ProductListCacheItem gap = listItem(
+                2L, "10.00", "20.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        when(productCacheService.getProductList(any(), anyInt(), anyInt(), anyInt(), any()))
+                .thenReturn(new ProductListResult(List.of(normal, gap), 2));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(
+                        LevelPricing.priced(2L, new BigDecimal("0.7000"),
+                                new BigDecimal("70.00"), new BigDecimal("140.00")),
+                        LevelPricing.missing(2L)));
+
+        var page = spuService.getUserLevelProductPreview(2L, null, 1, 10);
+
+        UserLevelProductPreviewVO priced = page.getRecords().get(0);
+        assertThat(priced.isSellable()).isTrue();
+        assertThat(priced.getMinPrice()).isEqualByComparingTo("70.00");
+        assertThat(priced.getMaxPrice()).isEqualByComparingTo("140.00");
+
+        UserLevelProductPreviewVO missing = page.getRecords().get(1);
+        assertThat(missing.isSellable()).isFalse();
+        assertThat(missing.getPricingRate()).isNull();
+        assertThat(missing.getMinPrice()).isNull();
+        assertThat(missing.getMaxPrice()).isNull();
+        assertThat(missing.getOriginalPrice()).isNull();
+        assertThat(missing.getRetailMinPrice()).isNull();
+        assertThat(missing.getRetailMaxPrice()).isNull();
+
+        verify(levelPricingService, times(1)).priceAll(eq(2L), argThat(facts -> facts.size() == 2
+                && facts.get(0).categoryId().equals(1L)
+                && facts.get(1).categoryId().equals(2L)
+                && facts.get(1).basePriceMin().compareTo(new BigDecimal("10.00")) == 0
+                && facts.get(1).basePriceMax().compareTo(new BigDecimal("20.00")) == 0));
+        verify(pricingRuleService, never()).rateFor(any(), any(), anyBoolean());
     }
 
     @Test

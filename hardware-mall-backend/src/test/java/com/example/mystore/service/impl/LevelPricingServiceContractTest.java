@@ -264,6 +264,36 @@ class LevelPricingServiceContractTest {
         verify(pricingRuleService, times(1)).rateTable(RETAIL_LEVEL_ID);
     }
 
+    @Test
+    void priceAllCoversMixedCategoryPageWithGapAndNormalRows() {
+        stubRateTable(CUSTOM_LEVEL_ID, Map.of(
+                CATEGORY_ID, new BigDecimal("0.8000"),
+                10L, new BigDecimal("1.0000")));
+
+        List<LevelPricing> page = levelPricingService.priceAll(
+                CUSTOM_LEVEL_ID,
+                List.of(
+                        ProductPricingFacts.range(
+                                CATEGORY_ID, new BigDecimal("100.00"), new BigDecimal("200.00"), false),
+                        ProductPricingFacts.range(
+                                10L, new BigDecimal("30.00"), new BigDecimal("40.00"), false),
+                        ProductPricingFacts.range(
+                                11L, new BigDecimal("7.50"), new BigDecimal("7.50"), false)));
+
+        assertThat(page).hasSize(3);
+        assertThat(page.get(0).sellable()).isTrue();
+        assertThat(page.get(0).minPrice()).isEqualByComparingTo("80.00");
+        assertThat(page.get(0).maxPrice()).isEqualByComparingTo("160.00");
+        assertThat(page.get(1).sellable()).isTrue();
+        assertThat(page.get(1).minPrice()).isEqualByComparingTo("30.00");
+        assertThat(page.get(1).maxPrice()).isEqualByComparingTo("40.00");
+        assertThat(page.get(2).sellable()).isFalse();
+        assertThat(page.get(2).rate()).isNull();
+        assertThat(page.get(2).minPrice()).isNull();
+        assertThat(page.get(2).maxPrice()).isNull();
+        verify(pricingRuleService, times(1)).rateTable(CUSTOM_LEVEL_ID);
+    }
+
     private BigDecimal priceFor(long categoryId, String basePrice) {
         return levelPricingService.price(
                         CUSTOM_LEVEL_ID,
