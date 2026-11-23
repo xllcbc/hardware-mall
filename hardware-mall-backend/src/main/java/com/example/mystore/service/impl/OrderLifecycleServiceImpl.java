@@ -22,11 +22,8 @@ import java.util.Set;
 @Slf4j
 public class OrderLifecycleServiceImpl implements OrderLifecycleService {
 
-    /** 确认收货: 仅已发货可推进 */
+    /** 确认收货: 仅已发货可推进（自动确认收货复用同一前驱集合） */
     static final Set<Integer> CONFIRM_RECEIVE_FROM = Set.of(StatusConstants.ORDER_SHIPPED);
-
-    /** 自动确认收货: 与用户确认收货使用同一前驱集合 */
-    static final Set<Integer> AUTO_CONFIRM_RECEIVE_FROM = CONFIRM_RECEIVE_FROM;
 
     /** 用户申请退款: 待发货或已发货可申请 */
     static final Set<Integer> APPLY_REFUND_FROM = Set.of(
@@ -50,9 +47,7 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
         if (!CONFIRM_RECEIVE_FROM.contains(order.getStatus())) {
             throw new BusinessException("只能确认收货已发货的订单");
         }
-        int affected = OrderStatusTransition.apply(
-                orderMapper, orderId, CONFIRM_RECEIVE_FROM, StatusConstants.ORDER_COMPLETED,
-                wrapper -> wrapper.set(Order::getReceiveTime, LocalDateTime.now()));
+        int affected = completeReceive(orderId);
         requireAffected(affected);
     }
 
@@ -64,13 +59,11 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
             return false;
         }
         // 幂等性检查：只有已发货状态的订单才需要自动收货
-        if (!AUTO_CONFIRM_RECEIVE_FROM.contains(order.getStatus())) {
+        if (!CONFIRM_RECEIVE_FROM.contains(order.getStatus())) {
             log.info("订单已处理，无需自动收货, orderId={}, status={}", orderId, order.getStatus());
             return false;
         }
-        int affected = OrderStatusTransition.apply(
-                orderMapper, orderId, AUTO_CONFIRM_RECEIVE_FROM, StatusConstants.ORDER_COMPLETED,
-                wrapper -> wrapper.set(Order::getReceiveTime, LocalDateTime.now()));
+        int affected = completeReceive(orderId);
         if (affected > 0) {
             log.info("订单自动收货成功, orderId={}", orderId);
             return true;
@@ -135,6 +128,12 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
                 orderMapper, orderId, DELETE_FROM, null,
                 wrapper -> wrapper.set(Order::getUserDeleteTime, System.currentTimeMillis()));
         requireAffected(affected);
+    }
+
+    private int completeReceive(Long orderId) {
+        return OrderStatusTransition.apply(
+                orderMapper, orderId, CONFIRM_RECEIVE_FROM, StatusConstants.ORDER_COMPLETED,
+                wrapper -> wrapper.set(Order::getReceiveTime, LocalDateTime.now()));
     }
 
     private Order requireOrder(Long orderId) {

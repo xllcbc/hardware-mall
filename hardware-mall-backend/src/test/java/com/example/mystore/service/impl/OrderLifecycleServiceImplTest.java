@@ -24,7 +24,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -63,6 +62,7 @@ class OrderLifecycleServiceImplTest {
 
         assertThat(capturedUpdateValues())
                 .contains(StatusConstants.ORDER_SHIPPED, StatusConstants.ORDER_COMPLETED);
+        assertThat(capturedSqlSet()).contains("receive_time=");
     }
 
     @Test
@@ -120,6 +120,7 @@ class OrderLifecycleServiceImplTest {
         assertThat(lifecycleService.autoConfirmReceive(1L)).isTrue();
         assertThat(capturedUpdateValues())
                 .contains(StatusConstants.ORDER_SHIPPED, StatusConstants.ORDER_COMPLETED);
+        assertThat(capturedSqlSet()).contains("receive_time=");
     }
 
     @Test
@@ -159,6 +160,9 @@ class OrderLifecycleServiceImplTest {
                 .contains(StatusConstants.ORDER_PENDING_SHIPMENT,
                         StatusConstants.ORDER_REFUND_REQUESTED,
                         "不想要了");
+        assertThat(capturedSqlSet())
+                .contains("cancel_reason=")
+                .contains("cancel_time=");
         verify(dingTalkAlertService).notify(eq("REFUND_REQUEST:1"), contains("SO1"));
         verify(dingTalkAlertService).notify(eq("REFUND_REQUEST:1"), contains("不想要了"));
     }
@@ -174,7 +178,7 @@ class OrderLifecycleServiceImplTest {
         }
 
         verify(orderMapper, times(2)).update(isNull(), any());
-        assertThat(capturedUpdateValues())
+        assertThat(capturedUpdateValues(2))
                 .contains(StatusConstants.ORDER_PENDING_SHIPMENT,
                         StatusConstants.ORDER_SHIPPED,
                         StatusConstants.ORDER_REFUND_REQUESTED);
@@ -244,6 +248,9 @@ class OrderLifecycleServiceImplTest {
                 .contains(StatusConstants.ORDER_REFUND_REQUESTED,
                         StatusConstants.ORDER_PENDING_SHIPMENT,
                         "凭证不足");
+        assertThat(capturedSqlSet())
+                .contains("admin_remark=")
+                .contains("cancel_time=");
     }
 
     @Test
@@ -293,9 +300,11 @@ class OrderLifecycleServiceImplTest {
 
         lifecycleService.deleteOrder(2L, 1L);
 
-        assertThat(capturedUpdateValues())
-                .contains(StatusConstants.ORDER_COMPLETED)
-                .anyMatch(value -> value instanceof Long millis && millis > 0);
+        // 只写删除时间, 不改订单状态; 不能仅凭 "有 Long 参数" 通过(orderId 本身也是 Long)
+        assertThat(capturedSqlSet())
+                .contains("user_delete_time=")
+                .doesNotContain("status=");
+        assertThat(capturedUpdateValues()).contains(StatusConstants.ORDER_COMPLETED);
         verify(orderMapper, never()).updateById(any(Order.class));
     }
 
@@ -355,14 +364,30 @@ class OrderLifecycleServiceImplTest {
     }
 
     private java.util.List<Object> capturedUpdateValues() {
+        return capturedUpdateValues(1);
+    }
+
+    /**
+     * @param expectedInvocations 期望的条件更新次数: 命令必须是单语句, 多出一次也应失败
+     */
+    private java.util.List<Object> capturedUpdateValues(int expectedInvocations) {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
                 ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
-        verify(orderMapper, atLeastOnce()).update(isNull(), captor.capture());
-        // WHERE 的 IN 参数在生成 SQL 片段时才写入参数表, 单测无 MyBatis 执行需手动触发
+        verify(orderMapper, times(expectedInvocations)).update(isNull(), captor.capture());
+        // WHERE 的 IN 与 SET 参数在生成 SQL 片段时才写入参数表, 单测无 MyBatis 执行需手动触发
+        captor.getAllValues().forEach(LambdaUpdateWrapper::getSqlSegment);
         return captor.getAllValues().stream()
-                .peek(LambdaUpdateWrapper::getSqlSegment)
                 .flatMap(wrapper -> wrapper.getParamNameValuePairs().values().stream())
                 .toList();
+    }
+
+    /** 条件更新的 SET 列: 断言附加列确实被写入, 而不只是 WHERE 命中 */
+    private String capturedSqlSet() {
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
+                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
+        verify(orderMapper, times(1)).update(isNull(), captor.capture());
+        return captor.getValue().getSqlSet();
     }
 }
