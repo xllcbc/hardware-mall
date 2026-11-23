@@ -1,6 +1,7 @@
 package com.example.mystore.service;
 
 import com.example.mystore.entity.dto.LevelRateItemRequest;
+import com.example.mystore.entity.dto.LevelRateTable;
 import com.example.mystore.entity.vo.LevelRateVO;
 import com.example.mystore.entity.dto.PricingRateResolution;
 
@@ -10,6 +11,11 @@ import java.util.List;
 public interface PricingRuleService {
 
     PricingRateResolution rateFor(Long levelId, Long categoryId, boolean excludeDiscount);
+
+    /**
+     * 一次取齐生效等级的整张分类倍率表；等级为空或不存在时回落到零售等级。
+     */
+    LevelRateTable rateTable(Long levelId);
 
     Long resolveRetailLevelId();
 

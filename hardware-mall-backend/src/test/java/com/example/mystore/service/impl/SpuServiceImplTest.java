@@ -9,10 +9,12 @@ import com.example.mystore.entity.vo.ProductDetailVO;
 import com.example.mystore.entity.vo.ProductListCacheItem;
 import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.entity.vo.ProductListVO;
+import com.example.mystore.entity.dto.LevelPricing;
 import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
+import com.example.mystore.service.LevelPricingService;
 import com.example.mystore.service.PriceService;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.ProductCacheService;
@@ -55,6 +57,8 @@ class SpuServiceImplTest {
     private ApplicationEventPublisher eventPublisher;
     @Mock
     private PricingRuleService pricingRuleService;
+    @Mock
+    private LevelPricingService levelPricingService;
 
     @Spy
     private PriceService priceService = new PriceServiceImpl();
@@ -128,8 +132,9 @@ class SpuServiceImplTest {
         Sku sku = sku(10L, 1L, "10.00");
         ProductDetailCache cache = detailCache(spu, List.of(sku));
         when(productCacheService.getProductDetail(eq(1L), any())).thenReturn(cache);
-        when(pricingRuleService.rateFor(2L, 1L, false))
-                .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        2L, new BigDecimal("0.8000"), new BigDecimal("8.00"), new BigDecimal("8.00"))));
         when(skuService.getStockById(10L)).thenReturn(7);
         UserContext.setLevelId(2L);
 
@@ -148,8 +153,8 @@ class SpuServiceImplTest {
         Sku sku = sku(10L, 1L, "10.00");
         when(productCacheService.getProductDetail(eq(1L), any()))
                 .thenReturn(detailCache(spu, List.of(sku)));
-        when(pricingRuleService.rateFor(2L, 1L, false))
-                .thenReturn(PricingRateResolution.missing(2L));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(LevelPricing.missing(2L)));
         when(skuService.getStockById(10L)).thenReturn(7);
         UserContext.setLevelId(2L);
 
@@ -165,13 +170,35 @@ class SpuServiceImplTest {
     }
 
     @Test
+    void productDetail_passesExplicitLevelAndSkuFactsToPricingModule() {
+        Spu spu = spu(1L, 1L, DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
+        Sku sku = sku(10L, 1L, "10.00");
+        when(productCacheService.getProductDetail(eq(1L), any()))
+                .thenReturn(detailCache(spu, List.of(sku)));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE, new BigDecimal("10.00"), new BigDecimal("10.00"))));
+        when(skuService.getStockById(10L)).thenReturn(1);
+        UserContext.setLevelId(2L);
+
+        spuService.getProductDetailVO(1L);
+
+        verify(levelPricingService).priceAll(eq(2L), argThat(facts ->
+                facts.size() == 1
+                        && facts.get(0).categoryId().equals(1L)
+                        && facts.get(0).basePriceMin().compareTo(new BigDecimal("10.00")) == 0
+                        && facts.get(0).excludeDiscount()));
+    }
+
+    @Test
     void productDetail_withoutSkuUsesOriginalPriceTimesRate() {
         Spu spu = spu(1L, 1L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         spu.setOriginalPrice(new BigDecimal("10.00"));
         when(productCacheService.getProductDetail(eq(1L), any()))
                 .thenReturn(detailCache(spu, Collections.emptyList()));
-        when(pricingRuleService.rateFor(2L, 1L, false))
-                .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        2L, new BigDecimal("0.8000"), new BigDecimal("8.00"), new BigDecimal("8.00"))));
         UserContext.setLevelId(2L);
 
         ProductDetailVO detail = spuService.getProductDetailVO(1L);
@@ -186,8 +213,9 @@ class SpuServiceImplTest {
         Spu spu = spu(1L, 1L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         ProductDetailCache cache = detailCache(spu, List.of(sku(10L, 1L, "10.00")));
         when(productCacheService.getProductDetail(eq(1L), any())).thenReturn(cache);
-        when(pricingRuleService.rateFor(any(), any(), anyBoolean()))
-                .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
+        when(levelPricingService.priceAll(any(), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE, new BigDecimal("10.00"), new BigDecimal("10.00"))));
         when(skuService.getStockById(10L)).thenReturn(1);
 
         assertThat(spuService.getProductSkuVOs(1L)).hasSize(1);
