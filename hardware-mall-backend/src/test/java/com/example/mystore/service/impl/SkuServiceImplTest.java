@@ -1,5 +1,8 @@
 package com.example.mystore.service.impl;
 
+import com.example.mystore.common.cache.BatchCacheLoader;
+import com.example.mystore.common.cache.CacheCell;
+import com.example.mystore.common.cache.CachePolicy;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Sku;
@@ -28,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -38,7 +42,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -85,12 +88,20 @@ class SkuServiceImplTest {
     @InjectMocks
     private SkuServiceImpl skuService;
 
+    /**
+     * 真实回填模块：库存批量填充的协议细节由模块契约测试覆盖，这里只观察服务结果。
+     * 用 spy 是为了取到服务组装出的缓存单元，验证库存 key 与策略的所有权。
+     */
+    private BatchCacheLoader batchCacheLoader;
+
     private Sku sku1;
     private Sku sku2;
 
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(skuService, "stockLockWaitMillis", 100L);
+        batchCacheLoader = spy(new BatchCacheLoader(redisUtil, redisLockUtil));
+        ReflectionTestUtils.setField(skuService, "batchCacheLoader", batchCacheLoader);
         SpecVO spec1 = new SpecVO();
         spec1.setTemplateId(1L);
         spec1.setItemId(1L);
@@ -151,11 +162,10 @@ class SkuServiceImplTest {
 
         when(productCacheService.getSkusByIds(eq(List.of(1L, 2L)), any()))
                 .thenReturn(Arrays.asList(cached, deleted));
-        when(redisUtil.multiGet(List.of(
-                RedisConstants.PREFIX_SKU_STOCK + 1L)))
+        // 用字面量断言 key 布局：库存批量填充的 key 只由库存 key 所有者产出
+        when(redisUtil.multiGet(List.of("sku:stock:1")))
                 .thenReturn(Collections.singletonList(null), Collections.singletonList(null));
-        when(redisLockUtil.tryLock(
-                eq(RedisConstants.PREFIX_SKU_STOCK + 1L), anyLong())).thenReturn(true);
+        when(redisLockUtil.tryLock(eq("sku:stock:1"), anyLong())).thenReturn(true);
 
         Sku loadedFromDb = new Sku();
         loadedFromDb.setId(1L);
@@ -166,21 +176,13 @@ class SkuServiceImplTest {
 
         assertThat(result).containsOnlyKeys(1L);
         assertThat(result.get(1L).getStock()).isEqualTo(55);
-        verify(redisUtil).set(
-                RedisConstants.PREFIX_SKU_STOCK + 1L,
-                55,
-                RedisConstants.SKU_STOCK_TTL_SECONDS,
-                TimeUnit.SECONDS);
-        verify(redisLockUtil).unlock(RedisConstants.PREFIX_SKU_STOCK + 1L);
     }
 
     @Test
-    void getSkuMapByIds_stockNullSentinel_returnsNullStockWithoutDbQuery() {
+    void getSkuMapByIds_stockNullSentinel_returnsNullStock() {
         when(productCacheService.getSkusByIds(eq(List.of(1L, 2L)), any()))
                 .thenReturn(Arrays.asList(sku1, sku2));
-        when(redisUtil.multiGet(List.of(
-                RedisConstants.PREFIX_SKU_STOCK + 1L,
-                RedisConstants.PREFIX_SKU_STOCK + 2L)))
+        when(redisUtil.multiGet(List.of("sku:stock:1", "sku:stock:2")))
                 .thenReturn(Arrays.asList(RedisConstants.CACHE_NULL, 30));
         when(redisUtil.isNull(RedisConstants.CACHE_NULL)).thenReturn(true);
 
@@ -188,24 +190,38 @@ class SkuServiceImplTest {
 
         assertThat(result.get(1L).getStock()).isNull();
         assertThat(result.get(2L).getStock()).isEqualTo(30);
-        verify(skuMapper, never()).selectBatchIds(any());
     }
 
     @Test
-    void getSkuMapByIds_allStockHits_returnsCachedStocksWithoutDbQuery() {
+    void getSkuMapByIds_allStockHits_returnsCachedStocks() {
         when(productCacheService.getSkusByIds(eq(List.of(1L, 2L)), any()))
                 .thenReturn(Arrays.asList(sku1, sku2));
-        when(redisUtil.multiGet(List.of(
-                RedisConstants.PREFIX_SKU_STOCK + 1L,
-                RedisConstants.PREFIX_SKU_STOCK + 2L)))
+        when(redisUtil.multiGet(List.of("sku:stock:1", "sku:stock:2")))
                 .thenReturn(Arrays.asList(50, 30));
 
         Map<Long, Sku> result = skuService.getSkuMapByIds(List.of(1L, 2L));
 
         assertThat(result.get(1L).getStock()).isEqualTo(50);
         assertThat(result.get(2L).getStock()).isEqualTo(30);
-        verify(skuMapper, never()).selectBatchIds(any());
-        verify(redisUtil, never()).set(any(), any(), anyLong(), any());
+    }
+
+    @Test
+    void getSkuMapByIds_batchStockReadUsesStockKeyOwnerAndStockPolicy() {
+        when(productCacheService.getSkusByIds(eq(List.of(1L)), any()))
+                .thenReturn(List.of(sku1));
+        when(redisUtil.multiGet(List.of("sku:stock:1")))
+                .thenReturn(Collections.singletonList(50));
+
+        skuService.getSkuMapByIds(List.of(1L));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<CacheCell<Integer>> cellCaptor = ArgumentCaptor.forClass(CacheCell.class);
+        verify(batchCacheLoader).load(eq(List.of(1L)), cellCaptor.capture());
+        CacheCell<Integer> cell = cellCaptor.getValue();
+        assertThat(cell.keys().currentKey(22L)).isEqualTo("sku:stock:22");
+        assertThat(cell.keys().keyFor(22L, "ignored-generation")).isEqualTo("sku:stock:22");
+        // 库存抖动为 0，TTL 与空值哨兵 TTL 不变
+        assertThat(cell.policy()).isEqualTo(new CachePolicy(300L, 0L, 300L, 100L));
     }
 
     @Test
@@ -531,10 +547,10 @@ class SkuServiceImplTest {
     @Test
     void testGetStockById_CacheMiss_FallbackToDb() {
         when(redisUtil.queryWithCache(
-                eq(RedisConstants.PREFIX_SKU_STOCK + 1L),
+                eq("sku:stock:1"),
                 eq(Integer.class),
-                eq(RedisConstants.SKU_STOCK_TTL_SECONDS),
-                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(300L),
+                eq(300L),
                 eq(0L),
                 eq(100L),
                 any())).thenAnswer(invocation -> {
@@ -563,10 +579,10 @@ class SkuServiceImplTest {
     @Test
     void testGetStockById_SkuNotFound() {
         when(redisUtil.queryWithCache(
-                eq(RedisConstants.PREFIX_SKU_STOCK + 99L),
+                eq("sku:stock:99"),
                 eq(Integer.class),
-                eq(RedisConstants.SKU_STOCK_TTL_SECONDS),
-                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(300L),
+                eq(300L),
                 eq(0L),
                 eq(100L),
                 any())).thenAnswer(invocation -> {
@@ -579,6 +595,24 @@ class SkuServiceImplTest {
         Integer result = skuService.getStockById(99L);
 
         assertThat(result).isNull();
+    }
+
+    @Test
+    void evictStockCache_evictsStockKeyWithStockLockBudget() {
+        when(redisUtil.evictWithLock("sku:stock:1", 100L)).thenReturn(true);
+
+        skuService.evictStockCache(1L);
+
+        verify(redisUtil).evictWithLock("sku:stock:1", 100L);
+    }
+
+    @Test
+    void evictStockCache_lockWaitTimeout_throws() {
+        when(redisUtil.evictWithLock("sku:stock:1", 100L)).thenReturn(false);
+
+        assertThatThrownBy(() -> skuService.evictStockCache(1L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("库存缓存失效等待锁超时");
     }
 
     @Test
@@ -803,10 +837,10 @@ class SkuServiceImplTest {
 
     private void stubStockQuery(Long skuId, Integer stock) {
         when(redisUtil.queryWithCache(
-                eq(RedisConstants.PREFIX_SKU_STOCK + skuId),
+                eq("sku:stock:" + skuId),
                 eq(Integer.class),
-                eq(RedisConstants.SKU_STOCK_TTL_SECONDS),
-                eq(RedisConstants.CACHE_NULL_TTL),
+                eq(300L),
+                eq(300L),
                 eq(0L),
                 eq(100L),
                 any())).thenReturn(stock);

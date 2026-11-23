@@ -2,6 +2,8 @@ package com.example.mystore.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.mystore.common.cache.BatchCacheLoader;
+import com.example.mystore.common.cache.CachePolicy;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Sku;
@@ -26,7 +28,6 @@ import com.example.mystore.service.ProductCacheService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.SpecItemService;
 import com.example.mystore.service.SpecTemplateService;
-import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,7 +47,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -67,9 +67,10 @@ public class SkuServiceImpl implements SkuService {
     private final SpecItemService specItemService;
     private final OssService ossService;
     private final RedisUtil redisUtil;
-    private final RedisLockUtil redisLockUtil;
     private final ProductCacheService productCacheService;
+    private final BatchCacheLoader batchCacheLoader;
     private final ApplicationEventPublisher eventPublisher;
+    private final StockCacheKeys stockCacheKeys = new StockCacheKeys();
 
     @Value("${stock.cache.lock-wait-ms:500}")
     private long stockLockWaitMillis = 500L;
@@ -132,43 +133,33 @@ public class SkuServiceImpl implements SkuService {
             return;
         }
         List<Sku> skuList = new ArrayList<>(skus);
-        List<String> stockKeys = skuList.stream()
-                .map(sku -> RedisConstants.PREFIX_SKU_STOCK + sku.getId())
-                .toList();
-        List<Object> cachedStocks = redisUtil.multiGet(stockKeys);
-        Set<Long> missingStockIds = new LinkedHashSet<>();
+        List<Long> skuIds = skuList.stream().map(Sku::getId).toList();
+        List<Integer> stocks = batchCacheLoader.load(skuIds, new StockCacheCell(
+                stockCacheKeys, stockPolicy(), this::loadStocksFromDb));
+        Map<Long, Integer> stockById = new HashMap<>();
         for (int i = 0; i < skuList.size(); i++) {
-            Object cached = cachedStocks == null ? null : cachedStocks.get(i);
-            if (redisUtil.isNull(cached)) {
-                continue;
-            }
-            if (cached != null) {
-                Integer stock = parseStock(cached);
-                if (stock != null) {
-                    skuList.get(i).setStock(stock);
-                    continue;
-                }
-                missingStockIds.add(skuList.get(i).getId());
-            } else {
-                missingStockIds.add(skuList.get(i).getId());
+            Integer stock = stocks.get(i);
+            if (stock != null) {
+                stockById.put(skuList.get(i).getId(), stock);
             }
         }
-        if (missingStockIds.isEmpty()) {
-            return;
-        }
-        Map<Long, Integer> loadedStocks = loadStocksWithSingleflight(missingStockIds);
         for (Sku sku : skuList) {
-            Integer stock = loadedStocks.get(sku.getId());
+            Integer stock = stockById.get(sku.getId());
             if (stock != null) {
                 sku.setStock(stock);
             }
         }
     }
 
+    private CachePolicy stockPolicy() {
+        return new CachePolicy(RedisConstants.SKU_STOCK_TTL_SECONDS, 0L,
+                RedisConstants.CACHE_NULL_TTL, stockLockWaitMillis);
+    }
+
     @Override
     public Integer getStockById(Long skuId) {
         return redisUtil.queryWithCache(
-                RedisConstants.PREFIX_SKU_STOCK + skuId,
+                stockCacheKeys.stockKey(skuId),
                 Integer.class,
                 RedisConstants.SKU_STOCK_TTL_SECONDS,
                 RedisConstants.CACHE_NULL_TTL,
@@ -187,7 +178,7 @@ public class SkuServiceImpl implements SkuService {
 
     @Override
     public void evictStockCache(Long skuId) {
-        String key = RedisConstants.PREFIX_SKU_STOCK + skuId;
+        String key = stockCacheKeys.stockKey(skuId);
         if (!redisUtil.evictWithLock(key, stockLockWaitMillis)) {
             throw new IllegalStateException(
                     "库存缓存失效等待锁超时, skuId=" + skuId
@@ -195,98 +186,8 @@ public class SkuServiceImpl implements SkuService {
         }
     }
 
-    private Map<Long, Integer> loadStocksWithSingleflight(Collection<Long> skuIds) {
-        List<Long> missingIds = skuIds.stream().sorted().toList();
-        List<String> acquiredLockKeys = new ArrayList<>();
-        long deadline = deadline(stockLockWaitMillis);
-        try {
-            for (Long skuId : missingIds) {
-                String key = RedisConstants.PREFIX_SKU_STOCK + skuId;
-                if (!redisLockUtil.tryLock(key, remainingMillis(deadline))) {
-                    log.warn("库存缓存批量回源等锁超时, skuId={}, maxWaitMs={}, 直接查库且不写缓存",
-                            skuId, stockLockWaitMillis);
-                    return loadStocksFromDb(missingIds);
-                }
-                acquiredLockKeys.add(key);
-            }
-
-            List<String> keys = missingIds.stream()
-                    .map(id -> RedisConstants.PREFIX_SKU_STOCK + id)
-                    .toList();
-            List<Object> cachedValues = redisUtil.multiGet(keys);
-            Map<Long, Integer> result = new HashMap<>();
-            List<Long> stillMissing = new ArrayList<>();
-            for (int i = 0; i < missingIds.size(); i++) {
-                Long skuId = missingIds.get(i);
-                Object cached = cachedValues == null ? null : cachedValues.get(i);
-                if (redisUtil.isNull(cached)) {
-                    continue;
-                }
-                Integer stock = parseStock(cached);
-                if (stock != null) {
-                    result.put(skuId, stock);
-                } else {
-                    stillMissing.add(skuId);
-                }
-            }
-
-            if (!stillMissing.isEmpty()) {
-                Map<Long, Sku> rows = skuMapper.selectBatchIds(stillMissing).stream()
-                        .collect(Collectors.toMap(Sku::getId, sku -> sku));
-                for (Long skuId : stillMissing) {
-                    Sku sku = rows.get(skuId);
-                    Integer stock = sku == null ? null : sku.getStock();
-                    String key = RedisConstants.PREFIX_SKU_STOCK + skuId;
-                    if (stock == null) {
-                        redisUtil.set(key, RedisConstants.CACHE_NULL,
-                                RedisConstants.CACHE_NULL_TTL, TimeUnit.SECONDS);
-                    } else {
-                        result.put(skuId, stock);
-                        redisUtil.set(key, stock, RedisConstants.SKU_STOCK_TTL_SECONDS,
-                                TimeUnit.SECONDS);
-                    }
-                }
-            }
-            return result;
-        } finally {
-            for (int i = acquiredLockKeys.size() - 1; i >= 0; i--) {
-                redisLockUtil.unlock(acquiredLockKeys.get(i));
-            }
-        }
-    }
-
-    private Map<Long, Integer> loadStocksFromDb(Collection<Long> skuIds) {
-        Map<Long, Integer> stocks = new HashMap<>();
-        for (Sku sku : skuMapper.selectBatchIds(skuIds)) {
-            if (sku.getStock() != null) {
-                stocks.put(sku.getId(), sku.getStock());
-            }
-        }
-        return stocks;
-    }
-
-    private Integer parseStock(Object cached) {
-        if (cached == null) {
-            return null;
-        }
-        try {
-            return Integer.parseInt(cached.toString());
-        } catch (NumberFormatException e) {
-            log.warn("库存缓存值格式错误, value={}", cached);
-            return null;
-        }
-    }
-
-    private long deadline(long maxWaitMillis) {
-        return System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0L, maxWaitMillis));
-    }
-
-    private long remainingMillis(long deadline) {
-        long remainingNanos = deadline - System.nanoTime();
-        if (remainingNanos <= 0) {
-            return 0L;
-        }
-        return Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
+    private List<Sku> loadStocksFromDb(Collection<Long> skuIds) {
+        return skuMapper.selectBatchIds(skuIds);
     }
 
     @Override
