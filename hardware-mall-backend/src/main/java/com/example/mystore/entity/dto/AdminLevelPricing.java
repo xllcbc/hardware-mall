@@ -20,6 +20,6 @@ public record AdminLevelPricing(
      * 缺口标记：生效报价不可售，表示该分类在生效等级下缺少倍率。
      */
     public boolean rateMissing() {
-        return effective == null || !effective.sellable();
+        return !effective.sellable();
     }
 }

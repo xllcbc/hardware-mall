@@ -49,7 +49,7 @@ class AdminLevelPricingContractTest {
         stubRateTable(VIEW_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("0.8000")));
         stubRateTable(RETAIL_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("1.2000")));
 
-        AdminLevelPricing pricing = levelPricingService.priceForAdmin(
+        AdminLevelPricing pricing = priceForAdmin(
                 VIEW_LEVEL_ID,
                 ProductPricingFacts.of(CATEGORY_ID, new BigDecimal("25.00"), false));
 
@@ -71,10 +71,10 @@ class AdminLevelPricingContractTest {
         stubRateTable(VIEW_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("1.0000")));
         stubRateTable(RETAIL_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("1.2000")));
 
-        AdminLevelPricing explicitOne = levelPricingService.priceForAdmin(
+        AdminLevelPricing explicitOne = priceForAdmin(
                 VIEW_LEVEL_ID,
                 ProductPricingFacts.of(CATEGORY_ID, new BigDecimal("25.00"), false));
-        AdminLevelPricing gap = levelPricingService.priceForAdmin(
+        AdminLevelPricing gap = priceForAdmin(
                 VIEW_LEVEL_ID,
                 ProductPricingFacts.of(10L, new BigDecimal("25.00"), false));
 
@@ -97,7 +97,7 @@ class AdminLevelPricingContractTest {
         stubRateTable(VIEW_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("0.8000")));
         stubRateTable(RETAIL_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("1.2000")));
 
-        AdminLevelPricing pricing = levelPricingService.priceForAdmin(
+        AdminLevelPricing pricing = priceForAdmin(
                 VIEW_LEVEL_ID,
                 ProductPricingFacts.of(CATEGORY_ID, new BigDecimal("25.00"), true));
 
@@ -113,11 +113,14 @@ class AdminLevelPricingContractTest {
         stubRateTable(VIEW_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("0.8000")));
         stubRateTable(RETAIL_LEVEL_ID, Map.of());
 
-        AdminLevelPricing pricing = levelPricingService.priceForAdmin(
+        AdminLevelPricing pricing = priceForAdmin(
                 VIEW_LEVEL_ID,
                 ProductPricingFacts.of(CATEGORY_ID, new BigDecimal("25.00"), true));
 
         assertThat(pricing.viewLevel().rate()).isEqualByComparingTo("0.8000");
+        assertThat(pricing.retailLevel().sellable()).isFalse();
+        assertThat(pricing.retailLevel().rate()).isNull();
+        assertThat(pricing.retailLevel().minPrice()).isNull();
         assertThat(pricing.effective().sellable()).isFalse();
         assertThat(pricing.rateMissing()).isTrue();
         assertThat(pricing.effective().minPrice()).isNull();
@@ -163,7 +166,7 @@ class AdminLevelPricingContractTest {
     void retailViewReusesOneRateTableForBothResults() {
         stubRateTable(RETAIL_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("1.2000")));
 
-        AdminLevelPricing pricing = levelPricingService.priceForAdmin(
+        AdminLevelPricing pricing = priceForAdmin(
                 RETAIL_LEVEL_ID,
                 ProductPricingFacts.of(CATEGORY_ID, new BigDecimal("25.00"), false));
 
@@ -171,6 +174,10 @@ class AdminLevelPricingContractTest {
         assertThat(pricing.retailLevel().levelId()).isEqualTo(RETAIL_LEVEL_ID);
         assertThat(pricing.effective().minPrice()).isEqualByComparingTo("30.00");
         verify(pricingRuleService, times(1)).rateTable(RETAIL_LEVEL_ID);
+    }
+
+    private AdminLevelPricing priceForAdmin(long viewLevelId, ProductPricingFacts facts) {
+        return levelPricingService.priceAllForAdmin(viewLevelId, List.of(facts)).get(0);
     }
 
     private void stubRateTable(long levelId, Map<Long, BigDecimal> rates) {

@@ -274,7 +274,8 @@ class AdminSpuPricingControllerTest {
         redisUtil.delete(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID);
     }
 
-    private Category category(String name) {        Category item = new Category();
+    private Category category(String name) {
+        Category item = new Category();
         item.setName(name);
         item.setSortOrder(0);
         item.setStatus(1);

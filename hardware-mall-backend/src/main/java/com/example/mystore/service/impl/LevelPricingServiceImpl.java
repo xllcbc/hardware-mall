@@ -55,14 +55,6 @@ public class LevelPricingServiceImpl implements LevelPricingService {
     }
 
     @Override
-    public AdminLevelPricing priceForAdmin(Long viewLevelId, ProductPricingFacts facts) {
-        if (facts == null) {
-            throw new IllegalArgumentException("商品事实不能为空");
-        }
-        return priceAllForAdmin(viewLevelId, List.of(facts)).get(0);
-    }
-
-    @Override
     public List<AdminLevelPricing> priceAllForAdmin(
             Long viewLevelId, List<ProductPricingFacts> facts) {
         if (facts == null || facts.isEmpty()) {

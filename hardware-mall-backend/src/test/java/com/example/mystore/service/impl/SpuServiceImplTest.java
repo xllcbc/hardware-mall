@@ -17,7 +17,6 @@ import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.LevelPricingService;
-import com.example.mystore.service.PriceService;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.ProductCacheService;
 import com.example.mystore.service.SkuService;
@@ -30,7 +29,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -62,9 +60,6 @@ class SpuServiceImplTest {
     private PricingRuleService pricingRuleService;
     @Mock
     private LevelPricingService levelPricingService;
-
-    @Spy
-    private PriceService priceService = new PriceServiceImpl();
 
     @InjectMocks
     private SpuServiceImpl spuService;
@@ -390,7 +385,6 @@ class SpuServiceImplTest {
         assertThat(vo.getSettlementMaxPrice()).isEqualByComparingTo("16.00");
         assertThat(vo.isRateMissing()).isFalse();
         verify(levelPricingService, times(1)).priceAllForAdmin(eq(2L), anyList());
-        verify(levelPricingService, never()).priceForAdmin(anyLong(), any());
     }
 
     @Test
