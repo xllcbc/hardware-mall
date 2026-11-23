@@ -2,6 +2,7 @@ package com.example.mystore.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.constant.DiscountConstants;
+import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.common.exception.IdempotencyConflictException;
@@ -27,6 +28,7 @@ import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.impl.OrderIdempotencyServiceImpl;
 import com.example.mystore.util.OrderRequestFingerprint;
+import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.UserContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -84,6 +86,8 @@ class OrderIdempotencyIntegrationTest {
     private SkuMapper skuMapper;
     @Autowired
     private LevelCategoryRateMapper levelCategoryRateMapper;
+    @Autowired
+    private RedisUtil redisUtil;
 
     @SpyBean
     private OrderIdempotencyServiceImpl orderIdempotencyServiceSpy;
@@ -91,6 +95,9 @@ class OrderIdempotencyIntegrationTest {
     @BeforeEach
     void setUp() {
         cleanup();
+        // 订单现在走等级定价模块的批量报价，倍率表按等级缓存；直接插表必须清缓存，否则读到其他测试留下的旧表
+        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRICING_LEVEL + "*");
+        redisUtil.delete(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID);
         UserContext.setLevelId(1L);
 
         Category category = new Category();
