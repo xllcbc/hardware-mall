@@ -33,7 +33,6 @@ import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.util.RedisLockUtil;
-import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.UserContext;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,7 +55,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -84,8 +82,6 @@ class OrderServiceImplTest {
     private PayService payService;
     @Mock
     private RedisLockUtil redisLockUtil;
-    @Mock
-    private RedisUtil redisUtil;
     @Mock
     private ApplicationEventPublisher applicationEventPublisher;
     @Mock
@@ -1769,33 +1765,33 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void orderDetail_pendingPayment_syncsThenAssemblesViewThroughQueryModule() {
+    void orderDetail_pendingPayment_triggersPaymentSyncThenAssemblesView() {
         Order order = orderWithStatus(1L, StatusConstants.ORDER_PENDING_PAYMENT);
         when(orderMapper.selectById(1L)).thenReturn(order);
-        when(redisUtil.setIfAbsent("lazysync:order:1", "1", 30, TimeUnit.SECONDS)).thenReturn(true);
-        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
         OrderVO view = new OrderVO();
         when(orderQueryService.getOrderView(1L)).thenReturn(view);
 
         assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
 
-        InOrder inOrder = inOrder(redisUtil, payService, orderQueryService);
-        inOrder.verify(redisUtil).setIfAbsent("lazysync:order:1", "1", 30, TimeUnit.SECONDS);
-        inOrder.verify(payService).queryByOrderId(1L);
+        InOrder inOrder = inOrder(payService, orderQueryService);
+        inOrder.verify(payService).syncPaymentStatus(1L);
         inOrder.verify(orderQueryService).getOrderView(1L);
+        // 内联修复与微信查单已迁入支付模块: 订单门面详情只读, 不再写订单
+        verify(orderMapper, never()).update(any(), any());
+        verify(payService, never()).queryWechatOrder(any());
     }
 
     @Test
     void orderDetail_syncFailure_stillReturnsView() {
         Order order = orderWithStatus(1L, StatusConstants.ORDER_PENDING_PAYMENT);
         when(orderMapper.selectById(1L)).thenReturn(order);
-        when(redisUtil.setIfAbsent("lazysync:order:1", "1", 30, TimeUnit.SECONDS)).thenReturn(true);
-        when(payService.queryByOrderId(1L)).thenThrow(new RuntimeException("wechat down"));
+        doThrow(new RuntimeException("wechat down")).when(payService).syncPaymentStatus(1L);
         OrderVO view = new OrderVO();
         when(orderQueryService.getOrderView(1L)).thenReturn(view);
 
         assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
+
+        verify(orderQueryService).getOrderView(1L);
     }
 
     @Test
@@ -1808,7 +1804,7 @@ class OrderServiceImplTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("订单不存在");
 
-        verifyNoInteractions(redisUtil, payService, orderQueryService);
+        verifyNoInteractions(payService, orderQueryService);
     }
 
     @Test
@@ -1820,6 +1816,6 @@ class OrderServiceImplTest {
 
         assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
 
-        verifyNoInteractions(redisUtil, payService);
+        verifyNoInteractions(payService);
     }
 }

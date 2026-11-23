@@ -14,4 +14,14 @@ public interface PayService {
     boolean processPaymentSuccess(String outTradeNo, String transactionId);
     Transaction queryWechatOrder(String outTradeNo);
     void reconcileRefund(PaymentRecord record);
+
+    /**
+     * 订单详情的支付状态同步入口（同一订单 30 秒内最多触发一次）：
+     * 支付记录已支付但订单仍待付款时修复为待发货；支付记录待支付时查询微信，成功则走
+     * {@link #processPaymentSuccess} 的既有支付成功处理。
+     *
+     * <p>调用方仅在订单仍为待付款时触发的语义由调用方保证；本入口按支付事实同步，
+     * 不再重复校验订单状态。异常向上抛出，由详情读路径吞掉，不影响详情返回。
+     */
+    void syncPaymentStatus(Long orderId);
 }
