@@ -152,7 +152,8 @@ public class SkuServiceImpl implements SkuService {
     }
 
     private CachePolicy stockPolicy() {
-        return new CachePolicy(RedisConstants.SKU_STOCK_TTL_SECONDS, 0L,
+        return new CachePolicy(RedisConstants.SKU_STOCK_TTL_SECONDS,
+                RedisConstants.SKU_STOCK_JITTER_SECONDS,
                 RedisConstants.CACHE_NULL_TTL, stockLockWaitMillis);
     }
 
@@ -194,14 +195,15 @@ public class SkuServiceImpl implements SkuService {
         for (Sku sku : skuMapper.selectList(wrapper)) {
             if (sku.getStock() != null && sku.getStock() > 0) {
                 redisUtil.setWithJitter(stockCacheKeys.stockKey(sku.getId()), sku.getStock(),
-                        RedisConstants.SKU_STOCK_TTL_SECONDS, TimeUnit.SECONDS, 0L);
+                        RedisConstants.SKU_STOCK_TTL_SECONDS, TimeUnit.SECONDS,
+                        RedisConstants.SKU_STOCK_JITTER_SECONDS);
                 count++;
             }
         }
         return count;
     }
 
-    private List<Sku> loadStocksFromDb(Collection<Long> skuIds) {
+    private List<Sku> loadStocksFromDb(List<Long> skuIds) {
         return skuMapper.selectBatchIds(skuIds);
     }
 

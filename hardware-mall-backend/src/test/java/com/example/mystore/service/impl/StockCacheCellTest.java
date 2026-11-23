@@ -5,7 +5,6 @@ import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.entity.db.Sku;
 import org.junit.jupiter.api.Test;
 
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -63,7 +62,7 @@ class StockCacheCellTest {
         assertThat(cell.loadFromSource(List.of(1L))).isEmpty();
     }
 
-    private StockCacheCell cell(Function<Collection<Long>, List<Sku>> loader) {
+    private StockCacheCell cell(Function<List<Long>, List<Sku>> loader) {
         return new StockCacheCell(keys, policy, loader);
     }
 

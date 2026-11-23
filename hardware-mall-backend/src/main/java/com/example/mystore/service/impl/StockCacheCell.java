@@ -6,6 +6,7 @@ import com.example.mystore.common.cache.CachePolicy;
 import com.example.mystore.entity.db.Sku;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -23,10 +24,10 @@ class StockCacheCell implements CacheCell<Integer> {
 
     private final StockCacheKeys keys;
     private final CachePolicy policy;
-    private final Function<Collection<Long>, List<Sku>> loader;
+    private final Function<List<Long>, List<Sku>> loader;
 
     StockCacheCell(StockCacheKeys keys, CachePolicy policy,
-                   Function<Collection<Long>, List<Sku>> loader) {
+                   Function<List<Long>, List<Sku>> loader) {
         this.keys = keys;
         this.policy = policy;
         this.loader = loader;
@@ -60,7 +61,7 @@ class StockCacheCell implements CacheCell<Integer> {
      */
     @Override
     public Map<Long, Integer> loadFromSource(Collection<Long> ids) {
-        List<Sku> loaded = loader.apply(ids);
+        List<Sku> loaded = loader.apply(new ArrayList<>(ids));
         Map<Long, Integer> stocks = new HashMap<>();
         if (loaded == null) {
             return stocks;

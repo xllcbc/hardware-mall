@@ -32,6 +32,10 @@ public class RedisConstants {
     public static final long CACHE_TTL_HOUR = 3600L;
     public static final long CACHE_TTL_DAY = 86400L;
     public static final long SKU_STOCK_TTL_SECONDS = 300L;
+    /**
+     * 库存 TTL 不抖动：库存以数据库原子扣减为准，抖动只会让补偿窗口难以推理。
+     */
+    public static final long SKU_STOCK_JITTER_SECONDS = 0L;
     public static final long WECHAT_SESSION_TTL = 7200L;
     public static final long RATE_LIMIT_TTL = 60L;
     public static final long IDEMPOTENCY_TTL = 300L;

@@ -191,6 +191,7 @@ class SkuServiceImplTest {
 
         assertThat(result.get(1L).getStock()).isNull();
         assertThat(result.get(2L).getStock()).isEqualTo(30);
+        verify(skuMapper, never()).selectBatchIds(any());
     }
 
     @Test
@@ -204,6 +205,7 @@ class SkuServiceImplTest {
 
         assertThat(result.get(1L).getStock()).isEqualTo(50);
         assertThat(result.get(2L).getStock()).isEqualTo(30);
+        verify(skuMapper, never()).selectBatchIds(any());
     }
 
     @Test
@@ -862,6 +864,7 @@ class SkuServiceImplTest {
     }
 
     private void stubStockQuery(Long skuId, Integer stock) {
+        // 用字面量断言库存 key 布局：key 只由库存 key 所有者产出，避免引用常量导致断言恒真
         when(redisUtil.queryWithCache(
                 eq("sku:stock:" + skuId),
                 eq(Integer.class),
