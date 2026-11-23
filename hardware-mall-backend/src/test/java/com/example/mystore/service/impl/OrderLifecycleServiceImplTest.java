@@ -4,9 +4,13 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
+import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.entity.db.Order;
+import com.example.mystore.mapper.LogisticsMapper;
 import com.example.mystore.mapper.OrderMapper;
+import com.example.mystore.service.WechatOrderShippingService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -19,14 +23,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -37,8 +44,15 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class OrderLifecycleServiceImplTest {
 
+    /** 未定义的发货方式: 发货方式规则只接受同城/自提 */
+    private static final int UNSUPPORTED_DELIVERY_TYPE = 1;
+
     @Mock
     private OrderMapper orderMapper;
+    @Mock
+    private LogisticsMapper logisticsMapper;
+    @Mock
+    private WechatOrderShippingService wechatOrderShippingService;
     @Mock
     private DingTalkAlertService dingTalkAlertService;
 
@@ -352,6 +366,236 @@ class OrderLifecycleServiceImplTest {
                 .hasMessage("订单状态已变更，请刷新后重试");
     }
 
+    // ==================== 发货 ====================
+
+    @Test
+    void shipOrder_localDelivery_generatesDeliveryNoMovesToShippedAndUploads() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_SHIPMENT));
+        when(logisticsMapper.selectById(2L)).thenReturn(enabledLogistics(2L));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+
+        lifecycleService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 2L);
+
+        assertThat(capturedUpdateValues())
+                .contains(StatusConstants.ORDER_SHIPPED,
+                        StatusConstants.DELIVERY_TYPE_LOCAL,
+                        2L)
+                .anyMatch(v -> v instanceof String s && s.startsWith("PS"));
+        verify(wechatOrderShippingService).uploadShippingInfo(1L);
+    }
+
+    @Test
+    void shipOrder_pickup_hasNoLogisticsAndNoDeliveryNo() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_SHIPMENT));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+
+        lifecycleService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_PICKUP, null);
+
+        verifyNoInteractions(logisticsMapper);
+        assertThat(capturedUpdateValues())
+                .contains(StatusConstants.ORDER_SHIPPED, StatusConstants.DELIVERY_TYPE_PICKUP);
+        assertThat(capturedSqlSet())
+                .contains("logistics_id=")
+                .contains("logistics_no=");
+        verify(wechatOrderShippingService).uploadShippingInfo(1L);
+    }
+
+    @Test
+    void shipOrder_invalidDeliveryType_rejectsBeforeWrite() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_SHIPMENT));
+
+        assertThatThrownBy(() -> lifecycleService.shipOrder(1L, UNSUPPORTED_DELIVERY_TYPE, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("不支持的发货方式");
+
+        verify(orderMapper, never()).update(isNull(), any());
+        verifyNoInteractions(wechatOrderShippingService);
+    }
+
+    @Test
+    void shipOrder_nonPendingShipmentStatus_rejectsBeforeWrite() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+
+        assertThatThrownBy(() -> lifecycleService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_PICKUP, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("只能发货待发货的订单");
+
+        verify(orderMapper, never()).update(isNull(), any());
+        verifyNoInteractions(logisticsMapper, wechatOrderShippingService);
+    }
+
+    @Test
+    void shipOrder_missingOrder_throwsOrderNotFound() {
+        when(orderMapper.selectById(1L)).thenReturn(null);
+
+        assertThatThrownBy(() -> lifecycleService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_PICKUP, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单不存在");
+
+        verify(orderMapper, never()).update(isNull(), any());
+    }
+
+    @Test
+    void shipOrder_logisticsNotFound_rejectsBeforeWrite() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_SHIPMENT));
+        when(logisticsMapper.selectById(999L)).thenReturn(null);
+
+        assertThatThrownBy(() -> lifecycleService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 999L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("物流公司不存在或已停用");
+
+        verify(orderMapper, never()).update(isNull(), any());
+    }
+
+    @Test
+    void shipOrder_logisticsDisabled_rejectsBeforeWrite() {
+        Logistics disabled = new Logistics();
+        disabled.setId(3L);
+        disabled.setStatus(StatusConstants.LOGISTICS_STATUS_DISABLED);
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_SHIPMENT));
+        when(logisticsMapper.selectById(3L)).thenReturn(disabled);
+
+        assertThatThrownBy(() -> lifecycleService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 3L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("物流公司不存在或已停用");
+
+        verify(orderMapper, never()).update(isNull(), any());
+    }
+
+    @Test
+    void shipOrder_casMiss_throwsStatusChangedAndDoesNotUpload() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_SHIPMENT));
+        when(logisticsMapper.selectById(2L)).thenReturn(enabledLogistics(2L));
+        when(orderMapper.update(isNull(), any())).thenReturn(0);
+
+        assertThatThrownBy(() -> lifecycleService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 2L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单状态已变更，请刷新后重试");
+
+        verifyNoInteractions(wechatOrderShippingService);
+    }
+
+    @Test
+    void shipOrder_wechatUploadFailure_isSwallowedAfterSuccessfulShipment() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_SHIPMENT));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        doThrow(new RuntimeException("wechat down"))
+                .when(wechatOrderShippingService).uploadShippingInfo(1L);
+
+        assertThatCode(() -> lifecycleService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_PICKUP, null))
+                .doesNotThrowAnyException();
+
+        verify(wechatOrderShippingService).uploadShippingInfo(1L);
+    }
+
+    // ==================== 微信确认收货 ====================
+
+    @Test
+    void confirmReceiveByWechat_confirmed_recordsStateThenCompletesOrder() {
+        assertWechatConfirmAdvancesLocalOrder(WechatConstants.OrderState.CONFIRMED);
+    }
+
+    @Test
+    void confirmReceiveByWechat_completed_recordsStateThenCompletesOrder() {
+        assertWechatConfirmAdvancesLocalOrder(WechatConstants.OrderState.COMPLETED);
+    }
+
+    @Test
+    void confirmReceiveByWechat_shippedNotConfirmed_rejectsWithoutLocalTransition() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+        when(wechatOrderShippingService.queryOrderState(1L)).thenReturn(WechatConstants.OrderState.SHIPPED);
+
+        assertThatThrownBy(() -> lifecycleService.confirmReceiveByWechat(2L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("微信未确认收货，请稍后重试");
+
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void confirmReceiveByWechat_wechatQueryFailed_rejectsWithoutLocalTransition() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+        when(wechatOrderShippingService.queryOrderState(1L)).thenReturn(null);
+
+        assertThatThrownBy(() -> lifecycleService.confirmReceiveByWechat(2L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("微信未确认收货，请稍后重试");
+
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void confirmReceiveByWechat_alreadyCompleted_isIdempotentWithoutWechatQuery() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_COMPLETED));
+
+        lifecycleService.confirmReceiveByWechat(2L, 1L);
+
+        verifyNoInteractions(wechatOrderShippingService);
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void confirmReceiveByWechat_wrongLocalStatus_rejectsWithoutWechatQuery() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_SHIPMENT));
+
+        assertThatThrownBy(() -> lifecycleService.confirmReceiveByWechat(2L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("当前订单状态不支持确认收货");
+
+        verifyNoInteractions(wechatOrderShippingService);
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void confirmReceiveByWechat_notOwner_rejectsWithoutWechatQuery() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_SHIPPED);
+        order.setUserId(99L);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+
+        assertThatThrownBy(() -> lifecycleService.confirmReceiveByWechat(2L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单不存在");
+
+        verifyNoInteractions(wechatOrderShippingService);
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void confirmReceiveByWechat_localTransitionCasMiss_throwsStatusChanged() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+        when(wechatOrderShippingService.queryOrderState(1L)).thenReturn(WechatConstants.OrderState.CONFIRMED);
+        // 第一次写 wechat_order_state 命中, 第二次本地 3→4 未命中
+        when(orderMapper.update(isNull(), any())).thenReturn(1, 0);
+
+        assertThatThrownBy(() -> lifecycleService.confirmReceiveByWechat(2L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单状态已变更，请刷新后重试");
+    }
+
+    private void assertWechatConfirmAdvancesLocalOrder(int wechatState) {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+        when(wechatOrderShippingService.queryOrderState(1L)).thenReturn(wechatState);
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+
+        lifecycleService.confirmReceiveByWechat(2L, 1L);
+
+        assertThat(capturedUpdateValues(2))
+                .contains(wechatState,
+                        StatusConstants.ORDER_SHIPPED,
+                        StatusConstants.ORDER_COMPLETED);
+        // 先记录微信状态, 再执行本地 3→4
+        java.util.List<String> sqlSets = capturedSqlSets(2);
+        assertThat(sqlSets.get(0)).contains("wechat_order_state=");
+        assertThat(sqlSets.get(1)).contains("receive_time=");
+    }
+
+    private Logistics enabledLogistics(Long id) {
+        Logistics logistics = new Logistics();
+        logistics.setId(id);
+        logistics.setStatus(StatusConstants.LOGISTICS_STATUS_ENABLED);
+        return logistics;
+    }
+
     private Order orderWithStatus(Long id, int status) {
         Order order = new Order();
         order.setId(id);
@@ -389,5 +633,13 @@ class OrderLifecycleServiceImplTest {
                 ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
         verify(orderMapper, times(1)).update(isNull(), captor.capture());
         return captor.getValue().getSqlSet();
+    }
+
+    private java.util.List<String> capturedSqlSets(int expectedInvocations) {
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
+                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
+        verify(orderMapper, times(expectedInvocations)).update(isNull(), captor.capture());
+        return captor.getAllValues().stream().map(LambdaUpdateWrapper::getSqlSet).toList();
     }
 }

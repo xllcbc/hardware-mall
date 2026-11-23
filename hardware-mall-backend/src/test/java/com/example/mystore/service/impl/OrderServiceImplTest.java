@@ -7,7 +7,6 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
-import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.common.exception.IdempotencyConflictException;
 import com.example.mystore.common.exception.PriceChangedException;
@@ -32,7 +31,6 @@ import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.UserLevelService;
-import com.example.mystore.service.WechatOrderShippingService;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.UserContext;
@@ -92,8 +90,6 @@ class OrderServiceImplTest {
     private OrderLifecycleService orderLifecycleService;
     @Mock
     private OrderQueryService orderQueryService;
-    @Mock
-    private WechatOrderShippingService wechatOrderShippingService;
     @Mock
     private PricingRuleService pricingRuleService;
     @Mock
@@ -782,88 +778,11 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void testShipOrder_Success() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(logisticsMapper.selectById(2L)).thenReturn(logistics);
-        // CAS 条件更新按成功命中 1 行 mock
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
-
+    void shipOrder_delegatesToLifecycleModule() {
         orderService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 2L);
 
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
-                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
-        verify(orderMapper).update(isNull(), captor.capture());
-        assertThat(captor.getValue().getParamNameValuePairs().values())
-                .contains(StatusConstants.ORDER_SHIPPED)
-                .contains(StatusConstants.DELIVERY_TYPE_LOCAL)
-                .contains(2L)
-                .anyMatch(v -> v instanceof String s && s.startsWith("PS"));
-    }
-
-    @Test
-    void testShipOrder_Pickup_NoLogistics() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
-
-        // 自提: 不选物流、无单号
-        orderService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_PICKUP, null);
-
-        verify(logisticsMapper, never()).selectById(any());
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
-                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
-        verify(orderMapper).update(isNull(), captor.capture());
-        assertThat(captor.getValue().getParamNameValuePairs().values())
-                .contains(StatusConstants.ORDER_SHIPPED)
-                .contains(StatusConstants.DELIVERY_TYPE_PICKUP);
-    }
-
-    @Test
-    void testGenerateDeliveryNo_Prefix() {
-        assertThat(orderService.generateDeliveryNo()).startsWith("PS");
-    }
-
-    @Test
-    void testShipOrder_LogisticsNotFound() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(logisticsMapper.selectById(999L)).thenReturn(null);
-
-        assertThatThrownBy(() -> orderService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 999L))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("物流公司不存在");
-    }
-
-    @Test
-    void testShipOrder_LogisticsDisabled_Throws() {
-        // M10: 停用的物流公司不允许被选用于发货
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
-
-        Logistics disabled = new Logistics();
-        disabled.setId(3L);
-        disabled.setStatus(0);
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(logisticsMapper.selectById(3L)).thenReturn(disabled);
-
-        assertThatThrownBy(() -> orderService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 3L))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage("物流公司不存在或已停用");
-
-        verify(orderMapper, never()).update(isNull(), any());
+        verify(orderLifecycleService).shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 2L);
+        verifyNoInteractions(orderMapper, logisticsMapper);
     }
 
     @Test
@@ -1497,55 +1416,11 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void confirmReceiveByWechat_recordsWechatStateThenCallsLifecycleModule() {
-        Order order = orderWithStatus(1L, StatusConstants.ORDER_SHIPPED);
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(wechatOrderShippingService.queryOrderState(1L)).thenReturn(WechatConstants.OrderState.CONFIRMED);
-
+    void confirmReceiveByWechat_delegatesToLifecycleModule() {
         orderService.confirmReceiveByWechat(2L, 1L);
 
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
-                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
-        verify(orderMapper).update(isNull(), captor.capture());
-        assertThat(captor.getValue().getParamNameValuePairs())
-                .containsValue(WechatConstants.OrderState.CONFIRMED);
-        // 经注入的生命周期模块执行本地 3→4, 不再同类自调用
-        verify(orderLifecycleService).confirmReceive(2L, 1L);
-    }
-
-    @Test
-    void confirmReceiveByWechat_notConfirmedByWechat_rejectsWithoutLocalTransition() {
-        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
-        when(wechatOrderShippingService.queryOrderState(1L)).thenReturn(WechatConstants.OrderState.SHIPPED);
-
-        assertThatThrownBy(() -> orderService.confirmReceiveByWechat(2L, 1L))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage("微信未确认收货，请稍后重试");
-
-        verifyNoInteractions(orderLifecycleService);
-        verify(orderMapper, never()).update(any(), any());
-    }
-
-    @Test
-    void confirmReceiveByWechat_alreadyCompleted_isIdempotentWithoutTransition() {
-        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_COMPLETED));
-
-        orderService.confirmReceiveByWechat(2L, 1L);
-
-        verifyNoInteractions(wechatOrderShippingService, orderLifecycleService);
-        verify(orderMapper, never()).update(any(), any());
-    }
-
-    @Test
-    void confirmReceiveByWechat_wrongStatus_rejectsWithoutWechatQuery() {
-        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_SHIPMENT));
-
-        assertThatThrownBy(() -> orderService.confirmReceiveByWechat(2L, 1L))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage("当前订单状态不支持确认收货");
-
-        verifyNoInteractions(wechatOrderShippingService, orderLifecycleService);
+        verify(orderLifecycleService).confirmReceiveByWechat(2L, 1L);
+        verifyNoInteractions(orderMapper);
     }
 
     // ==================== 读模型门面接线（只验证委托目标与详情触发顺序） ====================

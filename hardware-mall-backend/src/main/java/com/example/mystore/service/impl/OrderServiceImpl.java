@@ -7,7 +7,6 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
-import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.common.exception.IdempotencyConflictException;
 import com.example.mystore.common.exception.PriceChangedException;
@@ -41,7 +40,6 @@ import com.example.mystore.service.PayService;
 import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.UserLevelService;
-import com.example.mystore.service.WechatOrderShippingService;
 import com.example.mystore.util.MoneyUtil;
 import com.example.mystore.util.OrderRequestFingerprint;
 import com.example.mystore.util.UserContext;
@@ -75,7 +73,6 @@ public class OrderServiceImpl implements OrderService {
     private PayService payService;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final PlatformTransactionManager transactionManager;
-    private final WechatOrderShippingService wechatOrderShippingService;
     private final LevelPricingService levelPricingService;
     private final UserLevelService userLevelService;
     private final OrderIdempotencyService orderIdempotencyService;
@@ -463,29 +460,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public void confirmReceiveByWechat(Long userId, Long orderId) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() == StatusConstants.ORDER_COMPLETED) {
-            return; // 已完成, 幂等
-        }
-        if (order.getStatus() != StatusConstants.ORDER_SHIPPED) {
-            throw new BusinessException("当前订单状态不支持确认收货");
-        }
-        // 以微信 order_state 为准: 仅 确认收货/交易完成 才算数
-        Integer state = wechatOrderShippingService.queryOrderState(orderId);
-        if (state == null
-                || (state != WechatConstants.OrderState.CONFIRMED
-                    && state != WechatConstants.OrderState.COMPLETED)) {
-            throw new BusinessException("微信未确认收货，请稍后重试");
-        }
-        orderMapper.update(null, new LambdaUpdateWrapper<Order>()
-                .eq(Order::getId, orderId)
-                .set(Order::getWechatOrderState, state)
-                .set(Order::getUpdateTime, LocalDateTime.now()));
-        // 经注入的生命周期模块执行本地确认收货, 避免同类自调用
-        orderLifecycleService.confirmReceive(userId, orderId);
+        orderLifecycleService.confirmReceiveByWechat(userId, orderId);
     }
 
     @Override
@@ -510,58 +485,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public void shipOrder(Long orderId, Integer deliveryType, Long logisticsId) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT) {
-            throw new BusinessException("只能发货待发货的订单");
-        }
-
-        Long finalLogisticsId;
-        String logisticsNo;
-        if (deliveryType == StatusConstants.DELIVERY_TYPE_PICKUP) {
-            // 用户自提: 无物流、无单号
-            finalLogisticsId = null;
-            logisticsNo = null;
-        } else if (deliveryType == StatusConstants.DELIVERY_TYPE_LOCAL) {
-            // 同城配送: 物流取自 admin 物流管理(仅校验存在且启用), 配送单号后端自动生成
-            Logistics logistics = logisticsMapper.selectById(logisticsId);
-            if (logistics == null || logistics.getStatus() != StatusConstants.LOGISTICS_STATUS_ENABLED) {
-                throw new BusinessException("物流公司不存在或已停用");
-            }
-            finalLogisticsId = logisticsId;
-            logisticsNo = generateDeliveryNo();
-        } else {
-            throw new BusinessException("不支持的发货方式");
-        }
-
-        // CAS 条件更新: 仅当状态仍为待发货时置为已发货, 防与并发申请退款(2→8)/直退(2→6)/重复发货互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
-                        .set(Order::getStatus, StatusConstants.ORDER_SHIPPED)
-                        .set(Order::getDeliveryType, deliveryType)
-                        .set(Order::getLogisticsId, finalLogisticsId)
-                        .set(Order::getLogisticsNo, logisticsNo)
-                        .set(Order::getShipTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
-
-        // 发货成功后上报微信发货信息; 失败不影响发货结果, 由 WechatShippingRetryJob 兜底
-        try {
-            wechatOrderShippingService.uploadShippingInfo(orderId);
-        } catch (Exception e) {
-            log.warn("发货后微信上报失败, 待重试任务兜底, orderId={}: {}", orderId, e.getMessage());
-        }
-    }
-
-    /** 同城配送单号: 后端自动生成, 前缀 PS + 雪花ID */
-    String generateDeliveryNo() {
-        return "PS" + IdWorker.getIdStr();
+        orderLifecycleService.shipOrder(orderId, deliveryType, logisticsId);
     }
 
     @Override
