@@ -1373,7 +1373,7 @@ class OrderServiceImplTest {
             verify(levelPricingService, times(1)).priceAll(eq(2L), anyList());
             ArgumentCaptor<Collection<Long>> levelIdsCaptor = ArgumentCaptor.forClass((Class) Collection.class);
             verify(userLevelService, times(1)).getNames(levelIdsCaptor.capture());
-            assertThat(levelIdsCaptor.getValue()).containsExactly(7L);
+            assertThat(levelIdsCaptor.getValue()).containsOnly(7L);
             verify(userLevelService, never()).getName(any());
         } finally {
             UserContext.clear();

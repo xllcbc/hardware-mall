@@ -223,11 +223,14 @@ public class OrderServiceImpl implements OrderService {
                     DiscountConstants.isExcluded(spu.getExcludeDiscount())));
         }
         List<LevelPricing> pricings = levelPricingService.priceAll(UserContext.getLevelId(), facts);
-        Map<Long, String> levelNames = userLevelService.getNames(pricings.stream()
-                .map(LevelPricing::levelId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList());
+        for (int i = 0; i < pricings.size(); i++) {
+            if (!pricings.get(i).sellable()) {
+                throw new BusinessException(
+                        "商品暂不可售: " + spus.get(i).getName() + "（SKU " + skus.get(i).getId() + "）");
+            }
+        }
+        Map<Long, String> levelNames = userLevelService.getNames(
+                pricings.stream().map(LevelPricing::levelId).toList());
 
         // ④ 组装订单明细快照：等级 ID、名称、倍率与单价都取自同一报价结果
         List<OrderItem> orderItems = new ArrayList<>();
@@ -237,10 +240,7 @@ public class OrderServiceImpl implements OrderService {
             Sku sku = skus.get(i);
             Spu spu = spus.get(i);
             LevelPricing pricing = pricings.get(i);
-            if (!pricing.sellable()) {
-                throw new BusinessException(
-                        "商品暂不可售: " + spu.getName() + "（SKU " + sku.getId() + "）");
-            }
+            // 订单事实以单个 SKU 批发基价构建，报价的 min/max 必为同一等级结算价
             BigDecimal unitPrice = pricing.minPrice();
             BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             goodsAmount = goodsAmount.add(subtotal);

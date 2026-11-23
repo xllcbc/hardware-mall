@@ -17,7 +17,7 @@ public interface UserLevelService {
     String getName(Long id);
 
     /**
-     * 按等级 ID 批量读取名称，一次查询覆盖去重后的全部生效等级。
+     * 按等级 ID 批量读取名称，一次查询覆盖去重后的全部等级。
      */
     Map<Long, String> getNames(Collection<Long> ids);
 }
