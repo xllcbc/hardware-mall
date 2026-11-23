@@ -33,7 +33,6 @@ import com.example.mystore.entity.dto.CreateOrderRequest;
 import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.*;
-import com.example.mystore.service.CartService;
 import com.example.mystore.service.LevelPricingService;
 import com.example.mystore.service.OrderIdempotencyService;
 import com.example.mystore.service.OrderService;
@@ -73,12 +72,10 @@ public class OrderServiceImpl implements OrderService {
 
     private final OrderMapper orderMapper;
     private final OrderItemMapper orderItemMapper;
-    private final SkuMapper skuMapper;
     private final SpuMapper spuMapper;
     private final AddressMapper addressMapper;
     private final LogisticsMapper logisticsMapper;
     private final CartMapper cartMapper;
-    private final CartService cartService;
     private final SkuService skuService;
     @Autowired(required = false)
     private PayService payService;

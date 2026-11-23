@@ -19,7 +19,6 @@ import com.example.mystore.entity.dto.ProductPricingFacts;
 import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.mapper.*;
-import com.example.mystore.service.CartService;
 import com.example.mystore.service.LevelPricingService;
 import com.example.mystore.service.OrderIdempotencyService;
 import com.example.mystore.service.OrderIdempotencyService.ClaimOutcome;
@@ -68,8 +67,6 @@ class OrderServiceImplTest {
     @Mock
     private OrderItemMapper orderItemMapper;
     @Mock
-    private SkuMapper skuMapper;
-    @Mock
     private SpuMapper spuMapper;
     @Mock
     private AddressMapper addressMapper;
@@ -77,8 +74,6 @@ class OrderServiceImplTest {
     private LogisticsMapper logisticsMapper;
     @Mock
     private CartMapper cartMapper;
-    @Mock
-    private CartService cartService;
     @Mock
     private SkuService skuService;
     @Mock
