@@ -17,10 +17,13 @@ import com.example.mystore.entity.vo.ProductDetailCache;
 import com.example.mystore.entity.vo.ProductListCacheItem;
 import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.entity.vo.ProductSkuVO;
+import com.example.mystore.entity.dto.LevelPricing;
+import com.example.mystore.entity.dto.ProductPricingFacts;
 import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
+import com.example.mystore.service.LevelPricingService;
 import com.example.mystore.service.PriceService;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.ProductCacheService;
@@ -41,6 +44,7 @@ import com.example.mystore.entity.vo.SpecVO;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -59,6 +63,7 @@ public class SpuServiceImpl implements SpuService {
     private final SpecItemService specItemService;
     private final PriceService priceService;
     private final PricingRuleService pricingRuleService;
+    private final LevelPricingService levelPricingService;
     private final ProductCacheService productCacheService;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -382,29 +387,43 @@ public class SpuServiceImpl implements SpuService {
     }
 
     private ProductDetailVO toProductDetailView(ProductDetailCache cache) {
-        PricingRateResolution pricing = pricingRuleService.rateFor(
-                UserContext.getLevelId(),
-                cache.getSpu().getCategoryId(),
-                DiscountConstants.isExcluded(cache.getSpu().getExcludeDiscount()));
-        List<ProductSkuVO> skus = toProductSkuVOs(cache.getSkus(), pricing);
+        Spu spu = cache.getSpu();
+        List<Sku> skus = cache.getSkus();
+        List<ProductPricingFacts> facts = new ArrayList<>();
+        if (skus != null && !skus.isEmpty()) {
+            for (Sku sku : skus) {
+                facts.add(ProductPricingFacts.of(
+                        spu.getCategoryId(),
+                        sku.getPrice(),
+                        DiscountConstants.isExcluded(spu.getExcludeDiscount())));
+            }
+        } else {
+            facts.add(ProductPricingFacts.of(
+                    spu.getCategoryId(),
+                    spu.getOriginalPrice(),
+                    DiscountConstants.isExcluded(spu.getExcludeDiscount())));
+        }
+        List<LevelPricing> pricings = levelPricingService.priceAll(UserContext.getLevelId(), facts);
+
+        List<ProductSkuVO> skuVOs = toProductSkuVOs(skus, pricings);
         BigDecimal minPrice = null;
         BigDecimal maxPrice = null;
-        if (!skus.isEmpty()) {
-            minPrice = skus.stream().map(ProductSkuVO::getPrice)
+        if (!skuVOs.isEmpty()) {
+            minPrice = skuVOs.stream().map(ProductSkuVO::getPrice)
                     .filter(price -> price != null)
                     .min(BigDecimal::compareTo)
                     .orElse(null);
-            maxPrice = skus.stream().map(ProductSkuVO::getPrice)
+            maxPrice = skuVOs.stream().map(ProductSkuVO::getPrice)
                     .filter(price -> price != null)
                     .max(BigDecimal::compareTo)
                     .orElse(null);
-        } else if (!pricing.isMissing() && cache.getSpu().getOriginalPrice() != null) {
-            minPrice = priceService.resolveUnitPrice(cache.getSpu().getOriginalPrice(), pricing.rate());
-            maxPrice = minPrice;
+        } else if (!pricings.isEmpty()) {
+            minPrice = pricings.get(0).minPrice();
+            maxPrice = pricings.get(0).maxPrice();
         }
-        boolean sellable = !pricing.isMissing();
-        Spu spu = sellable ? cache.getSpu() : hideBasePrice(cache.getSpu());
-        return new ProductDetailVO(spu, skus, cache.getSpecTemplates(),
+        boolean sellable = pricings.stream().allMatch(LevelPricing::sellable);
+        Spu visibleSpu = sellable ? spu : hideBasePrice(spu);
+        return new ProductDetailVO(visibleSpu, skuVOs, cache.getSpecTemplates(),
                 cache.getSpecItemsMap(), minPrice, maxPrice, sellable);
     }
 
@@ -415,23 +434,26 @@ public class SpuServiceImpl implements SpuService {
         return copy;
     }
 
-    private List<ProductSkuVO> toProductSkuVOs(List<Sku> skus, PricingRateResolution pricing) {
+    private List<ProductSkuVO> toProductSkuVOs(List<Sku> skus, List<LevelPricing> pricings) {
         if (skus == null || skus.isEmpty()) {
             return Collections.emptyList();
         }
-        return skus.stream().map(sku -> {
+        List<ProductSkuVO> result = new ArrayList<>(skus.size());
+        for (int i = 0; i < skus.size(); i++) {
+            Sku sku = skus.get(i);
+            LevelPricing pricing = pricings.get(i);
             ProductSkuVO vo = new ProductSkuVO();
             vo.setId(sku.getId());
             vo.setSpuId(sku.getSpuId());
             vo.setSpecs(sku.getSpecs());
-            vo.setPrice(sku.getPrice() == null || pricing.isMissing()
-                    ? null : priceService.resolveUnitPrice(sku.getPrice(), pricing.rate()));
-            vo.setSellable(!pricing.isMissing());
+            vo.setPrice(pricing.minPrice());
+            vo.setSellable(pricing.sellable());
             vo.setStock(skuService.getStockById(sku.getId()));
             vo.setImage(sku.getImage());
             vo.setStatus(sku.getStatus());
-            return vo;
-        }).collect(Collectors.toList());
+            result.add(vo);
+        }
+        return result;
     }
 
     private PriceRange resolvePriceRange(BigDecimal baseMin, BigDecimal baseMax, PricingRateResolution pricing) {

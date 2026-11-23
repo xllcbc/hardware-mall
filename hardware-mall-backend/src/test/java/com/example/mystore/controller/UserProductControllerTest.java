@@ -5,9 +5,11 @@ import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.entity.db.LevelCategoryRate;
+import com.example.mystore.entity.db.Category;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.db.UserLevel;
+import com.example.mystore.mapper.CategoryMapper;
 import com.example.mystore.mapper.LevelCategoryRateMapper;
 import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
@@ -53,6 +55,8 @@ class UserProductControllerTest {
     private UserLevelMapper userLevelMapper;
     @Autowired
     private LevelCategoryRateMapper levelCategoryRateMapper;
+    @Autowired
+    private CategoryMapper categoryMapper;
     @Autowired
     private RedisUtil redisUtil;
     @Autowired
@@ -192,6 +196,83 @@ class UserProductControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].price").value(20.00))
                 .andExpect(content().string(not(containsString("wholesale"))));
+    }
+
+    @Test
+    void detailRateGapMarksUnsellableAndHidesWholesaleBasePrice() throws Exception {
+        Category gapCategory = new Category();
+        gapCategory.setId(3L);
+        gapCategory.setName("缺口分类");
+        gapCategory.setSortOrder(10);
+        gapCategory.setStatus(1);
+        gapCategory.setDeleteTime(0L);
+        categoryMapper.insert(gapCategory);
+
+        Spu gapSpu = new Spu();
+        gapSpu.setId(9002L);
+        gapSpu.setCategoryId(3L);
+        gapSpu.setName("缺口测试商品");
+        gapSpu.setOriginalPrice(new BigDecimal("30.00"));
+        gapSpu.setSalesCount(0);
+        gapSpu.setStatus(StatusConstants.PRODUCT_STATUS_ON_SHELF);
+        gapSpu.setIsRecommend(0);
+        gapSpu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        gapSpu.setDeleteTime(0L);
+        spuMapper.insert(gapSpu);
+
+        Sku gapSku = sku(9103L, "25.00", "spec-gap");
+        gapSku.setSpuId(9002L);
+        skuMapper.insert(gapSku);
+
+        String token = userToken(2L, "level-detail-gap-token");
+        mvc.perform(get("/api/user/product/9002")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sellable").value(false))
+                .andExpect(jsonPath("$.data.minPrice").doesNotExist())
+                .andExpect(jsonPath("$.data.maxPrice").doesNotExist())
+                .andExpect(jsonPath("$.data.spu.originalPrice").doesNotExist())
+                .andExpect(jsonPath("$.data.skus[0].price").doesNotExist())
+                .andExpect(jsonPath("$.data.skus[0].sellable").value(false))
+                .andExpect(content().string(not(containsString("wholesale"))));
+    }
+
+    @Test
+    void detailWithoutSkuPricesOriginalPriceWithLevelRate() throws Exception {
+        Category category = new Category();
+        category.setId(4L);
+        category.setName("无规格分类");
+        category.setSortOrder(10);
+        category.setStatus(1);
+        category.setDeleteTime(0L);
+        categoryMapper.insert(category);
+
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(2L);
+        rate.setCategoryId(4L);
+        rate.setRate(new BigDecimal("0.5000"));
+        levelCategoryRateMapper.insert(rate);
+
+        Spu spu = new Spu();
+        spu.setId(9003L);
+        spu.setCategoryId(4L);
+        spu.setName("无规格测试商品");
+        spu.setOriginalPrice(new BigDecimal("30.00"));
+        spu.setSalesCount(0);
+        spu.setStatus(StatusConstants.PRODUCT_STATUS_ON_SHELF);
+        spu.setIsRecommend(0);
+        spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        spu.setDeleteTime(0L);
+        spuMapper.insert(spu);
+
+        String token = userToken(2L, "level-detail-original-token");
+        mvc.perform(get("/api/user/product/9003")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sellable").value(true))
+                .andExpect(jsonPath("$.data.minPrice").value(15.00))
+                .andExpect(jsonPath("$.data.maxPrice").value(15.00))
+                .andExpect(jsonPath("$.data.skus").isEmpty());
     }
 
     @Test
