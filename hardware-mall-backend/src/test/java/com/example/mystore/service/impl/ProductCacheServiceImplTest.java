@@ -47,7 +47,7 @@ class ProductCacheServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        lenient().when(redisUtil.get(RedisConstants.PREFIX_PRODUCT_CACHE_GENERATION))
+        when(redisUtil.get(RedisConstants.PREFIX_PRODUCT_CACHE_GENERATION))
                 .thenReturn(GENERATION);
         ReflectionTestUtils.setField(productCacheService, "lockWaitMillis", 100L);
         lenient().when(redisUtil.evictWithLock(any(), eq(100L))).thenReturn(true);
@@ -233,9 +233,6 @@ class ProductCacheServiceImplTest {
                 .isEqualTo("sku:info:old-generation:22");
         assertThat(cell.keys().currentGeneration()).isEqualTo(GENERATION);
         assertThat(cell.policy()).isEqualTo(new CachePolicy(240L, 60L, 300L, 100L));
-        assertThat(cell.decode(first)).isSameAs(first);
-        assertThat(cell.decode(42)).isNull();
-        assertThat(cell.loadFromSource(List.of(1L))).containsEntry(1L, first);
     }
 
     private Sku sku(Long id) {

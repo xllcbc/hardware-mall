@@ -16,6 +16,9 @@ import java.util.UUID;
  *
  * <p>SKU 基础信息、商品详情、推荐、列表与搜索的 key，以及代际的读取与旋转都只在这里产出；
  * 回填模块与失效路径都通过它取 key，服务内不再自行拼 key。</p>
+ *
+ * <p>实现 {@link CacheKeys} 的「按 ID 批量」角色由 SKU 基础信息 key 承担：商品 namespace 中
+ * 只有它按 ID 批量读取。详情、推荐、列表与搜索的 key 通过具名方法产出，不进入批量单元格。</p>
  */
 class ProductCacheKeys implements CacheKeys {
 
