@@ -5,8 +5,10 @@ import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.entity.db.Sku;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -61,7 +63,7 @@ class StockCacheCellTest {
         assertThat(cell.loadFromSource(List.of(1L))).isEmpty();
     }
 
-    private StockCacheCell cell(java.util.function.Function<java.util.Collection<Long>, List<Sku>> loader) {
+    private StockCacheCell cell(Function<Collection<Long>, List<Sku>> loader) {
         return new StockCacheCell(keys, policy, loader);
     }
 
