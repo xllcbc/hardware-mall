@@ -223,7 +223,8 @@ public class OrderServiceImpl implements OrderService {
                     spu.getCategoryId(),
                     DiscountConstants.isExcluded(spu.getExcludeDiscount()));
             if (pricing.isMissing()) {
-                throw new BusinessException("商品暂不可售: " + cartItem.getSkuId());
+                throw new BusinessException(
+                        "商品暂不可售: " + spu.getName() + "（SKU " + sku.getId() + "）");
             }
             BigDecimal rate = pricing.rate();
             BigDecimal unitPrice = priceService.resolveUnitPrice(sku.getPrice(), rate);

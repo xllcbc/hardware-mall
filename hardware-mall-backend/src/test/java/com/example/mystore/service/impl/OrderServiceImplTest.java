@@ -465,7 +465,8 @@ class OrderServiceImplTest {
 
             assertThatThrownBy(() -> orderService.previewOrder(request))
                     .isInstanceOf(RuntimeException.class)
-                    .hasMessageContaining("商品暂不可售");
+                    .hasMessageContaining("商品暂不可售")
+                    .hasMessageContaining("防盗门锁 C级");
             verify(orderMapper, never()).insert(any(Order.class));
             verify(skuService, never()).deductStock(anyLong(), anyInt());
         } finally {
@@ -520,7 +521,8 @@ class OrderServiceImplTest {
 
             assertThatThrownBy(() -> orderService.createOrder(2L, request, "gap-key"))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("商品暂不可售");
+                    .hasMessageContaining("商品暂不可售")
+                    .hasMessageContaining("防盗门锁 C级");
 
             verify(orderMapper, never()).insert(any(Order.class));
             verify(skuService, never()).deductStock(anyLong(), anyInt());

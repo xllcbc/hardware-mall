@@ -3,30 +3,41 @@ import { ref, computed } from 'vue'
 import type { CartItem } from '@/types'
 import { updateCartQuantity, removeFromCart, clearCart as clearCartApi } from '@/api/cart'
 
+const subtotalOf = (item: CartItem) => item.subtotal ?? 0
+
 export const useCartStore = defineStore('cart', () => {
   const items = ref<CartItem[]>([])
 
   const total = computed(() =>
-    items.value.reduce((sum, item) => sum + item.subtotal, 0)
+    items.value.reduce((sum, item) => sum + subtotalOf(item), 0)
   )
 
   const count = computed(() => items.value.length)
 
+  const sellableItems = computed(() =>
+    items.value.filter(item => item.sellable !== false)
+  )
+
   const selectedItems = computed(() =>
+    sellableItems.value.filter(item => item.selected)
+  )
+
+  const pickedItems = computed(() =>
     items.value.filter(item => item.selected)
   )
 
   const selectedTotal = computed(() =>
-    selectedItems.value.reduce((sum, item) => sum + item.subtotal, 0)
+    selectedItems.value.reduce((sum, item) => sum + subtotalOf(item), 0)
   )
 
   function addItem(item: CartItem) {
     const existIndex = items.value.findIndex(i => i.skuId === item.skuId)
     if (existIndex > -1) {
-      items.value[existIndex].quantity += item.quantity
-      items.value[existIndex].subtotal = items.value[existIndex].price * items.value[existIndex].quantity
+      const existing = items.value[existIndex]
+      existing.quantity += item.quantity
+      existing.subtotal = existing.price == null ? null : existing.price * existing.quantity
     } else {
-      items.value.push({ ...item, selected: true })
+      items.value.push({ ...item, selected: item.sellable !== false })
     }
   }
 
@@ -36,7 +47,7 @@ export const useCartStore = defineStore('cart', () => {
     const oldQuantity = item.quantity
     const oldSubtotal = item.subtotal
     item.quantity = quantity
-    item.subtotal = item.price * quantity
+    item.subtotal = item.price == null ? null : item.price * quantity
     try {
       await updateCartQuantity(item.cartId!, quantity)
     } catch (e) {
@@ -62,7 +73,9 @@ export const useCartStore = defineStore('cart', () => {
   }
 
   async function clearSelected() {
-    const selectedIds = items.value.filter(item => item.selected).map(i => i.cartId!)
+    const selectedIds = items.value
+      .filter(item => item.selected && item.sellable !== false)
+      .map(i => i.cartId!)
     try {
       for (const cartId of selectedIds) {
         await removeFromCart(cartId)
@@ -78,14 +91,16 @@ export const useCartStore = defineStore('cart', () => {
   }
 
   function setItems(newItems: CartItem[]) {
-    items.value = newItems.map(item => ({ ...item, selected: true }))
+    items.value = newItems.map(item => ({ ...item, selected: item.sellable !== false }))
   }
 
   return {
     items,
     total,
     count,
+    sellableItems,
     selectedItems,
+    pickedItems,
     selectedTotal,
     addItem,
     updateQuantity,
