@@ -19,4 +19,6 @@ public class UserLevelProductPreviewVO implements Serializable {
     private BigDecimal minPrice;
     private BigDecimal maxPrice;
     private Integer excludeDiscount;
+    /** 可售标记：倍率缺口时为 false，与商品列表、详情保持一致。 */
+    private boolean sellable;
 }
