@@ -24,4 +24,15 @@ public record LevelPricing(
             Long levelId, BigDecimal rate, BigDecimal minPrice, BigDecimal maxPrice) {
         return new LevelPricing(levelId, rate, true, minPrice, maxPrice);
     }
+
+    /**
+     * 批发基价遮罩：可售时原样返回批发基价，倍率缺口时返回 {@code null}。
+     *
+     * <p>顾客侧所有展示面统一经由本方法读取批发基价，遮价只由可售性派生，
+     * 不再由各页面各自判断。商品由多个等级结算价汇总可售性时，传入汇总结果。
+     */
+    public static BigDecimal maskWholesaleBasePrice(
+            boolean sellable, BigDecimal wholesaleBasePrice) {
+        return sellable ? wholesaleBasePrice : null;
+    }
 }

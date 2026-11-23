@@ -46,6 +46,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -417,16 +418,16 @@ public class SpuServiceImpl implements SpuService {
             maxPrice = pricings.get(0).maxPrice();
         }
         boolean sellable = pricings.stream().allMatch(LevelPricing::sellable);
-        Spu visibleSpu = sellable ? spu : hideBasePrice(spu);
+        BigDecimal visibleOriginalPrice =
+                LevelPricing.maskWholesaleBasePrice(sellable, spu.getOriginalPrice());
+        Spu visibleSpu = spu;
+        if (!Objects.equals(visibleOriginalPrice, spu.getOriginalPrice())) {
+            visibleSpu = new Spu();
+            BeanUtils.copyProperties(spu, visibleSpu);
+            visibleSpu.setOriginalPrice(visibleOriginalPrice);
+        }
         return new ProductDetailVO(visibleSpu, skuVOs, cache.getSpecTemplates(),
                 cache.getSpecItemsMap(), minPrice, maxPrice, sellable);
-    }
-
-    private Spu hideBasePrice(Spu spu) {
-        Spu copy = new Spu();
-        BeanUtils.copyProperties(spu, copy);
-        copy.setOriginalPrice(null);
-        return copy;
     }
 
     private List<ProductSkuVO> toProductSkuVOs(List<Sku> skus, List<LevelPricing> pricings) {
@@ -479,14 +480,12 @@ public class SpuServiceImpl implements SpuService {
             target.setName(source.getName());
             target.setSubtitle(source.getSubtitle());
             target.setImages(source.getImages());
-            target.setOriginalPrice(source.getOriginalPrice());
+            target.setOriginalPrice(LevelPricing.maskWholesaleBasePrice(
+                    pricing.sellable(), source.getOriginalPrice()));
             target.setStatus(source.getStatus());
             target.setMinPrice(pricing.minPrice());
             target.setMaxPrice(pricing.maxPrice());
             target.setSellable(pricing.sellable());
-            if (!pricing.sellable()) {
-                target.setOriginalPrice(null);
-            }
             views.add(target);
         }
         return views;
@@ -607,21 +606,19 @@ public class SpuServiceImpl implements SpuService {
             vo.setCategoryId(item.getCategoryId());
             vo.setName(item.getName());
             vo.setImages(item.getImages());
-            vo.setOriginalPrice(item.getOriginalPrice());
-            vo.setRetailMinPrice(item.getBasePriceMin());
-            vo.setRetailMaxPrice(item.getBasePriceMax());
+            // 等级预览与列表、推荐、详情同属缺口遮价面：缺口时不展示任何批发基价字段。
+            // 管理端价格视角（AdminProductPricingVO）保留批发基价，由 #66 的管理入口单独组装。
+            vo.setOriginalPrice(LevelPricing.maskWholesaleBasePrice(
+                    pricing.sellable(), item.getOriginalPrice()));
+            vo.setRetailMinPrice(LevelPricing.maskWholesaleBasePrice(
+                    pricing.sellable(), item.getBasePriceMin()));
+            vo.setRetailMaxPrice(LevelPricing.maskWholesaleBasePrice(
+                    pricing.sellable(), item.getBasePriceMax()));
             vo.setExcludeDiscount(item.getExcludeDiscount());
             vo.setPricingRate(pricing.rate());
             vo.setMinPrice(pricing.minPrice());
             vo.setMaxPrice(pricing.maxPrice());
             vo.setSellable(pricing.sellable());
-            if (!pricing.sellable()) {
-                // 等级预览与列表、推荐、详情同属缺口遮价面：缺口时不展示任何批发基价字段。
-                // 管理端价格视角（AdminProductPricingVO）保留批发基价，由 #66 的管理入口单独组装。
-                vo.setOriginalPrice(null);
-                vo.setRetailMinPrice(null);
-                vo.setRetailMaxPrice(null);
-            }
             records.add(vo);
         }
         voPage.setRecords(records);

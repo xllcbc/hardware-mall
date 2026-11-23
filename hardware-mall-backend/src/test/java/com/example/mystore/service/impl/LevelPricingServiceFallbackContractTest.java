@@ -58,8 +58,7 @@ class LevelPricingServiceFallbackContractTest {
                 categoryMapper,
                 redisUtil,
                 eventPublisher);
-        levelPricingService = new LevelPricingServiceImpl(
-                pricingRuleService, new PriceServiceImpl());
+        levelPricingService = new LevelPricingServiceImpl(pricingRuleService);
 
         when(redisUtil.queryWithCache(
                 anyString(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any()))

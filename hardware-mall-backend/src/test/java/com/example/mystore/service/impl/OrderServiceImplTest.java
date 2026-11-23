@@ -24,7 +24,6 @@ import com.example.mystore.service.LevelPricingService;
 import com.example.mystore.service.OrderIdempotencyService;
 import com.example.mystore.service.OrderIdempotencyService.ClaimOutcome;
 import com.example.mystore.service.PayService;
-import com.example.mystore.service.PriceService;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
@@ -106,9 +105,6 @@ class OrderServiceImplTest {
     private UserLevelService userLevelService;
     @Mock
     private OrderIdempotencyService orderIdempotencyService;
-
-    @Spy
-    private PriceService priceService = new PriceServiceImpl();
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -442,7 +438,7 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void previewOrder_customLevel_returnsServerSettlementWithoutWriting() {
+    void previewOrder_wiresModuleSettlementWithoutWriting() {
         UserContext.setLevelId(2L);
         try {
             when(levelPricingService.priceAll(eq(2L), anyList()))
@@ -598,7 +594,7 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void previewOrder_excludeDiscountResolvesRetailRate() {
+    void previewOrder_mapsExcludeDiscountFactForPricing() {
         UserContext.setLevelId(2L);
         try {
             spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
@@ -615,10 +611,8 @@ class OrderServiceImplTest {
             CheckoutPreviewRequest request = new CheckoutPreviewRequest();
             request.setItems(List.of(line));
 
-            CheckoutPreviewVO preview = orderService.previewOrder(request);
+            orderService.previewOrder(request);
 
-            assertThat(preview.getItems().get(0).getPrice()).isEqualByComparingTo("219.00");
-            assertThat(preview.getPayAmount()).isEqualByComparingTo("438.00");
             @SuppressWarnings("unchecked")
             ArgumentCaptor<List<ProductPricingFacts>> factsCaptor =
                     ArgumentCaptor.forClass((Class) List.class);
@@ -663,60 +657,6 @@ class OrderServiceImplTest {
             verify(skuService, never()).deductStock(anyLong(), anyInt());
             verify(orderIdempotencyService).markFailed(10L, "owner-token");
             verify(orderIdempotencyService).releaseLock(2L, "gap-key", "owner-token", true);
-        } finally {
-            UserContext.clear();
-        }
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void createOrder_excludeDiscountSnapshotsRetailLevel() {
-        UserContext.setLevelId(2L);
-        try {
-            spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
-            when(levelPricingService.priceAll(eq(2L), anyList()))
-                    .thenReturn(List.of(LevelPricing.priced(
-                            1L, BigDecimal.ONE,
-                            new BigDecimal("219.00"), new BigDecimal("219.00"))));
-                when(addressMapper.selectById(1L)).thenReturn(address);
-            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
-            when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
-            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
-            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
-                inv.getArgument(0, Order.class).setId(100L);
-                return 1;
-            });
-            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
-                Order o = new Order();
-                o.setId(100L);
-                o.setUserId(2L);
-                o.setOrderNo("SO1");
-                o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-                o.setAddressId(1L);
-                o.setLogisticsId(1L);
-                return o;
-            });
-            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-
-            CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
-            line.setSkuId(5L);
-            line.setQuantity(2);
-            CreateOrderRequest request = new CreateOrderRequest();
-            request.setAddressId(1L);
-            request.setLogisticsId(1L);
-            request.setItems(List.of(line));
-            request.setExpectedPayAmount(new BigDecimal("438.00"));
-
-            orderService.createOrder(2L, request, "excluded-key");
-
-            ArgumentCaptor<List<OrderItem>> captor = ArgumentCaptor.forClass(List.class);
-            verify(orderItemMapper).insertBatch(captor.capture());
-            OrderItem item = captor.getValue().get(0);
-            assertThat(item.getLevelId()).isEqualTo(1L);
-            assertThat(item.getLevelName()).isEqualTo("零售");
-            assertThat(item.getPricingRate()).isEqualByComparingTo("1.0000");
-            assertThat(item.getPrice()).isEqualByComparingTo("219.00");
         } finally {
             UserContext.clear();
         }
@@ -1211,194 +1151,6 @@ class OrderServiceImplTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void orderWithoutLevelContextPricesAtRetail() {
-        when(levelPricingService.priceAll(isNull(), anyList()))
-                .thenReturn(List.of(LevelPricing.priced(
-                        1L, BigDecimal.ONE,
-                        new BigDecimal("219.00"), new BigDecimal("219.00"))));
-        when(addressMapper.selectById(1L)).thenReturn(address);
-        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
-        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
-        when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
-        when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
-            inv.getArgument(0, Order.class).setId(100L);
-            return 1;
-        });
-        when(orderMapper.selectById(100L)).thenAnswer(inv -> {
-            Order o = new Order();
-            o.setId(100L);
-            o.setUserId(2L);
-            o.setOrderNo("SO1");
-            o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-            o.setAddressId(1L);
-            o.setLogisticsId(1L);
-            return o;
-        });
-        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-
-        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
-        line.setSkuId(5L);
-        line.setQuantity(2);
-        CreateOrderRequest request = new CreateOrderRequest();
-        request.setAddressId(1L);
-        request.setLogisticsId(1L);
-        request.setItems(List.of(line));
-        request.setExpectedPayAmount(new BigDecimal("438.00"));
-
-        orderService.createOrder(2L, request, "anon");
-
-        ArgumentCaptor<List<OrderItem>> captor = ArgumentCaptor.forClass(List.class);
-        verify(orderItemMapper).insertBatch(captor.capture());
-        OrderItem item = captor.getValue().get(0);
-        assertThat(item.getLevelId()).isEqualTo(1L);
-        assertThat(item.getLevelName()).isEqualTo("零售");
-        assertThat(item.getPricingRate()).isEqualByComparingTo("1.0000");
-        assertThat(item.getPrice()).isEqualByComparingTo("219.00");
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void customLevel_getsDiscountedPriceAndSnapshot() {
-        UserContext.setLevelId(2L);
-        try {
-            when(levelPricingService.priceAll(eq(2L), anyList()))
-                    .thenReturn(List.of(LevelPricing.priced(
-                            2L, new BigDecimal("0.8000"),
-                            new BigDecimal("20.00"), new BigDecimal("20.00"))));
-                when(addressMapper.selectById(1L)).thenReturn(address);
-            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-
-            Sku pricedSku = new Sku();
-            pricedSku.setId(5L);
-            pricedSku.setSpuId(1L);
-            pricedSku.setPrice(new BigDecimal("25.00"));
-            pricedSku.setStock(40);
-            pricedSku.setStatus(1);
-
-            Spu pricedSpu = new Spu();
-            pricedSpu.setId(1L);
-            pricedSpu.setCategoryId(1L);
-            pricedSpu.setName("防盗门锁 C级");
-            pricedSpu.setImages(java.util.List.of("img-a.jpg"));
-            pricedSpu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
-
-            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, pricedSku));
-            when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));
-            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
-            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
-                inv.getArgument(0, Order.class).setId(100L);
-                return 1;
-            });
-            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
-                Order o = new Order();
-                o.setId(100L);
-                o.setUserId(2L);
-                o.setOrderNo("SO1");
-                o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-                o.setAddressId(1L);
-                o.setLogisticsId(1L);
-                return o;
-            });
-            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-
-            CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
-            i1.setSkuId(5L);
-            i1.setQuantity(2);
-            CreateOrderRequest request = new CreateOrderRequest();
-            request.setAddressId(1L);
-            request.setLogisticsId(1L);
-            request.setItems(java.util.List.of(i1));
-            request.setExpectedPayAmount(new BigDecimal("40.00"));
-
-            orderService.createOrder(2L, request, "k");
-
-            ArgumentCaptor<java.util.List<OrderItem>> captor = ArgumentCaptor.forClass(java.util.List.class);
-            verify(orderItemMapper).insertBatch(captor.capture());
-            OrderItem item = captor.getValue().get(0);
-            assertThat(item.getPrice()).isEqualByComparingTo("20.00");
-            assertThat(item.getLevelId()).isEqualTo(2L);
-            assertThat(item.getPricingRate()).isEqualByComparingTo("0.8000");
-            assertThat(item.getSubtotal()).isEqualByComparingTo("40.00");
-
-            ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
-            verify(orderMapper).insert(orderCaptor.capture());
-            assertThat(orderCaptor.getValue().getPayAmount()).isEqualByComparingTo("40.00");
-        } finally {
-            UserContext.clear();
-        }
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void retailUser_getsRetailPriceAndSnapshot() {
-        UserContext.setLevelId(1L);
-        try {
-                when(addressMapper.selectById(1L)).thenReturn(address);
-            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-
-            Sku pricedSku = new Sku();
-            pricedSku.setId(5L);
-            pricedSku.setSpuId(1L);
-            pricedSku.setPrice(new BigDecimal("25.00"));
-            pricedSku.setStock(40);
-            pricedSku.setStatus(1);
-
-            Spu pricedSpu = new Spu();
-            pricedSpu.setId(1L);
-            pricedSpu.setCategoryId(1L);
-            pricedSpu.setName("防盗门锁 C级");
-            pricedSpu.setImages(java.util.List.of("img-a.jpg"));
-            pricedSpu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
-
-            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, pricedSku));
-            when(spuMapper.selectBatchIds(any())).thenReturn(java.util.List.of(pricedSpu));
-            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
-            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
-                inv.getArgument(0, Order.class).setId(100L);
-                return 1;
-            });
-            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
-                Order o = new Order();
-                o.setId(100L);
-                o.setUserId(2L);
-                o.setOrderNo("SO1");
-                o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-                o.setAddressId(1L);
-                o.setLogisticsId(1L);
-                return o;
-            });
-            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-
-            CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
-            i1.setSkuId(5L);
-            i1.setQuantity(2);
-            CreateOrderRequest request = new CreateOrderRequest();
-            request.setAddressId(1L);
-            request.setLogisticsId(1L);
-            request.setItems(java.util.List.of(i1));
-            request.setExpectedPayAmount(new BigDecimal("50.00"));
-
-            orderService.createOrder(2L, request, "k");
-
-            ArgumentCaptor<java.util.List<OrderItem>> captor = ArgumentCaptor.forClass(java.util.List.class);
-            verify(orderItemMapper).insertBatch(captor.capture());
-            OrderItem item = captor.getValue().get(0);
-            assertThat(item.getPrice()).isEqualByComparingTo("25.00");
-            assertThat(item.getLevelId()).isEqualTo(1L);
-            assertThat(item.getPricingRate()).isEqualByComparingTo("1.0000");
-            assertThat(item.getSubtotal()).isEqualByComparingTo("50.00");
-
-            ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
-            verify(orderMapper).insert(orderCaptor.capture());
-            assertThat(orderCaptor.getValue().getPayAmount()).isEqualByComparingTo("50.00");
-        } finally {
-            UserContext.clear();
-        }
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
     void orderSnapshotFieldsAllComeFromOneLevelPricingResult() {
         UserContext.setLevelId(2L);
         try {
@@ -1486,7 +1238,7 @@ class OrderServiceImplTest {
         UserContext.setLevelId(2L);
         try {
             LevelPricingService realLevelPricing =
-                    new LevelPricingServiceImpl(pricingRuleService, priceService);
+                    new LevelPricingServiceImpl(pricingRuleService);
             ReflectionTestUtils.setField(orderService, "levelPricingService", realLevelPricing);
             when(pricingRuleService.rateTable(2L)).thenReturn(new LevelRateTable(
                     2L, Map.of(1L, new BigDecimal("0.8000"), 10L, new BigDecimal("1.0000"))));

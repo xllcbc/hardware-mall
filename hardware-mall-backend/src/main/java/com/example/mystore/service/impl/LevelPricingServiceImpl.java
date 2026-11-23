@@ -1,30 +1,30 @@
 package com.example.mystore.service.impl;
 
+import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.entity.dto.AdminLevelPricing;
 import com.example.mystore.entity.dto.LevelPricing;
 import com.example.mystore.entity.dto.LevelRateTable;
 import com.example.mystore.entity.dto.ProductPricingFacts;
 import com.example.mystore.service.LevelPricingService;
-import com.example.mystore.service.PriceService;
 import com.example.mystore.service.PricingRuleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 /**
- * 等级定价模块实现。取整仍委托唯一的纯定价函数，倍率解析委托定价缓存适配器；
- * 模块本身只负责把商品事实与整张倍率表匹配成可售性与等级结算价。
+ * 等级定价模块实现。倍率解析委托定价缓存适配器；等级结算价按批发基价乘以倍率、
+ * 人民币两位小数四舍五入，这是全链路唯一的取整位置。
  */
 @Service
 @RequiredArgsConstructor
 public class LevelPricingServiceImpl implements LevelPricingService {
 
     private final PricingRuleService pricingRuleService;
-    private final PriceService priceService;
 
     @Override
     public LevelPricing price(Long levelId, ProductPricingFacts facts) {
@@ -90,6 +90,17 @@ public class LevelPricingServiceImpl implements LevelPricingService {
     }
 
     private BigDecimal resolvePrice(BigDecimal basePrice, BigDecimal rate) {
-        return basePrice == null ? null : priceService.resolveUnitPrice(basePrice, rate);
+        if (basePrice == null) {
+            return null;
+        }
+        if (basePrice.signum() < 0) {
+            throw new IllegalArgumentException("基础价格不能为负");
+        }
+        if (rate == null
+                || rate.compareTo(UserLevelStatusConstants.MIN_EXCLUSIVE_RATE) <= 0
+                || rate.compareTo(UserLevelStatusConstants.MAX_INCLUSIVE_RATE) > 0) {
+            throw new IllegalArgumentException("定价倍率必须在 (0, 3] 之间");
+        }
+        return basePrice.multiply(rate).setScale(2, RoundingMode.HALF_UP);
     }
 }
