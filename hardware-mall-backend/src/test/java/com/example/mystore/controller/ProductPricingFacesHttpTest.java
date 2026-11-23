@@ -66,6 +66,8 @@ class ProductPricingFacesHttpTest {
 
     private String adminToken;
     private UserLevel level;
+    private Category pricedCategory;
+    private Spu priced;
 
     @BeforeEach
     void setUp() {
@@ -74,7 +76,7 @@ class ProductPricingFacesHttpTest {
                 "userId", 1L,
                 "role", StatusConstants.USER_ROLE_ADMIN));
 
-        Category pricedCategory = category("批量报价分类");
+        pricedCategory = category("批量报价分类");
         Category gapCategory = category("批量报价缺口分类");
 
         UserLevel retailLevel = userLevelMapper.selectOne(new LambdaQueryWrapper<UserLevel>()
@@ -90,7 +92,7 @@ class ProductPricingFacesHttpTest {
         userLevelMapper.insert(level);
         rate(level.getId(), pricedCategory.getId(), "0.8000");
 
-        Spu priced = spu(pricedCategory.getId(), "批量报价正常商品", 20);
+        priced = spu(pricedCategory.getId(), "批量报价正常商品", 20);
         sku(priced.getId(), "10.00");
         sku(priced.getId(), "20.00");
 
@@ -133,6 +135,30 @@ class ProductPricingFacesHttpTest {
                 .andExpect(jsonPath("$.data[1].minPrice").doesNotExist())
                 .andExpect(jsonPath("$.data[1].maxPrice").doesNotExist())
                 .andExpect(jsonPath("$.data[1].originalPrice").doesNotExist());
+    }
+
+    @Test
+    void productListRangeMatchesDetailForSameLevelViewer() throws Exception {
+        String shopperToken = jwtUtil.generateToken(Map.of(
+                "userId", 99L,
+                "role", StatusConstants.USER_ROLE_REGULAR,
+                "levelId", level.getId()));
+
+        mvc.perform(get("/api/user/product/list")
+                        .header("Authorization", "Bearer " + shopperToken)
+                        .param("categoryId", String.valueOf(pricedCategory.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records.length()").value(1))
+                .andExpect(jsonPath("$.data.records[0].minPrice").value(8.0))
+                .andExpect(jsonPath("$.data.records[0].maxPrice").value(16.0));
+
+        mvc.perform(get("/api/user/product/{id}", priced.getId())
+                        .header("Authorization", "Bearer " + shopperToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.skus.length()").value(2))
+                .andExpect(jsonPath("$.data.minPrice").value(8.0))
+                .andExpect(jsonPath("$.data.maxPrice").value(16.0))
+                .andExpect(jsonPath("$.data.sellable").value(true));
     }
 
     @Test

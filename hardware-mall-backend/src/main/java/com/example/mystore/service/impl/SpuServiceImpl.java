@@ -237,7 +237,7 @@ public class SpuServiceImpl implements SpuService {
                 return new Page<>(page, limit, 0);
             }
             Page<ProductListVO> voPage = new Page<>(page, limit, result.getTotal());
-            voPage.setRecords(toUserPricingViews(result.getRecords()));
+            voPage.setRecords(toUserLevelPricingViews(result.getRecords()));
             return voPage;
         }
         ProductListResult result = productCacheService.searchProducts(
@@ -247,7 +247,7 @@ public class SpuServiceImpl implements SpuService {
             return new Page<>(page, limit, 0);
         }
         Page<ProductListVO> voPage = new Page<>(page, limit, result.getTotal());
-        voPage.setRecords(toUserPricingViews(result.getRecords()));
+        voPage.setRecords(toUserLevelPricingViews(result.getRecords()));
         return voPage;
     }
 
@@ -288,7 +288,7 @@ public class SpuServiceImpl implements SpuService {
         if (result == null || result.getRecords() == null) {
             return Collections.emptyList();
         }
-        List<ProductListVO> userPricingViews = toUserPricingViews(result.getRecords());
+        List<ProductListVO> userPricingViews = toUserLevelPricingViews(result.getRecords());
         if (limit != null && userPricingViews.size() > limit) {
             return userPricingViews.subList(0, limit);
         }
@@ -468,14 +468,11 @@ public class SpuServiceImpl implements SpuService {
         return item;
     }
 
-    private List<ProductListVO> toUserPricingViews(List<ProductListCacheItem> records) {
+    private List<ProductListVO> toUserLevelPricingViews(List<ProductListCacheItem> records) {
         if (records == null || records.isEmpty()) {
             return Collections.emptyList();
         }
-        List<ProductPricingFacts> facts = records.stream()
-                .map(this::toPricingFacts)
-                .collect(Collectors.toList());
-        List<LevelPricing> pricings = levelPricingService.priceAll(UserContext.getLevelId(), facts);
+        List<LevelPricing> pricings = priceListItems(UserContext.getLevelId(), records);
         List<ProductListVO> views = new ArrayList<>(records.size());
         for (int i = 0; i < records.size(); i++) {
             ProductListCacheItem source = records.get(i);
@@ -497,6 +494,19 @@ public class SpuServiceImpl implements SpuService {
             views.add(target);
         }
         return views;
+    }
+
+    /**
+     * 列表类读取面共用的批量报价：一次取齐该等级的倍率表，按分类为整页商品匹配。
+     */
+    private List<LevelPricing> priceListItems(Long levelId, List<ProductListCacheItem> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        List<ProductPricingFacts> facts = items.stream()
+                .map(this::toPricingFacts)
+                .collect(Collectors.toList());
+        return levelPricingService.priceAll(levelId, facts);
     }
 
     private ProductPricingFacts toPricingFacts(ProductListCacheItem item) {
@@ -592,14 +602,11 @@ public class SpuServiceImpl implements SpuService {
                 () -> buildProductListResult(categoryId, null, page, limit, StatusConstants.PRODUCT_STATUS_ON_SHELF));
         Page<UserLevelProductPreviewVO> voPage = new Page<>(page, limit,
                 result == null ? 0 : result.getTotal());
-        if (result == null || result.getRecords() == null || result.getRecords().isEmpty()) {
+        if (result == null || result.getRecords() == null) {
             return voPage;
         }
         List<ProductListCacheItem> items = result.getRecords();
-        List<ProductPricingFacts> facts = items.stream()
-                .map(this::toPricingFacts)
-                .collect(Collectors.toList());
-        List<LevelPricing> pricings = levelPricingService.priceAll(levelId, facts);
+        List<LevelPricing> pricings = priceListItems(levelId, items);
         List<UserLevelProductPreviewVO> records = new ArrayList<>(items.size());
         for (int i = 0; i < items.size(); i++) {
             ProductListCacheItem item = items.get(i);
@@ -618,6 +625,8 @@ public class SpuServiceImpl implements SpuService {
             vo.setMaxPrice(pricing.maxPrice());
             vo.setSellable(pricing.sellable());
             if (!pricing.sellable()) {
+                // 等级预览与列表、推荐、详情同属缺口遮价面：缺口时不展示任何批发基价字段。
+                // 管理端价格视角（AdminProductPricingVO）保留批发基价，由 #66 的管理入口单独组装。
                 vo.setOriginalPrice(null);
                 vo.setRetailMinPrice(null);
                 vo.setRetailMaxPrice(null);
