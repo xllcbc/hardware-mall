@@ -1,5 +1,6 @@
 package com.example.mystore.service.impl;
 
+import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.entity.dto.AdminLevelPricing;
 import com.example.mystore.entity.dto.LevelPricing;
 import com.example.mystore.entity.dto.LevelRateTable;
@@ -94,6 +95,11 @@ public class LevelPricingServiceImpl implements LevelPricingService {
         }
         if (basePrice.signum() < 0) {
             throw new IllegalArgumentException("基础价格不能为负");
+        }
+        if (rate == null
+                || rate.compareTo(UserLevelStatusConstants.MIN_EXCLUSIVE_RATE) <= 0
+                || rate.compareTo(UserLevelStatusConstants.MAX_INCLUSIVE_RATE) > 0) {
+            throw new IllegalArgumentException("定价倍率必须在 (0, 3] 之间");
         }
         return basePrice.multiply(rate).setScale(2, RoundingMode.HALF_UP);
     }

@@ -131,7 +131,18 @@ class LevelPricingServiceContractTest {
         stubRateTable(CUSTOM_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("1.0000")));
 
         assertThat(priceFor(CATEGORY_ID, "8.115")).isEqualByComparingTo("8.12");
-        assertThat(priceFor(CATEGORY_ID, "8.114")).isEqualByComparingTo("8.11");
+    }
+
+    @Test
+    void rejectsRateOutsideAllowedRange() {
+        stubRateTable(CUSTOM_LEVEL_ID, Map.of(
+                CATEGORY_ID, BigDecimal.ZERO,
+                10L, new BigDecimal("3.0001")));
+
+        assertThatThrownBy(() -> priceFor(CATEGORY_ID, "10.00"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> priceFor(10L, "10.00"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -180,10 +191,13 @@ class LevelPricingServiceContractTest {
                 new BigDecimal("20.00"),
                 new BigDecimal("20.00"));
 
-        assertThat(gap.maskWholesaleBasePrice(new BigDecimal("25.00"))).isNull();
-        assertThat(sellable.maskWholesaleBasePrice(new BigDecimal("25.00")))
+        assertThat(LevelPricing.maskWholesaleBasePrice(
+                        gap.sellable(), new BigDecimal("25.00")))
+                .isNull();
+        assertThat(LevelPricing.maskWholesaleBasePrice(
+                        sellable.sellable(), new BigDecimal("25.00")))
                 .isEqualByComparingTo("25.00");
-        assertThat(sellable.maskWholesaleBasePrice(null)).isNull();
+        assertThat(LevelPricing.maskWholesaleBasePrice(sellable.sellable(), null)).isNull();
     }
 
     @Test

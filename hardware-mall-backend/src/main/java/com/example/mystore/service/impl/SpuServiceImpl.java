@@ -46,6 +46,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -417,10 +418,14 @@ public class SpuServiceImpl implements SpuService {
             maxPrice = pricings.get(0).maxPrice();
         }
         boolean sellable = pricings.stream().allMatch(LevelPricing::sellable);
-        Spu visibleSpu = new Spu();
-        BeanUtils.copyProperties(spu, visibleSpu);
-        visibleSpu.setOriginalPrice(LevelPricing.maskWholesaleBasePrice(
-                sellable, spu.getOriginalPrice()));
+        BigDecimal visibleOriginalPrice =
+                LevelPricing.maskWholesaleBasePrice(sellable, spu.getOriginalPrice());
+        Spu visibleSpu = spu;
+        if (!Objects.equals(visibleOriginalPrice, spu.getOriginalPrice())) {
+            visibleSpu = new Spu();
+            BeanUtils.copyProperties(spu, visibleSpu);
+            visibleSpu.setOriginalPrice(visibleOriginalPrice);
+        }
         return new ProductDetailVO(visibleSpu, skuVOs, cache.getSpecTemplates(),
                 cache.getSpecItemsMap(), minPrice, maxPrice, sellable);
     }
@@ -475,7 +480,8 @@ public class SpuServiceImpl implements SpuService {
             target.setName(source.getName());
             target.setSubtitle(source.getSubtitle());
             target.setImages(source.getImages());
-            target.setOriginalPrice(pricing.maskWholesaleBasePrice(source.getOriginalPrice()));
+            target.setOriginalPrice(LevelPricing.maskWholesaleBasePrice(
+                    pricing.sellable(), source.getOriginalPrice()));
             target.setStatus(source.getStatus());
             target.setMinPrice(pricing.minPrice());
             target.setMaxPrice(pricing.maxPrice());
@@ -602,9 +608,12 @@ public class SpuServiceImpl implements SpuService {
             vo.setImages(item.getImages());
             // 等级预览与列表、推荐、详情同属缺口遮价面：缺口时不展示任何批发基价字段。
             // 管理端价格视角（AdminProductPricingVO）保留批发基价，由 #66 的管理入口单独组装。
-            vo.setOriginalPrice(pricing.maskWholesaleBasePrice(item.getOriginalPrice()));
-            vo.setRetailMinPrice(pricing.maskWholesaleBasePrice(item.getBasePriceMin()));
-            vo.setRetailMaxPrice(pricing.maskWholesaleBasePrice(item.getBasePriceMax()));
+            vo.setOriginalPrice(LevelPricing.maskWholesaleBasePrice(
+                    pricing.sellable(), item.getOriginalPrice()));
+            vo.setRetailMinPrice(LevelPricing.maskWholesaleBasePrice(
+                    pricing.sellable(), item.getBasePriceMin()));
+            vo.setRetailMaxPrice(LevelPricing.maskWholesaleBasePrice(
+                    pricing.sellable(), item.getBasePriceMax()));
             vo.setExcludeDiscount(item.getExcludeDiscount());
             vo.setPricingRate(pricing.rate());
             vo.setMinPrice(pricing.minPrice());
