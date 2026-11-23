@@ -1,6 +1,7 @@
 package com.example.mystore.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Order;
@@ -965,7 +966,7 @@ class PayServiceImplTest {
 
     /** 详情同步去抖 key 存 Redis, 不随测试事务回滚, 每个用例先清理 */
     private void clearLazySyncKey(Long orderId) {
-        redisUtil.delete("lazysync:order:" + orderId);
+        redisUtil.delete(RedisConstants.PREFIX_ORDER_LAZY_SYNC + orderId);
     }
 
     @SuppressWarnings("unchecked")

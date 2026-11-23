@@ -3,6 +3,7 @@ package com.example.mystore.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.mystore.common.constant.PaymentAlertConstants;
+import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
@@ -50,9 +51,6 @@ public class PayServiceImpl implements PayService {
     private static final int HTTP_STATUS_SERVER_ERROR = 500;
     /** 对账补发退款的展示原因(不参与资金计算) */
     private static final String RECONCILE_REFUND_REASON = "退款对账补发";
-    /** 详情支付状态同步去抖: 同一订单 30 秒内最多查一次微信, 防刷 API 限频 */
-    private static final String LAZY_SYNC_KEY_PREFIX = "lazysync:order:";
-    private static final long LAZY_SYNC_DEBOUNCE_SECONDS = 30;
 
     private final PaymentRecordMapper paymentRecordMapper;
     private final OrderMapper orderMapper;
@@ -329,7 +327,8 @@ public class PayServiceImpl implements PayService {
     @Override
     public void syncPaymentStatus(Long orderId) {
         boolean debounced = redisUtil.setIfAbsent(
-                LAZY_SYNC_KEY_PREFIX + orderId, "1", LAZY_SYNC_DEBOUNCE_SECONDS, TimeUnit.SECONDS);
+                RedisConstants.PREFIX_ORDER_LAZY_SYNC + orderId, "1",
+                RedisConstants.ORDER_LAZY_SYNC_TTL, TimeUnit.SECONDS);
         if (!debounced) {
             return;
         }
@@ -355,15 +354,22 @@ public class PayServiceImpl implements PayService {
     }
 
     private void repairPaidOrderIfStillPending(Long orderId) {
-        int affected = orderMapper.update(null,
+        int affected = advanceOrderToPendingShipment(orderId, LocalDateTime.now(), null);
+        log.info("⑦ lazy sync DB不一致修复, orderId={}, affected={}", orderId, affected);
+    }
+
+    /**
+     * 订单 1→2 条件更新: 仅当仍为待付款时推进。
+     * 支付成功回填 payTime; DB 不一致修复没有支付时间可回填, 传 null 不更新该列。
+     */
+    private int advanceOrderToPendingShipment(Long orderId, LocalDateTime now, LocalDateTime payTime) {
+        return orderMapper.update(null,
                 new LambdaUpdateWrapper<Order>()
                         .eq(Order::getId, orderId)
                         .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
                         .set(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected > 0) {
-            log.info("⑦ lazy sync DB不一致修复, orderId={}", orderId);
-        }
+                        .set(payTime != null, Order::getPayTime, payTime)
+                        .set(Order::getUpdateTime, now));
     }
 
     /**
@@ -371,7 +377,8 @@ public class PayServiceImpl implements PayService {
      * 三处复用: 回调 callback / ⑥ OrderCancelStaleJob 微信查单补单 / ⑦ 详情同步 syncPaymentStatus
      *
      * 事务来源(M7): callback 经 TransactionTemplate 包裹调用(内部 this-call 不走代理, 由模板提供事务);
-     * ⑥⑦ 为外部调用, @Transactional 经代理生效
+     * ⑥ 为外部调用, @Transactional 经代理生效;
+     * ⑦ 详情同步在同类内调用, 由 syncPaymentStatus 的 TransactionTemplate 提供事务
      *
      * 幂等保证:
      *   - 已 PAID 直接返回 false(已被处理过)
@@ -418,13 +425,7 @@ public class PayServiceImpl implements PayService {
 
         // 订单状态条件更新: 仅 order.status=1(待付款) 时才改成 2(待发货)
         // 若订单已被自动取消(status=5)或其他状态, affect=0, 走下面 ④ 兜底退款
-        int orderRows = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, record.getOrderId())
-                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
-                        .set(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
-                        .set(Order::getPayTime, now)
-                        .set(Order::getUpdateTime, now));
+        int orderRows = advanceOrderToPendingShipment(record.getOrderId(), now, now);
 
         log.info("支付成功, orderId={}, transactionId={}, 订单推进与否(orderRows={})",
                 record.getOrderId(), transactionId, orderRows);
