@@ -1,6 +1,8 @@
 package com.example.mystore.entity.dto;
 
 import java.math.BigDecimal;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -9,7 +11,9 @@ import java.util.Map;
 public record LevelRateTable(Long levelId, Map<Long, BigDecimal> rates) {
 
     public LevelRateTable {
-        rates = rates == null ? Map.of() : rates;
+        rates = rates == null
+                ? Map.of()
+                : Collections.unmodifiableMap(new HashMap<>(rates));
     }
 
     public BigDecimal rateFor(Long categoryId) {

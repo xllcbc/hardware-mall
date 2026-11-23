@@ -98,11 +98,14 @@ class LevelPricingServiceContractTest {
 
     @Test
     void roundsHalfUpToTwoDecimalsAtBoundaries() {
-        stubRateTable(CUSTOM_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("1.0000")));
+        stubRateTable(CUSTOM_LEVEL_ID, Map.of(
+                CATEGORY_ID, new BigDecimal("0.8004"),
+                10L, new BigDecimal("0.8005"),
+                11L, new BigDecimal("0.8006")));
 
-        assertThat(priceFor("8.114")).isEqualByComparingTo("8.11");
-        assertThat(priceFor("8.115")).isEqualByComparingTo("8.12");
-        assertThat(priceFor("8.116")).isEqualByComparingTo("8.12");
+        assertThat(priceFor(CATEGORY_ID, "10.00")).isEqualByComparingTo("8.00");
+        assertThat(priceFor(10L, "10.00")).isEqualByComparingTo("8.01");
+        assertThat(priceFor(11L, "10.00")).isEqualByComparingTo("8.01");
     }
 
     @Test
@@ -261,10 +264,10 @@ class LevelPricingServiceContractTest {
         verify(pricingRuleService, times(1)).rateTable(RETAIL_LEVEL_ID);
     }
 
-    private BigDecimal priceFor(String basePrice) {
+    private BigDecimal priceFor(long categoryId, String basePrice) {
         return levelPricingService.price(
                         CUSTOM_LEVEL_ID,
-                        ProductPricingFacts.of(CATEGORY_ID, new BigDecimal(basePrice), false))
+                        ProductPricingFacts.of(categoryId, new BigDecimal(basePrice), false))
                 .minPrice();
     }
 

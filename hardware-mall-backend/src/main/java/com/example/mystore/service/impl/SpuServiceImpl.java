@@ -49,7 +49,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -411,11 +410,11 @@ public class SpuServiceImpl implements SpuService {
         BigDecimal maxPrice = null;
         if (!skuVOs.isEmpty()) {
             minPrice = skuVOs.stream().map(ProductSkuVO::getPrice)
-                    .filter(Objects::nonNull)
+                    .filter(price -> price != null)
                     .min(BigDecimal::compareTo)
                     .orElse(null);
             maxPrice = skuVOs.stream().map(ProductSkuVO::getPrice)
-                    .filter(Objects::nonNull)
+                    .filter(price -> price != null)
                     .max(BigDecimal::compareTo)
                     .orElse(null);
         } else if (!pricings.isEmpty()) {

@@ -238,6 +238,44 @@ class UserProductControllerTest {
     }
 
     @Test
+    void detailWithoutSkuPricesOriginalPriceWithLevelRate() throws Exception {
+        Category category = new Category();
+        category.setId(4L);
+        category.setName("无规格分类");
+        category.setSortOrder(10);
+        category.setStatus(1);
+        category.setDeleteTime(0L);
+        categoryMapper.insert(category);
+
+        LevelCategoryRate rate = new LevelCategoryRate();
+        rate.setLevelId(2L);
+        rate.setCategoryId(4L);
+        rate.setRate(new BigDecimal("0.5000"));
+        levelCategoryRateMapper.insert(rate);
+
+        Spu spu = new Spu();
+        spu.setId(9003L);
+        spu.setCategoryId(4L);
+        spu.setName("无规格测试商品");
+        spu.setOriginalPrice(new BigDecimal("30.00"));
+        spu.setSalesCount(0);
+        spu.setStatus(StatusConstants.PRODUCT_STATUS_ON_SHELF);
+        spu.setIsRecommend(0);
+        spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        spu.setDeleteTime(0L);
+        spuMapper.insert(spu);
+
+        String token = userToken(2L, "level-detail-original-token");
+        mvc.perform(get("/api/user/product/9003")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sellable").value(true))
+                .andExpect(jsonPath("$.data.minPrice").value(15.00))
+                .andExpect(jsonPath("$.data.maxPrice").value(15.00))
+                .andExpect(jsonPath("$.data.skus").isEmpty());
+    }
+
+    @Test
     void blacklistedTokenReturns401() throws Exception {
         String token = userToken(2L, "blacklisted-level-token");
         String blacklistKey = RedisConstants.PREFIX_TOKEN_BLACKLIST + token;
