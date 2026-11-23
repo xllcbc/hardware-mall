@@ -8,19 +8,28 @@ import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.entity.db.Order;
+import com.example.mystore.entity.db.OrderItem;
+import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.LogisticsMapper;
+import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
+import com.example.mystore.service.SkuService;
 import com.example.mystore.service.WechatOrderShippingService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -30,6 +39,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -50,11 +60,17 @@ class OrderLifecycleServiceImplTest {
     @Mock
     private OrderMapper orderMapper;
     @Mock
+    private OrderItemMapper orderItemMapper;
+    @Mock
     private LogisticsMapper logisticsMapper;
+    @Mock
+    private SkuService skuService;
     @Mock
     private WechatOrderShippingService wechatOrderShippingService;
     @Mock
     private DingTalkAlertService dingTalkAlertService;
+    @Mock
+    private ApplicationEventPublisher applicationEventPublisher;
 
     @InjectMocks
     private OrderLifecycleServiceImpl lifecycleService;
@@ -63,6 +79,7 @@ class OrderLifecycleServiceImplTest {
     static void initTableInfo() {
         // LambdaUpdateWrapper.set() 立即解析列名, 单测无 Spring 上下文需手动注册 Order 元数据
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Order.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), OrderItem.class);
     }
 
     // ==================== 确认收货 ====================
@@ -589,11 +606,185 @@ class OrderLifecycleServiceImplTest {
         assertThat(sqlSets.get(1)).contains("receive_time=");
     }
 
+    // ==================== 用户取消 ====================
+
+    @Test
+    void cancelOrder_pendingPayment_restoresStockThenClaimsCancelledAndPublishesEvent() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_PAYMENT));
+        when(orderItemMapper.selectList(any())).thenReturn(List.of(orderItem(5L, 2), orderItem(7L, 1)));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+
+        lifecycleService.cancelOrder(2L, 1L, "不想要了");
+
+        // 先还库存, 再做条件更新
+        InOrder inOrder = inOrder(skuService, orderMapper);
+        inOrder.verify(skuService).restoreStock(5L, 2);
+        inOrder.verify(skuService).restoreStock(7L, 1);
+        inOrder.verify(orderMapper).update(isNull(), any());
+        assertThat(capturedUpdateValues())
+                .contains(StatusConstants.ORDER_PENDING_PAYMENT,
+                        StatusConstants.ORDER_CANCELLED,
+                        "不想要了");
+        assertThat(capturedSqlSet())
+                .contains("cancel_reason=")
+                .contains("cancel_time=");
+        // 事件在事务内发布, 监听器 AFTER_COMMIT 执行; 载荷是已还库存的 SKU
+        assertThat(publishedStockSkuIds()).containsExactly(5L, 7L);
+    }
+
+    @Test
+    void cancelOrder_notPendingPayment_rejectsWithoutStockWriteOrEvent() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+
+        assertThatThrownBy(() -> lifecycleService.cancelOrder(2L, 1L, "不想要了"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("只能取消待付款的订单");
+
+        verifyNoInteractions(skuService, applicationEventPublisher);
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void cancelOrder_notOwner_rejectsWithoutSideEffects() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_PENDING_PAYMENT);
+        order.setUserId(99L);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+
+        assertThatThrownBy(() -> lifecycleService.cancelOrder(2L, 1L, "不想要了"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单不存在");
+
+        verifyNoInteractions(skuService, applicationEventPublisher);
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void cancelOrder_missingOrder_throwsOrderNotFound() {
+        when(orderMapper.selectById(1L)).thenReturn(null);
+
+        assertThatThrownBy(() -> lifecycleService.cancelOrder(2L, 1L, "不想要了"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单不存在");
+
+        verifyNoInteractions(skuService, applicationEventPublisher);
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void cancelOrder_casMiss_throwsToRollbackRestoredStock() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_PAYMENT));
+        when(orderItemMapper.selectList(any())).thenReturn(List.of(orderItem(5L, 2)));
+        when(orderMapper.update(isNull(), any())).thenReturn(0);
+
+        // 抛异常是回滚已还库存的唯一手段, 不能静默吞掉
+        assertThatThrownBy(() -> lifecycleService.cancelOrder(2L, 1L, "不想要了"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单状态已变更，请刷新后重试");
+
+        verify(skuService).restoreStock(5L, 2);
+        verify(applicationEventPublisher, never()).publishEvent(any());
+    }
+
+    // ==================== 定时任务自动取消 ====================
+
+    @Test
+    void autoCancelOrder_pendingPayment_restoresStockThenClaimsCancelledAndPublishesEvent() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_PAYMENT));
+        when(orderItemMapper.selectList(any())).thenReturn(List.of(orderItem(5L, 2)));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+
+        assertThat(lifecycleService.autoCancelOrder(1L, "超时未支付，系统自动取消")).isTrue();
+
+        InOrder inOrder = inOrder(skuService, orderMapper);
+        inOrder.verify(skuService).restoreStock(5L, 2);
+        inOrder.verify(orderMapper).update(isNull(), any());
+        assertThat(capturedUpdateValues())
+                .contains(StatusConstants.ORDER_PENDING_PAYMENT,
+                        StatusConstants.ORDER_CANCELLED,
+                        "超时未支付，系统自动取消");
+        assertThat(publishedStockSkuIds()).containsExactly(5L);
+    }
+
+    @Test
+    void autoCancelOrder_missingOrder_returnsFalseWithoutSideEffects() {
+        when(orderMapper.selectById(1L)).thenReturn(null);
+
+        assertThat(lifecycleService.autoCancelOrder(1L, "超时未支付，系统自动取消")).isFalse();
+
+        verifyNoInteractions(skuService, applicationEventPublisher);
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void autoCancelOrder_notPendingPayment_returnsFalseWithoutSideEffects() {
+        int[] alreadyHandledStatuses = {
+                StatusConstants.ORDER_CANCELLED,
+                StatusConstants.ORDER_COMPLETED,
+                StatusConstants.ORDER_PENDING_SHIPMENT
+        };
+        for (int status : alreadyHandledStatuses) {
+            when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, status));
+
+            assertThat(lifecycleService.autoCancelOrder(1L, "超时未支付，系统自动取消"))
+                    .as("status=%d 应返回 false 且无副作用", status)
+                    .isFalse();
+        }
+
+        verifyNoInteractions(skuService, applicationEventPublisher);
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void autoCancelOrder_casMiss_throwsToRollbackRestoredStock() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_PAYMENT));
+        when(orderItemMapper.selectList(any())).thenReturn(List.of(orderItem(5L, 2)));
+        when(orderMapper.update(isNull(), any())).thenReturn(0);
+
+        // 定时任务的 CAS 未命中仍需回滚已还库存, 因此抛异常而非返回 false
+        assertThatThrownBy(() -> lifecycleService.autoCancelOrder(1L, "超时未支付，系统自动取消"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单状态已变更，跳过取消");
+
+        verify(skuService).restoreStock(5L, 2);
+        verify(applicationEventPublisher, never()).publishEvent(any());
+    }
+
+    /**
+     * 取消与自动取消必须自己持有事务: 先还库存再条件更新, CAS 未命中抛异常才能回滚已还库存。
+     * 事务注解无法从命令返回值观察, 且监听器的 AFTER_COMMIT 依赖它, 故在此钉住这条契约。
+     */
+    @Test
+    void cancelCommands_areTransactionalSoCasMissRollsBackRestoredStock() throws Exception {
+        assertThat(isTransactional("cancelOrder", Long.class, Long.class, String.class)).isTrue();
+        assertThat(isTransactional("autoCancelOrder", Long.class, String.class)).isTrue();
+    }
+
     private Logistics enabledLogistics(Long id) {
         Logistics logistics = new Logistics();
         logistics.setId(id);
         logistics.setStatus(StatusConstants.LOGISTICS_STATUS_ENABLED);
         return logistics;
+    }
+
+    private OrderItem orderItem(Long skuId, int quantity) {
+        OrderItem item = new OrderItem();
+        item.setOrderId(1L);
+        item.setSkuId(skuId);
+        item.setQuantity(quantity);
+        return item;
+    }
+
+    /** 取消类命令必须自己持有事务: 还库存先提交, CAS 未命中时抛异常才能回滚已还库存 */
+    private static boolean isTransactional(String name, Class<?>... parameterTypes)
+            throws NoSuchMethodException {
+        Method method = OrderLifecycleServiceImpl.class.getMethod(name, parameterTypes);
+        return method.isAnnotationPresent(Transactional.class);
+    }
+
+    private java.util.List<Long> publishedStockSkuIds() {
+        ArgumentCaptor<StockCacheEvent> captor = ArgumentCaptor.forClass(StockCacheEvent.class);
+        verify(applicationEventPublisher).publishEvent(captor.capture());
+        return captor.getValue().skuIds();
     }
 
     private Order orderWithStatus(Long id, int status) {

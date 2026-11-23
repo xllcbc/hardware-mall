@@ -9,6 +9,24 @@ package com.example.mystore.service;
 public interface OrderLifecycleService {
 
     /**
+     * 用户取消待付款订单: 待付款(1) → 已取消(5)。
+     *
+     * <p>先还库存再条件更新; 前驱不合法或条件更新未命中时抛业务异常, 事务回滚已还库存。
+     */
+    void cancelOrder(Long userId, Long orderId, String reason);
+
+    /**
+     * 定时任务自动取消超时未支付订单: 待付款(1) → 已取消(5), 幂等。
+     *
+     * <p>先还库存再条件更新; 订单已非待付款时返回 false 且无副作用。
+     *
+     * @return true-本次取消; false-订单不存在或已非待付款（无副作用）
+     * @throws com.example.mystore.common.exception.BusinessException CAS 未命中（状态被并发变更）,
+     *         抛异常以回滚已还库存
+     */
+    boolean autoCancelOrder(Long orderId, String cancelReason);
+
+    /**
      * 用户确认收货: 已发货(3) → 已完成(4)。前驱不合法或条件更新未命中时抛业务异常。
      */
     void confirmReceive(Long userId, Long orderId);

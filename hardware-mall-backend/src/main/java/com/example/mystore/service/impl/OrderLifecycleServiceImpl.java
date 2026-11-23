@@ -1,5 +1,6 @@
 package com.example.mystore.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.example.mystore.common.constant.StatusConstants;
@@ -7,15 +8,22 @@ import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.entity.db.Order;
+import com.example.mystore.entity.db.OrderItem;
+import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.LogisticsMapper;
+import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.service.OrderLifecycleService;
+import com.example.mystore.service.SkuService;
 import com.example.mystore.service.WechatOrderShippingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -27,6 +35,9 @@ import java.util.Set;
 @RequiredArgsConstructor
 @Slf4j
 public class OrderLifecycleServiceImpl implements OrderLifecycleService {
+
+    /** 取消/自动取消: 仅待付款可取消 */
+    static final Set<Integer> CANCEL_FROM = Set.of(StatusConstants.ORDER_PENDING_PAYMENT);
 
     /** 确认收货: 仅已发货可推进（自动确认收货复用同一前驱集合） */
     static final Set<Integer> CONFIRM_RECEIVE_FROM = Set.of(StatusConstants.ORDER_SHIPPED);
@@ -48,9 +59,62 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
     static final String STATUS_CHANGED_MESSAGE = "订单状态已变更，请刷新后重试";
 
     private final OrderMapper orderMapper;
+    private final OrderItemMapper orderItemMapper;
     private final LogisticsMapper logisticsMapper;
+    private final SkuService skuService;
     private final WechatOrderShippingService wechatOrderShippingService;
     private final DingTalkAlertService dingTalkAlertService;
+    private final ApplicationEventPublisher applicationEventPublisher;
+
+    @Override
+    @Transactional
+    public void cancelOrder(Long userId, Long orderId, String reason) {
+        Order order = requireOwnedOrder(userId, orderId);
+        if (!CANCEL_FROM.contains(order.getStatus())) {
+            throw new BusinessException("只能取消待付款的订单");
+        }
+
+        // 先还库存; CAS 未命中时抛异常, 由事务回滚已还库存
+        List<OrderItem> items = selectOrderItems(orderId);
+        restoreStock(items, false);
+
+        // CAS 最终确认: 仅当状态仍为待付款时置为已取消, 防与并发支付回调(1→2)互相覆盖
+        requireAffected(claimCancelled(orderId, reason));
+
+        publishStockCacheEvent(items);
+    }
+
+    @Override
+    @Transactional
+    public boolean autoCancelOrder(Long orderId, String cancelReason) {
+        Order order = orderMapper.selectById(orderId);
+        if (order == null) {
+            log.warn("订单不存在, orderId={}", orderId);
+            return false;
+        }
+        // 幂等性检查：只有待付款状态的订单才需要取消
+        if (!CANCEL_FROM.contains(order.getStatus())) {
+            log.info("订单已处理，无需取消, orderId={}, status={}", orderId, order.getStatus());
+            return false;
+        }
+
+        // 先还库存; CAS 未命中时抛异常触发事务回滚, 撤销上方已执行的恢复库存
+        List<OrderItem> items = selectOrderItems(orderId);
+        restoreStock(items, true);
+
+        // CAS 最终确认：仅当状态仍为待付款时置为已取消，防与并发支付回调(1→2)互相覆盖
+        int affected = claimCancelled(orderId, cancelReason);
+        if (affected == 0) {
+            // 定时任务方向的 CAS 未命中仍需回滚已还库存, 因此抛异常而非返回 false;
+            // OrderCancelStaleJob 把 BusinessException 计为“跳过”, 失败语义与改造前一致
+            log.info("自动取消跳过（CAS 未命中，订单状态已变更）, orderId={}", orderId);
+            throw new BusinessException("订单状态已变更，跳过取消");
+        }
+
+        log.info("订单自动取消成功, orderId={}", orderId);
+        publishStockCacheEvent(items);
+        return true;
+    }
 
     @Override
     public void confirmReceive(Long userId, Long orderId) {
@@ -206,6 +270,41 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
     /** 同城配送单号: 后端自动生成, 前缀 PS + 雪花ID */
     private String generateDeliveryNo() {
         return "PS" + IdWorker.getIdStr();
+    }
+
+    private List<OrderItem> selectOrderItems(Long orderId) {
+        return orderItemMapper.selectList(new LambdaQueryWrapper<OrderItem>()
+                .eq(OrderItem::getOrderId, orderId));
+    }
+
+    /** 取消类命令共用的条件更新: 待付款 → 已取消, 记录原因与时间 */
+    private int claimCancelled(Long orderId, String reason) {
+        return OrderStatusTransition.apply(
+                orderMapper, orderId, CANCEL_FROM, StatusConstants.ORDER_CANCELLED,
+                wrapper -> wrapper
+                        .set(Order::getCancelReason, reason)
+                        .set(Order::getCancelTime, LocalDateTime.now()));
+    }
+
+    /**
+     * 取消前还库存。
+     *
+     * @param logEach 是否逐项记录恢复日志（定时任务排障用）
+     */
+    private void restoreStock(List<OrderItem> items, boolean logEach) {
+        for (OrderItem item : items) {
+            skuService.restoreStock(item.getSkuId(), item.getQuantity());
+            if (logEach) {
+                log.info("恢复DB库存, orderId={}, skuId={}, quantity={}",
+                        item.getOrderId(), item.getSkuId(), item.getQuantity());
+            }
+        }
+    }
+
+    /** 库存缓存事件在事务内发布, 监听器 AFTER_COMMIT 后执行, 缓存一致性行为不变 */
+    private void publishStockCacheEvent(List<OrderItem> items) {
+        List<Long> skuIds = items.stream().map(OrderItem::getSkuId).toList();
+        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
     }
 
     /** 确认收货公共步骤: 所有权/前驱预检 + 单语句 3→4; 供用户确认与微信确认共用 */

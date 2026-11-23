@@ -1,7 +1,6 @@
 package com.example.mystore.service.impl;
 
 import com.alibaba.fastjson2.JSON;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -49,7 +48,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
@@ -415,42 +413,8 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @Transactional
     public void cancelOrder(Long userId, Long orderId, String reason) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_PAYMENT) {
-            throw new BusinessException("只能取消待付款的订单");
-        }
-
-        // 先恢复库存
-        LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
-        itemWrapper.eq(OrderItem::getOrderId, orderId);
-        List<OrderItem> items = orderItemMapper.selectList(itemWrapper);
-        for (OrderItem item : items) {
-            skuService.restoreStock(item.getSkuId(), item.getQuantity());
-        }
-
-        // CAS 最终确认：仅当状态仍为待付款时置为已取消，防与并发支付回调(1→2)互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
-                        .set(Order::getStatus, StatusConstants.ORDER_CANCELLED)
-                        .set(Order::getCancelReason, reason)
-                        .set(Order::getCancelTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
-
-        // 发布库存同步事件，事务提交后由监听器异步执行
-        List<Long> skuIds = items.stream()
-                .map(OrderItem::getSkuId)
-                .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
+        orderLifecycleService.cancelOrder(userId, orderId, reason);
     }
 
     @Override
@@ -568,52 +532,8 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @Transactional
     public boolean autoCancelOrder(Long orderId, String cancelReason) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null) {
-            log.warn("订单不存在, orderId={}", orderId);
-            return false;
-        }
-        // 幂等性检查：只有待付款状态的订单才需要取消
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_PAYMENT) {
-            log.info("订单已处理，无需取消, orderId={}, status={}", orderId, order.getStatus());
-            return false;
-        }
-
-        // 先恢复库存
-        LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
-        itemWrapper.eq(OrderItem::getOrderId, orderId);
-        List<OrderItem> items = orderItemMapper.selectList(itemWrapper);
-        for (OrderItem item : items) {
-            skuService.restoreStock(item.getSkuId(), item.getQuantity());
-            log.info("恢复DB库存, orderId={}, skuId={}, quantity={}", orderId, item.getSkuId(), item.getQuantity());
-        }
-
-        // CAS 最终确认：仅当状态仍为待付款时置为已取消，防与并发支付回调(1→2)互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
-                        .set(Order::getStatus, StatusConstants.ORDER_CANCELLED)
-                        .set(Order::getCancelReason, cancelReason)
-                        .set(Order::getCancelTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            // 抛异常触发事务回滚, 撤销上方已执行的恢复库存; 对齐 cancelOrder 的 CAS-失败-回滚模式
-            log.info("自动取消跳过（CAS 未命中，订单状态已变更）, orderId={}", orderId);
-            throw new BusinessException("订单状态已变更，跳过取消");
-        }
-
-        log.info("订单自动取消成功, orderId={}", orderId);
-
-        // 发布库存同步事件，事务提交后由监听器异步执行
-        List<Long> skuIds = items.stream()
-                .map(OrderItem::getSkuId)
-                .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
-
-        return true;
+        return orderLifecycleService.autoCancelOrder(orderId, cancelReason);
     }
 
     @Override
