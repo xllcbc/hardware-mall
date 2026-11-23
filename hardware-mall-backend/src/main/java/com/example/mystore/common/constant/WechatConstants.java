@@ -128,8 +128,7 @@ public final class WechatConstants {
 
         /** 人民币币种 */
         public static final String CURRENCY_CNY = "CNY";
-        /** 微信 JSAPI 下单金额字段 Amount.total 为 int 分，允许的最小分值与最大值 */
-        public static final int MIN_TOTAL_CENTS = 1;
+        /** 微信 JSAPI 下单金额字段 Amount.total 为 int 分，允许的最大分值 */
         public static final int MAX_TOTAL_CENTS = Integer.MAX_VALUE;
         /** 退款结果通知路径(拼接在 notify-url 后) */
         public static final String REFUND_NOTIFY_PATH = "/refund";

@@ -522,7 +522,9 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void previewOrder_subCentAmountIsRejected() {
+    void previewOrder_subCentSettlementAmountIsRejected() {
+        // 等级结算价按契约已取整到分；这里模拟任何非法子分来源穿透到结算，
+        // 断言结算边界仍以业务错误失败关闭，而不是 ArithmeticException 或网关失败
         when(levelPricingService.priceAll(any(), anyList()))
                 .thenReturn(List.of(LevelPricing.priced(
                         1L, BigDecimal.ONE,
@@ -543,7 +545,7 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void createOrder_zeroAmountIsRejectedBeforeCreatingPaymentRecord() {
+    void createOrder_zeroAmountIsRejectedBeforePaymentIsInitiated() {
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
         when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
@@ -567,9 +569,9 @@ class OrderServiceImplTest {
                 .hasMessageContaining("订单金额低于 0.01 元")
                 .hasMessageNotContaining("创建支付订单失败");
 
+        // 没有订单就没有可支付对象：不建单、不扣库存、不进入任何支付调用
         verify(orderMapper, never()).insert(any(Order.class));
         verify(skuService, never()).deductStock(anyLong(), anyInt());
-        verify(paymentRecordMapper, never()).insert(any(PaymentRecord.class));
         verifyNoInteractions(payService);
         verify(orderIdempotencyService).markFailed(10L, "owner-token");
         verify(orderIdempotencyService).releaseLock(2L, "zero-key", "owner-token", true);

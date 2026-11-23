@@ -292,7 +292,7 @@ public class OrderServiceImpl implements OrderService {
         } catch (BusinessException e) {
             throw new BusinessException("订单金额非法，无法下单：" + e.getMessage());
         }
-        if (cents < WechatConstants.Pay.MIN_TOTAL_CENTS) {
+        if (cents < MoneyUtil.MIN_PAYABLE_CENTS) {
             throw new BusinessException("订单金额低于 0.01 元，无法下单");
         }
     }
