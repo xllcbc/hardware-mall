@@ -18,8 +18,8 @@
       </view>
 
       <scroll-view class="cart-list" scroll-y>
-        <view class="cart-item" v-for="item in cartStore.items" :key="item.skuId">
-          <view class="item-checkbox" @tap="toggleSelect(item)">
+        <view class="cart-item" v-for="item in cartStore.items" :key="item.skuId" :class="{ unsellable: item.sellable === false }">
+          <view class="item-checkbox" :class="{ disabled: item.sellable === false }" @tap="toggleSelect(item)">
             <view class="checkbox" :class="{ checked: item.selected }">
               <text v-if="item.selected" class="check-icon">✓</text>
             </view>
@@ -34,15 +34,18 @@
               <text v-if="item.stock === 0" class="soldout-badge">已售罄</text>
               <view class="item-bottom">
                 <view class="item-price">
-                  <text class="price-symbol">¥</text>
-                  <text class="price-value">{{ item.price.toFixed(2) }}</text>
+                  <text v-if="item.sellable === false" class="unsellable-text">暂不可售</text>
+                  <template v-else>
+                    <text class="price-symbol">¥</text>
+                    <text class="price-value">{{ formatPrice(item.price) }}</text>
+                  </template>
                 </view>
                 <CountStepper
                   v-if="!manageMode"
                   :model-value="item.quantity"
                   :min="1"
                   :max="item.stock ?? 99"
-                  :disabled="item.stock === 0"
+                  :disabled="item.sellable === false || item.stock === 0"
                   @update:model-value="updateQuantity(item, $event)"
                 />
               </view>
@@ -134,8 +137,10 @@ const goLogin = () => {
 }
 
 const isSelectAll = computed(() =>
-  cartStore.items.length > 0 && cartStore.items.every(item => item.selected)
+  cartStore.sellableItems.length > 0 && cartStore.sellableItems.every(item => item.selected)
 )
+
+const formatPrice = (price: number | null) => (price ?? 0).toFixed(2)
 
 const goShopping = () => {
   uni.switchTab({ url: '/pages/index/index' })
@@ -151,12 +156,13 @@ const toggleManageMode = () => {
 }
 
 const toggleSelect = (item: CartItem) => {
+  if (item.sellable === false) return
   item.selected = !item.selected
 }
 
 const toggleSelectAll = () => {
   const allSelected = isSelectAll.value
-  cartStore.items.forEach(item => {
+  cartStore.sellableItems.forEach(item => {
     item.selected = !allSelected
   })
 }
@@ -192,8 +198,8 @@ const moveToFavorites = () => {
       id: item.productId,
       name: item.productName,
       image: item.productImage,
-      minPrice: item.minPrice || item.price,
-      originalPrice: item.maxPrice
+      minPrice: item.minPrice ?? item.price ?? 0,
+      originalPrice: item.maxPrice ?? undefined
     })
   })
   uni.showToast({ title: '已移入收藏夹', icon: 'success' })
@@ -341,6 +347,20 @@ const goCheckout = async () => {
   color: #E53935;
   background: #FFEBEE;
   border-radius: 6rpx;
+}
+
+.unsellable-text {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #999999;
+}
+
+.cart-item.unsellable {
+  opacity: 0.7;
+}
+
+.item-checkbox.disabled {
+  opacity: 0.4;
 }
 
 .item-bottom {

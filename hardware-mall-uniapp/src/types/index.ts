@@ -98,12 +98,13 @@ export interface CartItem {
   productName: string
   productImage?: string
   spec?: string
-  price: number
-  minPrice?: number
-  maxPrice?: number
+  price: number | null
+  minPrice?: number | null
+  maxPrice?: number | null
   quantity: number
-  subtotal: number
+  subtotal: number | null
   stock?: number
+  sellable?: boolean
   selected?: boolean
 }
 
