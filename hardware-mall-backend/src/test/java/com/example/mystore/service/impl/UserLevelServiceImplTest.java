@@ -10,11 +10,13 @@ import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.PricingRuleService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -137,7 +139,10 @@ class UserLevelServiceImplTest {
                 .containsEntry(1L, "零售")
                 .containsEntry(2L, "批发A")
                 .hasSize(2);
-        verify(userLevelMapper, times(1)).selectBatchIds(anyCollection());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Collection<Long>> idsCaptor = ArgumentCaptor.forClass((Class) Collection.class);
+        verify(userLevelMapper, times(1)).selectBatchIds(idsCaptor.capture());
+        assertThat(idsCaptor.getValue()).containsExactlyInAnyOrder(1L, 2L);
         verify(userLevelMapper, never()).selectById(any());
     }
 
