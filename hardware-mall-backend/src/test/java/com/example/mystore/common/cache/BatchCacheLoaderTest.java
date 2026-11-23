@@ -265,6 +265,38 @@ class BatchCacheLoaderTest {
         verify(redisUtil, never()).set(any(), any(), anyLong(), any());
     }
 
+    @Test
+    void doesNotRefreshSentinelForIdThatWasAlreadyAbsentInCache() {
+        when(redisUtil.multiGet(List.of(key(1), key(2))))
+                .thenReturn(Arrays.asList(RedisConstants.CACHE_NULL, null));
+        when(redisUtil.multiGet(List.of(key(2))))
+                .thenReturn(Collections.singletonList(null));
+        when(redisLockUtil.tryLock(eq(key(2)), anyLong())).thenReturn(true);
+        TestCell cell = cell(ids -> Map.of(2L, "v2"));
+
+        List<String> result = batchCacheLoader.load(List.of(1L, 2L), cell);
+
+        assertThat(result).containsExactly(null, "v2");
+        assertThat(cell.sourceRequests()).containsExactly(List.of(2L));
+        verify(redisUtil, never()).set(any(), any(), anyLong(), any());
+        verify(redisUtil).setWithJitter(key(2), "v2", 240L, TimeUnit.SECONDS, 60L);
+    }
+
+    @Test
+    void writesNoSentinelWhenNullTtlIsDisabled() {
+        CachePolicy noSentinelPolicy = new CachePolicy(240L, 60L, 0L, 500L);
+        when(redisUtil.multiGet(List.of(key(1))))
+                .thenReturn(Collections.singletonList(null), Collections.singletonList(null));
+        when(redisLockUtil.tryLock(eq(key(1)), anyLong())).thenReturn(true);
+        TestCell cell = cell(noSentinelPolicy, ids -> Map.of());
+
+        List<String> result = batchCacheLoader.load(List.of(1L), cell);
+
+        assertThat(result).containsExactly((String) null);
+        verify(redisUtil, never()).set(any(), any(), anyLong(), any());
+        verify(redisUtil, never()).setWithJitter(any(), any(), anyLong(), any(), anyLong());
+    }
+
     @Nested
     class CachePolicyConstruction {
 
@@ -318,6 +350,10 @@ class BatchCacheLoaderTest {
 
     private TestCell cell(Function<Collection<Long>, Map<Long, String>> source) {
         return new TestCell(POLICY, keys, source);
+    }
+
+    private TestCell cell(CachePolicy policy, Function<Collection<Long>, Map<Long, String>> source) {
+        return new TestCell(policy, keys, source);
     }
 
     private String key(long id) {

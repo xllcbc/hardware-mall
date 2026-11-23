@@ -9,12 +9,14 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 /**
  * 有界批量回填模块：缓存批量读取、单次回源、写回与解锁的唯一实现。
@@ -48,48 +50,64 @@ public class BatchCacheLoader {
         CachePolicy policy = cell.policy();
         CacheKeys cacheKeys = cell.keys();
         String generation = cacheKeys.currentGeneration();
-        List<Object> cachedValues = redisUtil.multiGet(
-                requestedIds.stream().map(id -> cacheKeys.keyFor(id, generation)).toList());
         List<T> result = new ArrayList<>(Collections.nCopies(requestedIds.size(), null));
+        LoadContext<T> context = new LoadContext<>(
+                requestedIds, result, cell, policy, id -> cacheKeys.keyFor(id, generation));
+
+        Set<Long> unresolvedIds = readCachedValues(context);
+        if (unresolvedIds.isEmpty()) {
+            return result;
+        }
+        List<Long> missingIds = unresolvedIds.stream().sorted().toList();
+        return loadMissing(context, missingIds);
+    }
+
+    private <T> Set<Long> readCachedValues(LoadContext<T> context) {
+        List<Long> requestedIds = context.requestedIds();
+        List<Object> cachedValues = redisUtil.multiGet(
+                requestedIds.stream().map(context.keyOf()).toList());
         Set<Long> unresolvedIds = new LinkedHashSet<>();
         for (int i = 0; i < requestedIds.size(); i++) {
             Object value = cachedValues == null ? null : cachedValues.get(i);
             if (redisUtil.isNull(value)) {
                 continue;
             }
-            T decoded = cell.decode(value);
+            T decoded = context.cell().decode(value);
             if (decoded != null) {
-                result.set(i, decoded);
+                context.result().set(i, decoded);
             } else {
                 unresolvedIds.add(requestedIds.get(i));
             }
         }
-        if (unresolvedIds.isEmpty()) {
-            return result;
-        }
+        return unresolvedIds;
+    }
 
-        List<Long> missingIds = unresolvedIds.stream().sorted().toList();
+    /**
+     * 按 ID 升序取锁，整批共享一个等待预算；任一锁取不到就停止取锁，
+     * 把所有未解析 ID 一次性交给回源函数，且不写任何缓存。
+     */
+    private <T> List<T> loadMissing(LoadContext<T> context, List<Long> missingIds) {
         List<String> acquiredLockKeys = new ArrayList<>();
-        long deadline = deadline(policy.lockWaitMillis());
+        long deadline = deadline(context.policy().lockWaitMillis());
         try {
             for (Long id : missingIds) {
-                String key = cacheKeys.keyFor(id, generation);
+                String key = context.keyOf().apply(id);
                 if (!redisLockUtil.tryLock(key, remainingMillis(deadline))) {
                     log.warn("批量缓存回源等锁超时, id={}, maxWaitMs={}, 直接查库且不写缓存",
-                            id, policy.lockWaitMillis());
-                    mergeLoaded(requestedIds, result, cell.loadFromSource(missingIds),
-                            false, cell, generation);
-                    return result;
+                            id, context.policy().lockWaitMillis());
+                    applySourceResult(context, missingIds,
+                            context.cell().loadFromSource(missingIds), false);
+                    return context.result();
                 }
                 acquiredLockKeys.add(key);
             }
 
-            List<Long> stillMissing = recheckAfterLock(
-                    requestedIds, result, missingIds, cell, generation);
+            List<Long> stillMissing = recheckAfterLock(context, missingIds);
             if (!stillMissing.isEmpty()) {
-                mergeLoaded(requestedIds, result, cell.loadFromSource(stillMissing), true, cell, generation);
+                applySourceResult(context, stillMissing,
+                        context.cell().loadFromSource(stillMissing), true);
             }
-            return result;
+            return context.result();
         } finally {
             for (int i = acquiredLockKeys.size() - 1; i >= 0; i--) {
                 redisLockUtil.unlock(acquiredLockKeys.get(i));
@@ -97,11 +115,9 @@ public class BatchCacheLoader {
         }
     }
 
-    private <T> List<Long> recheckAfterLock(List<Long> requestedIds, List<T> result, List<Long> missingIds,
-                                            CacheCell<T> cell, String generation) {
-        List<Object> cachedValues = redisUtil.multiGet(missingIds.stream()
-                .map(id -> cell.keys().keyFor(id, generation))
-                .toList());
+    private <T> List<Long> recheckAfterLock(LoadContext<T> context, List<Long> missingIds) {
+        List<Object> cachedValues = redisUtil.multiGet(
+                missingIds.stream().map(context.keyOf()).toList());
         List<Long> stillMissing = new ArrayList<>();
         for (int i = 0; i < missingIds.size(); i++) {
             Object value = cachedValues == null ? null : cachedValues.get(i);
@@ -109,9 +125,9 @@ public class BatchCacheLoader {
             if (redisUtil.isNull(value)) {
                 continue;
             }
-            T decoded = cell.decode(value);
+            T decoded = context.cell().decode(value);
             if (decoded != null) {
-                fillResultById(requestedIds, result, id, decoded);
+                fillResultById(context, id, decoded);
             } else {
                 stillMissing.add(id);
             }
@@ -119,52 +135,38 @@ public class BatchCacheLoader {
         return stillMissing;
     }
 
-    private <T> void fillResultById(List<Long> requestedIds, List<T> result, Long id, T value) {
+    private <T> void fillResultById(LoadContext<T> context, Long id, T value) {
+        List<Long> requestedIds = context.requestedIds();
         for (int i = 0; i < requestedIds.size(); i++) {
             if (Objects.equals(requestedIds.get(i), id)) {
-                result.set(i, value);
+                context.result().set(i, value);
             }
         }
     }
 
-    private <T> void mergeLoaded(List<Long> requestedIds, List<T> result, Map<Long, T> loaded,
-                                 boolean writeCache, CacheCell<T> cell, String generation) {
+    /**
+     * 合并回源结果。只有真正交给回源函数的 ID 才会写值或写空值哨兵：
+     * 缓存里已有哨兵的 ID 不会被回源，也不会被顺手续期。
+     */
+    private <T> void applySourceResult(LoadContext<T> context, List<Long> sourcedIds,
+                                       Map<Long, T> loaded, boolean writeCache) {
         Map<Long, T> loadedById = loaded == null ? Collections.emptyMap() : loaded;
-        for (int i = 0; i < requestedIds.size(); i++) {
-            if (result.get(i) != null) {
-                continue;
-            }
-            T value = loadedById.get(requestedIds.get(i));
-            if (value != null) {
-                result.set(i, value);
-            }
-        }
-        if (!writeCache) {
-            return;
-        }
-        CachePolicy policy = cell.policy();
-        Set<Long> writtenIds = new LinkedHashSet<>();
-        for (Long id : requestedIds) {
+        Set<Long> sourced = new HashSet<>(sourcedIds);
+        CachePolicy policy = context.policy();
+        for (int i = 0; i < context.requestedIds().size(); i++) {
+            Long id = context.requestedIds().get(i);
             T value = loadedById.get(id);
-            if (value != null && writtenIds.add(id)) {
-                redisUtil.setWithJitter(cell.keys().keyFor(id, generation), value,
+            if (context.result().get(i) == null && value != null) {
+                context.result().set(i, value);
+            }
+            if (!writeCache || !sourced.contains(id)) {
+                continue;
+            }
+            if (value != null) {
+                redisUtil.setWithJitter(context.keyOf().apply(id), value,
                         policy.ttlSeconds(), TimeUnit.SECONDS, policy.jitterSeconds());
-            }
-        }
-        if (policy.nullTtlSeconds() <= 0) {
-            return;
-        }
-        // 只对本次回源确认不存在、且结果仍为空的 ID 写哨兵；已命中的 ID 不会被误伤。
-        for (int i = 0; i < requestedIds.size(); i++) {
-            if (result.get(i) != null) {
-                continue;
-            }
-            Long id = requestedIds.get(i);
-            if (loadedById.containsKey(id)) {
-                continue;
-            }
-            if (writtenIds.add(id)) {
-                redisUtil.set(cell.keys().keyFor(id, generation), RedisConstants.CACHE_NULL,
+            } else if (context.result().get(i) == null && policy.nullTtlSeconds() > 0) {
+                redisUtil.set(context.keyOf().apply(id), RedisConstants.CACHE_NULL,
                         policy.nullTtlSeconds(), TimeUnit.SECONDS);
             }
         }
@@ -180,5 +182,12 @@ public class BatchCacheLoader {
             return 0L;
         }
         return Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
+    }
+
+    /**
+     * 单次调用内共享的请求上下文：有序 ID、对齐结果、缓存单元、策略与 key 函数。
+     */
+    private record LoadContext<T>(List<Long> requestedIds, List<T> result, CacheCell<T> cell,
+                                  CachePolicy policy, Function<Long, String> keyOf) {
     }
 }
