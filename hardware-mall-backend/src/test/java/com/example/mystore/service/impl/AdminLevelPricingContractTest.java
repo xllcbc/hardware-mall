@@ -4,7 +4,6 @@ import com.example.mystore.entity.dto.AdminLevelPricing;
 import com.example.mystore.entity.dto.LevelRateTable;
 import com.example.mystore.entity.dto.ProductPricingFacts;
 import com.example.mystore.service.LevelPricingService;
-import com.example.mystore.service.PriceService;
 import com.example.mystore.service.PricingRuleService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,12 +34,11 @@ class AdminLevelPricingContractTest {
     @Mock
     private PricingRuleService pricingRuleService;
 
-    private final PriceService priceService = new PriceServiceImpl();
     private LevelPricingService levelPricingService;
 
     @BeforeEach
     void setUp() {
-        levelPricingService = new LevelPricingServiceImpl(pricingRuleService, priceService);
+        levelPricingService = new LevelPricingServiceImpl(pricingRuleService);
         when(pricingRuleService.resolveRetailLevelId()).thenReturn(RETAIL_LEVEL_ID);
     }
 

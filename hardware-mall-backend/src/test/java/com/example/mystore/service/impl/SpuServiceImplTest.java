@@ -70,7 +70,7 @@ class SpuServiceImplTest {
     }
 
     @Test
-    void productList_appliesCategoryRateToRetailRange() {
+    void productList_wiresModulePricingIntoView() {
         ProductListCacheItem item = listItem(
                 1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         when(productCacheService.getProductList(eq(1L), eq(1), eq(10), eq(1), any()))
@@ -90,7 +90,7 @@ class SpuServiceImplTest {
     }
 
     @Test
-    void productList_excludeDiscountKeepsRetail() {
+    void productList_wiresExcludeDiscountFactAndModuleResult() {
         ProductListCacheItem item = listItem(
                 1L, "100.00", "200.00", DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
         when(productCacheService.getProductList(any(), anyInt(), anyInt(), anyInt(), any()))
@@ -196,7 +196,7 @@ class SpuServiceImplTest {
     }
 
     @Test
-    void productDetail_appliesRateAndReadsFreshStock() {
+    void productDetail_wiresModulePricingAndReadsFreshStock() {
         Spu spu = spu(1L, 1L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         Sku sku = sku(10L, 1L, "10.00");
         ProductDetailCache cache = detailCache(spu, List.of(sku));
@@ -260,7 +260,7 @@ class SpuServiceImplTest {
     }
 
     @Test
-    void productDetail_withoutSkuUsesOriginalPriceTimesRate() {
+    void productDetail_withoutSkuPassesOriginalPriceAsFact() {
         Spu spu = spu(1L, 1L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         spu.setOriginalPrice(new BigDecimal("10.00"));
         when(productCacheService.getProductDetail(eq(1L), any()))
@@ -275,6 +275,9 @@ class SpuServiceImplTest {
         assertThat(detail.getSkus()).isEmpty();
         assertThat(detail.getMinPrice()).isEqualByComparingTo("8.00");
         assertThat(detail.getMaxPrice()).isEqualByComparingTo("8.00");
+        verify(levelPricingService).priceAll(eq(2L), argThat(facts ->
+                facts.size() == 1
+                        && facts.get(0).basePriceMin().compareTo(new BigDecimal("10.00")) == 0));
     }
 
     @Test

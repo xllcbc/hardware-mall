@@ -4,7 +4,6 @@ import com.example.mystore.entity.dto.LevelPricing;
 import com.example.mystore.entity.dto.LevelRateTable;
 import com.example.mystore.entity.dto.ProductPricingFacts;
 import com.example.mystore.service.LevelPricingService;
-import com.example.mystore.service.PriceService;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.util.UserContext;
 import org.junit.jupiter.api.AfterEach;
@@ -21,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -40,12 +40,11 @@ class LevelPricingServiceContractTest {
     @Mock
     private PricingRuleService pricingRuleService;
 
-    private final PriceService priceService = new PriceServiceImpl();
     private LevelPricingService levelPricingService;
 
     @BeforeEach
     void setUp() {
-        levelPricingService = new LevelPricingServiceImpl(pricingRuleService, priceService);
+        levelPricingService = new LevelPricingServiceImpl(pricingRuleService);
     }
 
     @AfterEach
@@ -128,6 +127,24 @@ class LevelPricingServiceContractTest {
     }
 
     @Test
+    void roundsBasePriceThirdDecimalHalfUp() {
+        stubRateTable(CUSTOM_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("1.0000")));
+
+        assertThat(priceFor(CATEGORY_ID, "8.115")).isEqualByComparingTo("8.12");
+        assertThat(priceFor(CATEGORY_ID, "8.114")).isEqualByComparingTo("8.11");
+    }
+
+    @Test
+    void negativeBasePriceIsRejected() {
+        stubRateTable(CUSTOM_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("1.0000")));
+
+        assertThatThrownBy(() -> levelPricingService.price(
+                CUSTOM_LEVEL_ID,
+                ProductPricingFacts.of(CATEGORY_ID, new BigDecimal("-1.00"), false)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void priceRangeUsesBaseRangeFacts() {
         stubRateTable(CUSTOM_LEVEL_ID, Map.of(CATEGORY_ID, new BigDecimal("0.5000")));
 
@@ -152,6 +169,21 @@ class LevelPricingServiceContractTest {
         assertThat(pricing.levelId()).isEqualTo(CUSTOM_LEVEL_ID);
         verify(pricingRuleService).rateTable(CUSTOM_LEVEL_ID);
         verify(pricingRuleService, never()).rateTable(999L);
+    }
+
+    @Test
+    void wholesaleBasePriceIsMaskedOnGapAndKeptWhenSellable() {
+        LevelPricing gap = LevelPricing.missing(CUSTOM_LEVEL_ID);
+        LevelPricing sellable = LevelPricing.priced(
+                CUSTOM_LEVEL_ID,
+                new BigDecimal("0.8000"),
+                new BigDecimal("20.00"),
+                new BigDecimal("20.00"));
+
+        assertThat(gap.maskWholesaleBasePrice(new BigDecimal("25.00"))).isNull();
+        assertThat(sellable.maskWholesaleBasePrice(new BigDecimal("25.00")))
+                .isEqualByComparingTo("25.00");
+        assertThat(sellable.maskWholesaleBasePrice(null)).isNull();
     }
 
     @Test
