@@ -1,6 +1,8 @@
 package com.example.mystore.service.impl;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.exception.BusinessException;
@@ -17,9 +19,11 @@ import com.example.mystore.mapper.LogisticsMapper;
 import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.mapper.PaymentRecordMapper;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -61,6 +65,13 @@ class OrderQueryServiceImplTest {
 
     private Address address;
     private Logistics logistics;
+
+    @BeforeAll
+    static void initTableInfo() {
+        // LambdaQueryWrapper 生成 SQL 片段时需要 Order 列元数据（单测无 Spring 上下文）
+        TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(new MybatisConfiguration(), ""), Order.class);
+    }
 
     @BeforeEach
     void setUp() {
@@ -233,6 +244,57 @@ class OrderQueryServiceImplTest {
         assertThatThrownBy(() -> queryService.getOrderByOrderNo("SO-MISSING"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("订单不存在");
+    }
+
+    @Test
+    void userOrderView_status8_exposesCancelReasonAndRefundRequestedText() {
+        Order order = order(1L, StatusConstants.ORDER_REFUND_REQUESTED);
+        order.setCancelReason("不想要了");
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(paymentRecordMapper.selectOne(any())).thenReturn(null);
+
+        OrderVO vo = queryService.getOrderView(1L);
+
+        assertThat(vo.getStatusText()).isEqualTo("退款申请中");
+        assertThat(vo.getCancelReason()).isEqualTo("不想要了");
+    }
+
+    @Test
+    void adminOrderDetail_rejectedRefund_exposesAdminRemark() {
+        // 拒绝退款后状态回退 2/3, 拒绝原因经 adminRemark 透出给用户
+        Order order = order(1L, StatusConstants.ORDER_PENDING_SHIPMENT);
+        order.setAdminRemark("凭证不足");
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(paymentRecordMapper.selectOne(any())).thenReturn(null);
+
+        OrderVO vo = queryService.getAdminOrderById(1L);
+
+        assertThat(vo.getStatus()).isEqualTo(StatusConstants.ORDER_PENDING_SHIPMENT);
+        assertThat(vo.getAdminRemark()).isEqualTo("凭证不足");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void adminOrderPage_appliesOrderNoAndInclusiveDateFilters() {
+        when(orderMapper.selectPage(any(), any())).thenReturn(new Page<>(1, 20));
+
+        queryService.getAdminOrderPage(null, null, " SO123 ", "2026-01-01", "2026-01-31", 1, 20);
+
+        ArgumentCaptor<LambdaQueryWrapper<Order>> captor =
+                ArgumentCaptor.forClass((Class) LambdaQueryWrapper.class);
+        verify(orderMapper).selectPage(any(), captor.capture());
+        LambdaQueryWrapper<Order> wrapper = captor.getValue();
+        assertThat(wrapper.getSqlSegment()).contains("order_no").contains("create_time");
+        assertThat(wrapper.getParamNameValuePairs().values())
+                .contains("SO123")
+                .contains(LocalDateTime.of(2026, 1, 1, 0, 0))
+                .contains(LocalDateTime.of(2026, 2, 1, 0, 0));
     }
 
     @Test

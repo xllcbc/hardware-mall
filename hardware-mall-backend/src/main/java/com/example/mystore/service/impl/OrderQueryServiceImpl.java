@@ -70,15 +70,15 @@ public class OrderQueryServiceImpl implements OrderQueryService {
         Page<OrderVO> voPage = new Page<>(orderPage.getCurrent(), orderPage.getSize(), orderPage.getTotal());
         List<OrderVO> voList = new ArrayList<>();
         for (Order order : orderPage.getRecords()) {
-            voList.add(getOrderView(order.getId(), userId));
+            voList.add(getOrderView(order.getId()));
         }
         voPage.setRecords(voList);
         return voPage;
     }
 
     @Override
-    public OrderVO getOrderView(Long orderId, Long userId) {
-        return buildOrderVO(orderMapper.selectById(orderId), userId, null);
+    public OrderVO getOrderView(Long orderId) {
+        return buildOrderVO(orderMapper.selectById(orderId), false, null);
     }
 
     @Override
@@ -111,7 +111,7 @@ public class OrderQueryServiceImpl implements OrderQueryService {
         List<OrderVO> voList = new ArrayList<>();
         Map<Long, PaymentRecord> latestPayments = loadLatestPaymentRecords(orderPage.getRecords());
         for (Order order : orderPage.getRecords()) {
-            voList.add(buildOrderVO(order, null, latestPayments));
+            voList.add(buildOrderVO(order, true, latestPayments));
         }
         voPage.setRecords(voList);
         return voPage;
@@ -142,7 +142,7 @@ public class OrderQueryServiceImpl implements OrderQueryService {
         if (order == null) {
             throw new BusinessException("订单不存在");
         }
-        return getOrderView(order.getId(), order.getUserId());
+        return getOrderView(order.getId());
     }
 
     @Override
@@ -240,10 +240,10 @@ public class OrderQueryServiceImpl implements OrderQueryService {
 
     @Override
     public OrderVO getAdminOrderById(Long orderId) {
-        return buildOrderVO(orderMapper.selectById(orderId), null, null);
+        return buildOrderVO(orderMapper.selectById(orderId), true, null);
     }
 
-    private OrderVO buildOrderVO(Order order, Long userId, Map<Long, PaymentRecord> latestPayments) {
+    private OrderVO buildOrderVO(Order order, boolean includePricingSnapshot, Map<Long, PaymentRecord> latestPayments) {
         Address address = addressMapper.selectById(order.getAddressId());
         Logistics logistics = logisticsMapper.selectById(order.getLogisticsId());
 
@@ -273,7 +273,7 @@ public class OrderQueryServiceImpl implements OrderQueryService {
         vo.setShipTime(order.getShipTime());
         vo.setReceiveTime(order.getReceiveTime());
         vo.setCreateTime(order.getCreateTime());
-        vo.setItems(items.stream().map(item -> toOrderItemVO(item, userId == null)).toList());
+        vo.setItems(items.stream().map(item -> toOrderItemVO(item, includePricingSnapshot)).toList());
 
         // 微信确认收货组件所需参数(商户单号=订单号; 交易单号支付成功后回填)
         PaymentRecord payRecord = latestPayments != null

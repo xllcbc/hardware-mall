@@ -179,7 +179,7 @@ class OrderServiceImplTest {
         lenient().when(orderIdempotencyService.claim(anyLong(), anyString(), anyString()))
                 .thenReturn(new ClaimOutcome(
                         ClaimOutcome.Kind.ACQUIRED, 10L, "owner-token", null, true));
-        lenient().when(orderQueryService.getOrderView(anyLong(), anyLong()))
+        lenient().when(orderQueryService.getOrderView(anyLong()))
                 .thenReturn(new OrderVO());
     }
 
@@ -260,7 +260,7 @@ class OrderServiceImplTest {
         OrderVO original = new OrderVO();
         original.setId(77L);
         original.setOrderNo("SO-ORIGINAL");
-        when(orderQueryService.getOrderView(77L, 2L)).thenReturn(original);
+        when(orderQueryService.getOrderView(77L)).thenReturn(original);
 
         OrderVO vo = orderService.createOrder(2L, stubValidRequest(), "k1");
 
@@ -323,7 +323,7 @@ class OrderServiceImplTest {
     @SuppressWarnings("unchecked")
     void createOrder_voAssemblyFails_doesNotFailOrReleaseRecord() {
         stubSuccessfulOrderCreation();
-        when(orderQueryService.getOrderView(100L, 2L)).thenThrow(new RuntimeException("vo assembly failed"));
+        when(orderQueryService.getOrderView(100L)).thenThrow(new RuntimeException("vo assembly failed"));
 
         CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
         line.setSkuId(5L);
@@ -357,7 +357,7 @@ class OrderServiceImplTest {
         OrderVO vo = new OrderVO();
         vo.setId(orderId);
         vo.setOrderNo("SO" + orderId);
-        when(orderQueryService.getOrderView(orderId, 2L)).thenReturn(vo);
+        when(orderQueryService.getOrderView(orderId)).thenReturn(vo);
     }
 
     @Test
@@ -1776,14 +1776,14 @@ class OrderServiceImplTest {
         when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
         when(orderMapper.update(isNull(), any())).thenReturn(1);
         OrderVO view = new OrderVO();
-        when(orderQueryService.getOrderView(1L, 2L)).thenReturn(view);
+        when(orderQueryService.getOrderView(1L)).thenReturn(view);
 
         assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
 
         InOrder inOrder = inOrder(redisUtil, payService, orderQueryService);
         inOrder.verify(redisUtil).setIfAbsent("lazysync:order:1", "1", 30, TimeUnit.SECONDS);
         inOrder.verify(payService).queryByOrderId(1L);
-        inOrder.verify(orderQueryService).getOrderView(1L, 2L);
+        inOrder.verify(orderQueryService).getOrderView(1L);
     }
 
     @Test
@@ -1793,7 +1793,7 @@ class OrderServiceImplTest {
         when(redisUtil.setIfAbsent("lazysync:order:1", "1", 30, TimeUnit.SECONDS)).thenReturn(true);
         when(payService.queryByOrderId(1L)).thenThrow(new RuntimeException("wechat down"));
         OrderVO view = new OrderVO();
-        when(orderQueryService.getOrderView(1L, 2L)).thenReturn(view);
+        when(orderQueryService.getOrderView(1L)).thenReturn(view);
 
         assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
     }
@@ -1816,7 +1816,7 @@ class OrderServiceImplTest {
         Order order = orderWithStatus(1L, StatusConstants.ORDER_SHIPPED);
         when(orderMapper.selectById(1L)).thenReturn(order);
         OrderVO view = new OrderVO();
-        when(orderQueryService.getOrderView(1L, 2L)).thenReturn(view);
+        when(orderQueryService.getOrderView(1L)).thenReturn(view);
 
         assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
 

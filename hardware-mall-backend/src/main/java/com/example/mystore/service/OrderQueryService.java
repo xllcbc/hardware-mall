@@ -23,7 +23,7 @@ public interface OrderQueryService {
     /**
      * 组装用户端订单详情视图（归属校验与支付同步由门面完成）。
      */
-    OrderVO getOrderView(Long orderId, Long userId);
+    OrderVO getOrderView(Long orderId);
 
     /**
      * 管理端订单分页：按用户、状态、订单号与创建日期筛选，批量加载最新支付记录。

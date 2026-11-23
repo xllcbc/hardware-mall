@@ -103,7 +103,7 @@ public class OrderServiceImpl implements OrderService {
         switch (claim.kind()) {
             case SUCCEEDED -> {
                 // 订单已提交但上次 VO 组装失败时，同 key 同指纹重试直接返回原订单
-                return orderQueryService.getOrderView(claim.orderId(), userId);
+                return orderQueryService.getOrderView(claim.orderId());
             }
             case PROCESSING -> throw new BusinessException("订单处理中，请稍后重试");
             case CONFLICT -> throw new IdempotencyConflictException();
@@ -135,7 +135,7 @@ public class OrderServiceImpl implements OrderService {
 
         orderIdempotencyService.releaseLock(userId, idemKey, claim.ownerToken(), claim.lockAcquired());
         // ③ 事务外：组装返回 VO；VO 失败不得把已成功的幂等记录置失败或删除
-        return orderQueryService.getOrderView(orderId, userId);
+        return orderQueryService.getOrderView(orderId);
     }
 
     private String requireIdempotencyKey(String idempotencyKey) {
@@ -432,7 +432,7 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        return orderQueryService.getOrderView(orderId, userId);
+        return orderQueryService.getOrderView(orderId);
     }
 
     @Override
