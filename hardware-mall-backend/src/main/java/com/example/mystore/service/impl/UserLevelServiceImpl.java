@@ -21,7 +21,12 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -164,5 +169,26 @@ public class UserLevelServiceImpl implements UserLevelService {
         }
         UserLevel level = userLevelMapper.selectById(id);
         return level == null ? null : level.getName();
+    }
+
+    @Override
+    public Map<Long, String> getNames(Collection<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> distinctIds = new HashSet<>();
+        for (Long id : ids) {
+            if (id != null) {
+                distinctIds.add(id);
+            }
+        }
+        if (distinctIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> names = new HashMap<>();
+        for (UserLevel level : userLevelMapper.selectBatchIds(distinctIds)) {
+            names.put(level.getId(), level.getName());
+        }
+        return names;
     }
 }
