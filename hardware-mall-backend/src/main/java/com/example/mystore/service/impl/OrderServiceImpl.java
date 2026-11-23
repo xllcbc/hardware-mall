@@ -34,6 +34,7 @@ import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.LevelPricingService;
 import com.example.mystore.service.OrderIdempotencyService;
+import com.example.mystore.service.OrderLifecycleService;
 import com.example.mystore.service.OrderQueryService;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
@@ -78,9 +79,8 @@ public class OrderServiceImpl implements OrderService {
     private final LevelPricingService levelPricingService;
     private final UserLevelService userLevelService;
     private final OrderIdempotencyService orderIdempotencyService;
+    private final OrderLifecycleService orderLifecycleService;
     private final OrderQueryService orderQueryService;
-
-    private final DingTalkAlertService dingTalkAlertService;
 
     @Override
     public CheckoutPreviewVO previewOrder(CheckoutPreviewRequest request) {
@@ -457,27 +457,8 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @Transactional
     public void confirmReceive(Long userId, Long orderId) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() != StatusConstants.ORDER_SHIPPED) {
-            throw new BusinessException("只能确认收货已发货的订单");
-        }
-
-        // CAS 条件更新: 仅当仍为已发货时置为已完成, 防与并发退款(3→6)互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_SHIPPED)
-                        .set(Order::getStatus, StatusConstants.ORDER_COMPLETED)
-                        .set(Order::getReceiveTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
+        orderLifecycleService.confirmReceive(userId, orderId);
     }
 
     @Override
@@ -503,22 +484,13 @@ public class OrderServiceImpl implements OrderService {
                 .eq(Order::getId, orderId)
                 .set(Order::getWechatOrderState, state)
                 .set(Order::getUpdateTime, LocalDateTime.now()));
-        confirmReceive(userId, orderId);
+        // 经注入的生命周期模块执行本地确认收货, 避免同类自调用
+        orderLifecycleService.confirmReceive(userId, orderId);
     }
 
     @Override
     public void deleteOrder(Long userId, Long orderId) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() != StatusConstants.ORDER_COMPLETED
-            && order.getStatus() != StatusConstants.ORDER_CANCELLED) {
-            throw new BusinessException("该订单不可删除");
-        }
-
-        order.setUserDeleteTime(System.currentTimeMillis());
-        orderMapper.updateById(order);
+        orderLifecycleService.deleteOrder(userId, orderId);
     }
 
     @Override
@@ -658,64 +630,12 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public void applyRefund(Long userId, Long orderId, String reason) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new BusinessException("订单不存在");
-        }
-        // 预检: 明显错状态直接报错 (CAS 才是权威并发守卫, 预检仅为友好提示)
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT
-                && order.getStatus() != StatusConstants.ORDER_SHIPPED) {
-            throw new BusinessException("当前订单状态不支持申请退款");
-        }
-
-        // claim-first: 先 CAS 占位 8(退款申请中), 命中 0 行说明状态被并发改走, 中止
-        // 单条 UPDATE 自动提交, 不加 @Transactional; 管理员审核通过后走 refundOrder 调微信退款
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .in(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT, StatusConstants.ORDER_SHIPPED)
-                        .set(Order::getStatus, StatusConstants.ORDER_REFUND_REQUESTED)
-                        .set(Order::getCancelReason, reason)
-                        .set(Order::getCancelTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
-        log.info("用户申请退款, orderId={}, orderNo={}, 等待管理员审核", orderId, order.getOrderNo());
-
-        // 通知管理员审核(防抖 key 含订单 ID, 每笔申请都独立送达)
-        dingTalkAlertService.notify("REFUND_REQUEST:" + orderId,
-                "用户申请退款\n订单号: " + order.getOrderNo() + "\n申请原因: " + reason);
+        orderLifecycleService.applyRefund(userId, orderId, reason);
     }
 
     @Override
     public void rejectRefund(Long orderId, String rejectReason) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() != StatusConstants.ORDER_REFUND_REQUESTED) {
-            throw new BusinessException("该订单不是待审核的退款申请");
-        }
-
-        // 回退目标: 申请前是什么状态就回什么状态 — 按是否已有发货时间判断, 无需额外字段
-        int targetStatus = order.getShipTime() == null
-                ? StatusConstants.ORDER_PENDING_SHIPMENT
-                : StatusConstants.ORDER_SHIPPED;
-
-        // CAS: 仅当仍为退款申请中时回退, 防与并发审核互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_REFUND_REQUESTED)
-                        .set(Order::getStatus, targetStatus)
-                        .set(Order::getAdminRemark, rejectReason)
-                        .set(Order::getCancelTime, null)
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
-        log.info("管理员拒绝退款申请, orderId={}, 回退至状态{}, 原因: {}", orderId, targetStatus, rejectReason);
+        orderLifecycleService.rejectRefund(orderId, rejectReason);
     }
 
     @Override
@@ -773,32 +693,8 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @Transactional
     public boolean autoConfirmReceive(Long orderId) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null) {
-            log.warn("订单不存在, orderId={}", orderId);
-            return false;
-        }
-        // 幂等性检查：只有已发货状态的订单才需要自动收货
-        if (order.getStatus() != StatusConstants.ORDER_SHIPPED) {
-            log.info("订单已处理，无需自动收货, orderId={}, status={}", orderId, order.getStatus());
-            return false;
-        }
-        // CAS 条件更新：仅当状态仍为已发货时置为已完成，避免与并发退款(3→6)互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_SHIPPED)
-                        .set(Order::getStatus, StatusConstants.ORDER_COMPLETED)
-                        .set(Order::getReceiveTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected > 0) {
-            log.info("订单自动收货成功, orderId={}", orderId);
-            return true;
-        }
-        log.info("自动收货跳过（CAS 未命中，订单状态已变更）, orderId={}", orderId);
-        return false;
+        return orderLifecycleService.autoConfirmReceive(orderId);
     }
 
     String generateOrderNo() {

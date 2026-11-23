@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
+import com.example.mystore.common.constant.WechatConstants;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.common.exception.IdempotencyConflictException;
 import com.example.mystore.common.exception.PriceChangedException;
@@ -24,6 +25,7 @@ import com.example.mystore.mapper.*;
 import com.example.mystore.service.LevelPricingService;
 import com.example.mystore.service.OrderIdempotencyService;
 import com.example.mystore.service.OrderIdempotencyService.ClaimOutcome;
+import com.example.mystore.service.OrderLifecycleService;
 import com.example.mystore.service.OrderQueryService;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.PricingRuleService;
@@ -85,9 +87,9 @@ class OrderServiceImplTest {
     @Mock
     private ApplicationEventPublisher applicationEventPublisher;
     @Mock
-    private DingTalkAlertService dingTalkAlertService;
-    @Mock
     private org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @Mock
+    private OrderLifecycleService orderLifecycleService;
     @Mock
     private OrderQueryService orderQueryService;
     @Mock
@@ -780,20 +782,6 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void testConfirmReceive_NotShipped() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setUserId(2L);
-        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT); // 待发货
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-
-        assertThatThrownBy(() -> orderService.confirmReceive(2L, 1L))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("只能确认收货已发货的订单");
-    }
-
-    @Test
     void testShipOrder_Success() {
         Order order = new Order();
         order.setId(1L);
@@ -912,20 +900,6 @@ class OrderServiceImplTest {
         assertThatThrownBy(() -> orderService.getOrderById(2L, 999L))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("订单不存在");
-    }
-
-    @Test
-    void testDeleteOrder_NotAllowed() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setUserId(2L);
-        order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT); // 待付款，不可删除
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-
-        assertThatThrownBy(() -> orderService.deleteOrder(2L, 1L))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("该订单不可删除");
     }
 
     @Test
@@ -1280,61 +1254,6 @@ class OrderServiceImplTest {
         assertThat(orderService.generateOrderNo()).startsWith("SO").hasSizeLessThan(32);
     }
 
-    @Test
-    void testAutoConfirmReceive_Success() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_SHIPPED);
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
-
-        boolean result = orderService.autoConfirmReceive(1L);
-
-        assertThat(result).isTrue();
-        verify(orderMapper).update(isNull(), any());
-    }
-
-    @Test
-    void testAutoConfirmReceive_OrderNotExist() {
-        when(orderMapper.selectById(999L)).thenReturn(null);
-
-        boolean result = orderService.autoConfirmReceive(999L);
-
-        assertThat(result).isFalse();
-        verify(orderMapper, never()).update(any(), any());
-    }
-
-    @Test
-    void testAutoConfirmReceive_NotShipped() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_COMPLETED); // 已完成，无需自动收货
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-
-        boolean result = orderService.autoConfirmReceive(1L);
-
-        assertThat(result).isFalse();
-        verify(orderMapper, never()).update(any(), any());
-    }
-
-    @Test
-    void testAutoConfirmReceive_CasMiss_ShouldSkip() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_SHIPPED);
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        // CAS 未命中：读取后状态被并发操作改走（如退款 3→6），条件更新 0 行命中
-        when(orderMapper.update(isNull(), any())).thenReturn(0);
-
-        boolean result = orderService.autoConfirmReceive(1L);
-
-        assertThat(result).isFalse();
-        verify(orderMapper).update(isNull(), any());
-    }
-
     // ==================== refundOrder claim-first 重构 ====================
 
     @Test
@@ -1407,95 +1326,6 @@ class OrderServiceImplTest {
                 .hasMessageContaining("wechat error");
 
         verify(orderMapper).update(isNull(), any()); // claim 已提交, status 保持 6
-    }
-
-    // ==================== applyRefund 用户申请退款 ====================
-
-    @Test
-    void applyRefund_success_claimsStatus8AndNotifiesAdmin() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setUserId(2L);
-        order.setOrderNo("SO123");
-        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
-
-        orderService.applyRefund(2L, 1L, "不想要了");
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
-                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
-        verify(orderMapper).update(isNull(), captor.capture());
-        // CAS 占位目标状态必须是 8(退款申请中), 而非直接 6(退款中)
-        assertThat(captor.getValue().getParamNameValuePairs())
-                .containsValue(StatusConstants.ORDER_REFUND_REQUESTED);
-
-        // 每笔申请都要通知到管理员(防抖 key 含订单号, 互不吞单)
-        verify(dingTalkAlertService).notify(eq("REFUND_REQUEST:1"), contains("SO123"));
-        verify(dingTalkAlertService).notify(eq("REFUND_REQUEST:1"), contains("不想要了"));
-    }
-
-    @Test
-    void applyRefund_casMiss_throwsAndNoNotify() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setUserId(2L);
-        order.setOrderNo("SO123");
-        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(orderMapper.update(isNull(), any())).thenReturn(0); // 竞态输了
-
-        assertThatThrownBy(() -> orderService.applyRefund(2L, 1L, "不想要了"))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("状态已变更");
-
-        verify(dingTalkAlertService, never()).notify(any(), any()); // 未占位成功绝不通知
-    }
-
-    @Test
-    void applyRefund_invalidStatus_rejectsBeforeCasClaim() {
-        // 待付款/已完成/已取消/退款中/已退款 均不允许申请退款
-        int[] invalidStatuses = {
-                StatusConstants.ORDER_PENDING_PAYMENT,
-                StatusConstants.ORDER_COMPLETED,
-                StatusConstants.ORDER_CANCELLED,
-                StatusConstants.ORDER_REFUNDING,
-                StatusConstants.ORDER_REFUNDED,
-                StatusConstants.ORDER_REFUND_REQUESTED
-        };
-        for (int status : invalidStatuses) {
-            Order order = new Order();
-            order.setId(1L);
-            order.setUserId(2L);
-            order.setStatus(status);
-            when(orderMapper.selectById(1L)).thenReturn(order);
-
-            assertThatThrownBy(() -> orderService.applyRefund(2L, 1L, "不想要了"))
-                    .as("status=%d 应被拒绝", status)
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("不支持申请退款");
-        }
-        verify(orderMapper, never()).update(isNull(), any()); // 预检失败绝不写库
-        verify(dingTalkAlertService, never()).notify(any(), any());
-    }
-
-    @Test
-    void applyRefund_notOwner_rejectsAndNoWrite() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setUserId(2L); // 归属用户 2
-        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
-        when(orderMapper.selectById(1L)).thenReturn(order);
-
-        assertThatThrownBy(() -> orderService.applyRefund(999L, 1L, "不想要了"))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage("订单不存在");
-
-        verify(orderMapper, never()).update(isNull(), any());
-        verify(dingTalkAlertService, never()).notify(any(), any());
     }
 
     // ==================== refundOrder 审核通过(放行状态8) ====================
@@ -1630,65 +1460,6 @@ class OrderServiceImplTest {
         verify(payService, times(4)).refund(1L, "质量问题");
     }
 
-    // ==================== rejectRefund 管理员拒绝退款申请 ====================
-
-    @Test
-    void rejectRefund_notShipped_backToPendingShipment() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_REFUND_REQUESTED);
-        order.setShipTime(null); // 未发货
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
-
-        orderService.rejectRefund(1L, "凭证不足");
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
-                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
-        verify(orderMapper).update(isNull(), captor.capture());
-        // 状态回退到待发货, 拒绝原因记录在 adminRemark
-        assertThat(captor.getValue().getParamNameValuePairs())
-                .containsValue(StatusConstants.ORDER_PENDING_SHIPMENT)
-                .containsValue("凭证不足");
-    }
-
-    @Test
-    void rejectRefund_shipped_backToShipped() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_REFUND_REQUESTED);
-        order.setShipTime(LocalDateTime.now()); // 已发货
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
-
-        orderService.rejectRefund(1L, "影响二次销售");
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
-                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
-        verify(orderMapper).update(isNull(), captor.capture());
-        assertThat(captor.getValue().getParamNameValuePairs())
-                .containsValue(StatusConstants.ORDER_SHIPPED)
-                .containsValue("影响二次销售");
-    }
-
-    @Test
-    void rejectRefund_nonRequestedStatus_rejectsAndNoWrite() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT); // 不是待审核状态
-        when(orderMapper.selectById(1L)).thenReturn(order);
-
-        assertThatThrownBy(() -> orderService.rejectRefund(1L, "拒绝"))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("不是待审核的退款申请");
-
-        verify(orderMapper, never()).update(isNull(), any());
-    }
-
     // ==================== Seam 2: 状态 8 的 VO 文案与原因透出 ====================
 
     // ==================== Seam 3: stats 透出退款申请计数 ====================
@@ -1705,37 +1476,76 @@ class OrderServiceImplTest {
         verifyNoInteractions(orderMapper); // 连 selectById 都未发生, 任何 DB 写都不允许
     }
 
-    // ==================== confirmReceive CAS 加固 ====================
+    // ==================== 生命周期命令门面接线 ====================
 
     @Test
-    void confirmReceive_casSuccess_neverBlindWrite() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setUserId(2L);
-        order.setStatus(StatusConstants.ORDER_SHIPPED);
-
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
+    void lifecycleCommands_delegateToLifecycleModule() {
+        when(orderLifecycleService.autoConfirmReceive(1L)).thenReturn(true);
 
         orderService.confirmReceive(2L, 1L);
+        assertThat(orderService.autoConfirmReceive(1L)).isTrue();
+        orderService.applyRefund(2L, 1L, "不想要了");
+        orderService.rejectRefund(1L, "凭证不足");
+        orderService.deleteOrder(2L, 1L);
 
-        verify(orderMapper).update(isNull(), any());
-        verify(orderMapper, never()).updateById(any(Order.class)); // 不再盲写
+        verify(orderLifecycleService).confirmReceive(2L, 1L);
+        verify(orderLifecycleService).autoConfirmReceive(1L);
+        verify(orderLifecycleService).applyRefund(2L, 1L, "不想要了");
+        verify(orderLifecycleService).rejectRefund(1L, "凭证不足");
+        verify(orderLifecycleService).deleteOrder(2L, 1L);
+        verifyNoInteractions(orderMapper);
     }
 
     @Test
-    void confirmReceive_casMiss_throws() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setUserId(2L);
-        order.setStatus(StatusConstants.ORDER_SHIPPED);
-
+    void confirmReceiveByWechat_recordsWechatStateThenCallsLifecycleModule() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_SHIPPED);
         when(orderMapper.selectById(1L)).thenReturn(order);
-        when(orderMapper.update(isNull(), any())).thenReturn(0); // 竞态: 退款刚占位 6
+        when(wechatOrderShippingService.queryOrderState(1L)).thenReturn(WechatConstants.OrderState.CONFIRMED);
 
-        assertThatThrownBy(() -> orderService.confirmReceive(2L, 1L))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("状态已变更");
+        orderService.confirmReceiveByWechat(2L, 1L);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<Order>> captor =
+                ArgumentCaptor.forClass((Class) LambdaUpdateWrapper.class);
+        verify(orderMapper).update(isNull(), captor.capture());
+        assertThat(captor.getValue().getParamNameValuePairs())
+                .containsValue(WechatConstants.OrderState.CONFIRMED);
+        // 经注入的生命周期模块执行本地 3→4, 不再同类自调用
+        verify(orderLifecycleService).confirmReceive(2L, 1L);
+    }
+
+    @Test
+    void confirmReceiveByWechat_notConfirmedByWechat_rejectsWithoutLocalTransition() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+        when(wechatOrderShippingService.queryOrderState(1L)).thenReturn(WechatConstants.OrderState.SHIPPED);
+
+        assertThatThrownBy(() -> orderService.confirmReceiveByWechat(2L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("微信未确认收货，请稍后重试");
+
+        verifyNoInteractions(orderLifecycleService);
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void confirmReceiveByWechat_alreadyCompleted_isIdempotentWithoutTransition() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_COMPLETED));
+
+        orderService.confirmReceiveByWechat(2L, 1L);
+
+        verifyNoInteractions(wechatOrderShippingService, orderLifecycleService);
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void confirmReceiveByWechat_wrongStatus_rejectsWithoutWechatQuery() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_PENDING_SHIPMENT));
+
+        assertThatThrownBy(() -> orderService.confirmReceiveByWechat(2L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("当前订单状态不支持确认收货");
+
+        verifyNoInteractions(wechatOrderShippingService, orderLifecycleService);
     }
 
     // ==================== 读模型门面接线（只验证委托目标与详情触发顺序） ====================
