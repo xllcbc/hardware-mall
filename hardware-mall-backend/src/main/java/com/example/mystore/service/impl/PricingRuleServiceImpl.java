@@ -9,6 +9,7 @@ import com.example.mystore.entity.db.Category;
 import com.example.mystore.entity.db.LevelCategoryRate;
 import com.example.mystore.entity.db.UserLevel;
 import com.example.mystore.entity.dto.LevelRateItemRequest;
+import com.example.mystore.entity.dto.LevelRateTable;
 import com.example.mystore.entity.vo.LevelRateVO;
 import com.example.mystore.entity.vo.PricingLevelCache;
 import com.example.mystore.entity.dto.PricingRateResolution;
@@ -48,9 +49,18 @@ public class PricingRuleServiceImpl implements PricingRuleService {
 
     @Override
     public PricingRateResolution rateFor(Long levelId, Long categoryId, boolean excludeDiscount) {
+        LevelRateTable rateTable = rateTable(excludeDiscount ? resolveRetailLevelId() : levelId);
+        BigDecimal rate = rateTable.rateFor(categoryId);
+        return rate == null
+                ? PricingRateResolution.missing(rateTable.levelId())
+                : PricingRateResolution.resolved(rateTable.levelId(), rate);
+    }
+
+    @Override
+    public LevelRateTable rateTable(Long levelId) {
         PricingLevelCache cache;
         Long effectiveLevelId;
-        if (excludeDiscount || levelId == null) {
+        if (levelId == null) {
             effectiveLevelId = resolveRetailLevelId();
             cache = getLevelCache(effectiveLevelId);
         } else {
@@ -62,11 +72,9 @@ public class PricingRuleServiceImpl implements PricingRuleService {
                 cache = getLevelCache(effectiveLevelId);
             }
         }
-        BigDecimal rate = categoryId == null || cache == null || cache.getRates() == null
-                ? null : cache.getRates().get(categoryId);
-        return rate == null
-                ? PricingRateResolution.missing(effectiveLevelId)
-                : PricingRateResolution.resolved(effectiveLevelId, rate);
+        return new LevelRateTable(
+                effectiveLevelId,
+                cache == null || cache.getRates() == null ? Map.of() : cache.getRates());
     }
 
     private boolean levelExists(PricingLevelCache cache) {

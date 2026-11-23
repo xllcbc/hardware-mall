@@ -15,6 +15,13 @@ public interface SkuService {
     Map<Long, Sku> getSkuMapByIds(Collection<Long> skuIds);
     Integer getStockById(Long skuId);
     void evictStockCache(Long skuId);
+
+    /**
+     * 把在售 SKU 的正库存预写入库存缓存。
+     *
+     * @return 写入缓存的 SKU 数量
+     */
+    int warmUpStockCache();
     List<Sku> getSkusBySpu(Long spuId);
     List<Sku> getSkusBySpu(Long spuId, Integer status);
     Map<Long, List<Sku>> getSkusBySpuIds(List<Long> spuIds);

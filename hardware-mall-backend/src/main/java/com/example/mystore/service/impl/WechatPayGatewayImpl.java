@@ -19,7 +19,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -42,7 +41,7 @@ public class WechatPayGatewayImpl implements WechatPayGateway {
     private String notifyUrl;
 
     @Override
-    public Map<String, String> prepay(String outTradeNo, BigDecimal amount, String openid) {
+    public Map<String, String> prepay(String outTradeNo, long amountInCents, String openid) {
         PrepayRequest prepayRequest = new PrepayRequest();
         prepayRequest.setAppid(appId);
         prepayRequest.setMchid(mchId);
@@ -51,7 +50,7 @@ public class WechatPayGatewayImpl implements WechatPayGateway {
         prepayRequest.setNotifyUrl(notifyUrl);
 
         Amount reqAmount = new Amount();
-        reqAmount.setTotal(amount.multiply(BigDecimal.valueOf(WechatConstants.Pay.CENTS_PER_YUAN)).intValueExact());
+        reqAmount.setTotal(Math.toIntExact(amountInCents));
         reqAmount.setCurrency(WechatConstants.Pay.CURRENCY_CNY);
         prepayRequest.setAmount(reqAmount);
 
@@ -80,14 +79,13 @@ public class WechatPayGatewayImpl implements WechatPayGateway {
     }
 
     @Override
-    public void createRefund(String outTradeNo, String outRefundNo, BigDecimal amount, String reason) {
+    public void createRefund(String outTradeNo, String outRefundNo, long amountInCents, String reason) {
         CreateRequest refundRequest = new CreateRequest();
         refundRequest.setOutTradeNo(outTradeNo);
         refundRequest.setOutRefundNo(outRefundNo);
         refundRequest.setReason(reason);
         refundRequest.setNotifyUrl(notifyUrl + WechatConstants.Pay.REFUND_NOTIFY_PATH);
 
-        long amountInCents = amount.multiply(BigDecimal.valueOf(WechatConstants.Pay.CENTS_PER_YUAN)).longValue();
         AmountReq amountReq = new AmountReq();
         amountReq.setRefund(amountInCents);
         amountReq.setTotal(amountInCents);

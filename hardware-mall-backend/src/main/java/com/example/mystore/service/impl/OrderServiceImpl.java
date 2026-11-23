@@ -25,7 +25,8 @@ import com.example.mystore.entity.vo.OrderItemVO;
 import com.example.mystore.entity.vo.CheckoutItemVO;
 import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.DashboardStatsVO;
-import com.example.mystore.entity.dto.PricingRateResolution;
+import com.example.mystore.entity.dto.LevelPricing;
+import com.example.mystore.entity.dto.ProductPricingFacts;
 import com.example.mystore.entity.vo.RecentOrderVO;
 import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;
@@ -33,15 +34,15 @@ import com.example.mystore.entity.vo.SpecVO;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
+import com.example.mystore.service.LevelPricingService;
 import com.example.mystore.service.OrderIdempotencyService;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
-import com.example.mystore.service.PriceService;
-import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
+import com.example.mystore.util.MoneyUtil;
 import com.example.mystore.util.OrderRequestFingerprint;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.UserContext;
@@ -86,8 +87,7 @@ public class OrderServiceImpl implements OrderService {
     private final PlatformTransactionManager transactionManager;
     private final WechatOrderShippingService wechatOrderShippingService;
     private final PaymentRecordMapper paymentRecordMapper;
-    private final PriceService priceService;
-    private final PricingRuleService pricingRuleService;
+    private final LevelPricingService levelPricingService;
     private final UserLevelService userLevelService;
     private final OrderIdempotencyService orderIdempotencyService;
 
@@ -206,10 +206,9 @@ public class OrderServiceImpl implements OrderService {
                 : spuMapper.selectBatchIds(spuIds).stream()
                         .collect(java.util.stream.Collectors.toMap(Spu::getId, spu -> spu));
 
-        // ③ 组装订单明细快照（spu 改从 map 取）
-        List<OrderItem> orderItems = new ArrayList<>();
-        BigDecimal goodsAmount = BigDecimal.ZERO;
-        Long currentLevelId = UserContext.getLevelId();
+        // ③ 一次批量报价：订单预览与创建共用同一份等级定价结果
+        List<Spu> spus = new ArrayList<>(requestedItems.size());
+        List<ProductPricingFacts> facts = new ArrayList<>(requestedItems.size());
         for (int i = 0; i < requestedItems.size(); i++) {
             CreateOrderRequest.CartItem cartItem = requestedItems.get(i);
             Sku sku = skus.get(i);
@@ -217,15 +216,32 @@ public class OrderServiceImpl implements OrderService {
             if (spu == null) {
                 throw new BusinessException("商品不存在或已下架: " + cartItem.getSkuId());
             }
-            PricingRateResolution pricing = pricingRuleService.rateFor(
-                    currentLevelId,
+            spus.add(spu);
+            facts.add(ProductPricingFacts.of(
                     spu.getCategoryId(),
-                    DiscountConstants.isExcluded(spu.getExcludeDiscount()));
-            if (pricing.isMissing()) {
-                throw new BusinessException("商品暂不可售: " + cartItem.getSkuId());
+                    sku.getPrice(),
+                    DiscountConstants.isExcluded(spu.getExcludeDiscount())));
+        }
+        List<LevelPricing> pricings = levelPricingService.priceAll(UserContext.getLevelId(), facts);
+        for (int i = 0; i < pricings.size(); i++) {
+            if (!pricings.get(i).sellable()) {
+                throw new BusinessException(
+                        "商品暂不可售: " + spus.get(i).getName() + "（SKU " + skus.get(i).getId() + "）");
             }
-            BigDecimal rate = pricing.rate();
-            BigDecimal unitPrice = priceService.resolveUnitPrice(sku.getPrice(), rate);
+        }
+        Map<Long, String> levelNames = userLevelService.getNames(
+                pricings.stream().map(LevelPricing::levelId).toList());
+
+        // ④ 组装订单明细快照：等级 ID、名称、倍率与单价都取自同一报价结果
+        List<OrderItem> orderItems = new ArrayList<>();
+        BigDecimal goodsAmount = BigDecimal.ZERO;
+        for (int i = 0; i < requestedItems.size(); i++) {
+            CreateOrderRequest.CartItem cartItem = requestedItems.get(i);
+            Sku sku = skus.get(i);
+            Spu spu = spus.get(i);
+            LevelPricing pricing = pricings.get(i);
+            // 订单事实以单个 SKU 批发基价构建，报价的 min/max 必为同一等级结算价
+            BigDecimal unitPrice = pricing.minPrice();
             BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             goodsAmount = goodsAmount.add(subtotal);
 
@@ -250,8 +266,8 @@ public class OrderServiceImpl implements OrderService {
             item.setProductImage(sku.getImage() != null ? sku.getImage() : getFirstImage(spu.getImages()));
             item.setPrice(unitPrice);
             item.setLevelId(pricing.levelId());
-            item.setLevelName(userLevelService.getName(pricing.levelId()));
-            item.setPricingRate(rate);
+            item.setLevelName(levelNames.get(pricing.levelId()));
+            item.setPricingRate(pricing.rate());
             item.setQuantity(cartItem.getQuantity());
             item.setSubtotal(subtotal);
             item.setCreateTime(LocalDateTime.now());
@@ -259,8 +275,26 @@ public class OrderServiceImpl implements OrderService {
         }
 
         BigDecimal freightAmount = BigDecimal.ZERO.setScale(2);
+        BigDecimal payAmount = goodsAmount.add(freightAmount);
+        requirePayableAmount(payAmount);
         return new SettlementSnapshot(
-                orderItems, goodsAmount.setScale(2), freightAmount, goodsAmount.add(freightAmount).setScale(2));
+                orderItems, goodsAmount.setScale(2), freightAmount, payAmount.setScale(2));
+    }
+
+    /**
+     * 结算金额下限：低于 1 分（含取整为 0 元）时直接拒绝下单，
+     * 不创建订单与支付记录，避免跳到支付页后才被微信网关拒绝。
+     */
+    private void requirePayableAmount(BigDecimal payAmount) {
+        long cents;
+        try {
+            cents = MoneyUtil.yuanToCents(payAmount);
+        } catch (BusinessException e) {
+            throw new BusinessException("订单金额非法，无法下单：" + e.getMessage());
+        }
+        if (cents < MoneyUtil.MIN_PAYABLE_CENTS) {
+            throw new BusinessException("订单金额低于 0.01 元，无法下单");
+        }
     }
 
     private void requireConfirmedAmount(BigDecimal expectedPayAmount, SettlementSnapshot settlement) {
@@ -659,7 +693,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private static long toCents(BigDecimal amount) {
-        return amount == null ? 0L : amount.movePointRight(2).longValue();
+        return amount == null ? 0L : MoneyUtil.yuanToCents(amount);
     }
 
     @Override
