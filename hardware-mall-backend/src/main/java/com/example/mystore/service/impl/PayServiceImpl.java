@@ -21,6 +21,7 @@ import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.WechatPayGateway;
 import com.example.mystore.util.MoneyUtil;
+import com.example.mystore.util.RedisUtil;
 import com.wechat.pay.java.core.exception.ServiceException;
 import com.wechat.pay.java.core.notification.NotificationParser;
 import com.wechat.pay.java.core.notification.RequestParam;
@@ -37,6 +38,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
@@ -48,6 +50,9 @@ public class PayServiceImpl implements PayService {
     private static final int HTTP_STATUS_SERVER_ERROR = 500;
     /** 对账补发退款的展示原因(不参与资金计算) */
     private static final String RECONCILE_REFUND_REASON = "退款对账补发";
+    /** 详情支付状态同步去抖: 同一订单 30 秒内最多查一次微信, 防刷 API 限频 */
+    private static final String LAZY_SYNC_KEY_PREFIX = "lazysync:order:";
+    private static final long LAZY_SYNC_DEBOUNCE_SECONDS = 30;
 
     private final PaymentRecordMapper paymentRecordMapper;
     private final OrderMapper orderMapper;
@@ -59,6 +64,7 @@ public class PayServiceImpl implements PayService {
     private final SkuService skuService;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final PlatformTransactionManager transactionManager;
+    private final RedisUtil redisUtil;
 
     @Override
     public Map<String, String> prepay(Long userId, Long orderId) {
@@ -315,8 +321,54 @@ public class PayServiceImpl implements PayService {
     }
 
     /**
+     * 详情读路径的支付状态同步: 30 秒去抖后核查支付记录, 兜底回调丢失。
+     *
+     * <p>去抖 key 保持 {@code lazysync:order:<orderId>}, 与迁入前一致, 运维排障语义不变。
+     * 同步异常向上抛, 由详情读路径吞掉, 不影响详情返回。
+     */
+    @Override
+    public void syncPaymentStatus(Long orderId) {
+        boolean debounced = redisUtil.setIfAbsent(
+                LAZY_SYNC_KEY_PREFIX + orderId, "1", LAZY_SYNC_DEBOUNCE_SECONDS, TimeUnit.SECONDS);
+        if (!debounced) {
+            return;
+        }
+
+        PaymentRecord record = queryByOrderId(orderId);
+        if (record == null) {
+            return;
+        }
+        if (record.getStatus() == PaymentRecord.STATUS_PAID) {
+            // DB 不一致修复: payment_record 已 PAID 但 order 还是待付款 → 直接推进
+            repairPaidOrderIfStillPending(orderId);
+            return;
+        }
+        if (record.getStatus() == PaymentRecord.STATUS_PENDING) {
+            Transaction txn = queryWechatOrder(record.getOutTradeNo());
+            if (Transaction.TradeStateEnum.SUCCESS.equals(txn.getTradeState())) {
+                // 本类内自调用走不到代理, 由 TransactionTemplate 提供 processPaymentSuccess 所需事务
+                new TransactionTemplate(transactionManager)
+                        .execute(status -> processPaymentSuccess(record.getOutTradeNo(), txn.getTransactionId()));
+                log.info("⑦ lazy sync 微信查单补单成功, orderId={}", orderId);
+            }
+        }
+    }
+
+    private void repairPaidOrderIfStillPending(Long orderId) {
+        int affected = orderMapper.update(null,
+                new LambdaUpdateWrapper<Order>()
+                        .eq(Order::getId, orderId)
+                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
+                        .set(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
+                        .set(Order::getUpdateTime, LocalDateTime.now()));
+        if (affected > 0) {
+            log.info("⑦ lazy sync DB不一致修复, orderId={}", orderId);
+        }
+    }
+
+    /**
      * 支付成功核心处理: payment_record 翻转 PAID + 订单状态 1→2(待发货)
-     * 三处复用: 回调 callback / ⑥ OrderCancelStaleJob 微信查单补单 / ⑦ getOrderById lazy sync
+     * 三处复用: 回调 callback / ⑥ OrderCancelStaleJob 微信查单补单 / ⑦ 详情同步 syncPaymentStatus
      *
      * 事务来源(M7): callback 经 TransactionTemplate 包裹调用(内部 this-call 不走代理, 由模板提供事务);
      * ⑥⑦ 为外部调用, @Transactional 经代理生效

@@ -43,9 +43,7 @@ import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
 import com.example.mystore.util.MoneyUtil;
 import com.example.mystore.util.OrderRequestFingerprint;
-import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.UserContext;
-import com.wechat.pay.java.service.payments.model.Transaction;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,7 +57,6 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -75,7 +72,6 @@ public class OrderServiceImpl implements OrderService {
     private final SkuService skuService;
     @Autowired(required = false)
     private PayService payService;
-    private final RedisUtil redisUtil;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final PlatformTransactionManager transactionManager;
     private final WechatOrderShippingService wechatOrderShippingService;
@@ -403,30 +399,11 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException("订单不存在");
         }
 
-        // ⑦ lazy sync: 用户打开待付款订单详情时自动核查支付状态, 兜底回调丢失
-        // O3 Redis 节流: 同一订单 30s 内最多查一次微信, 防刷 API 限频
+        // 打开待付款订单详情时触发支付状态同步（去抖、修复与查单由支付模块负责）
+        // 同步异常不影响详情返回
         if (order.getStatus() == StatusConstants.ORDER_PENDING_PAYMENT && payService != null) {
             try {
-                boolean debounced = redisUtil.setIfAbsent("lazysync:order:" + orderId, "1", 30, TimeUnit.SECONDS);
-                if (debounced) {
-                    PaymentRecord record = payService.queryByOrderId(orderId);
-                    if (record != null && record.getStatus() == PaymentRecord.STATUS_PAID) {
-                        // DB 不一致修复: payment_record 已 PAID 但 order 还是待付款 → 直接推进
-                        orderMapper.update(null,
-                                new LambdaUpdateWrapper<Order>()
-                                        .eq(Order::getId, orderId)
-                                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
-                                        .set(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
-                                        .set(Order::getUpdateTime, LocalDateTime.now()));
-                        log.info("⑦ lazy sync DB不一致修复, orderId={}", orderId);
-                    } else if (record != null && record.getStatus() == PaymentRecord.STATUS_PENDING) {
-                        Transaction txn = payService.queryWechatOrder(record.getOutTradeNo());
-                        if (Transaction.TradeStateEnum.SUCCESS.equals(txn.getTradeState())) {
-                            payService.processPaymentSuccess(record.getOutTradeNo(), txn.getTransactionId());
-                            log.info("⑦ lazy sync 微信查单补单成功, orderId={}", orderId);
-                        }
-                    }
-                }
+                payService.syncPaymentStatus(orderId);
             } catch (Exception e) {
                 log.warn("⑦ lazy sync 异常, 不影响详情返回, orderId={}: {}", orderId, e.getMessage());
             }

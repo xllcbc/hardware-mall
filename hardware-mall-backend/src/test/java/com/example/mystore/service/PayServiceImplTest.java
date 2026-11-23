@@ -16,6 +16,7 @@ import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.impl.DingTalkAlertService;
 import com.example.mystore.service.impl.PayServiceImpl;
+import com.example.mystore.util.RedisUtil;
 import com.wechat.pay.java.core.exception.ServiceException;
 import com.wechat.pay.java.core.notification.NotificationParser;
 import com.wechat.pay.java.core.notification.RequestParam;
@@ -47,6 +48,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -68,6 +70,7 @@ class PayServiceImplTest {
     @Autowired SkuMapper skuMapper;
     @Autowired OrderItemMapper orderItemMapper;
     @Autowired UserMapper userMapper;
+    @Autowired RedisUtil redisUtil;
 
     @SpyBean
     PayServiceImpl payService;
@@ -703,6 +706,82 @@ class PayServiceImplTest {
         assertThat(payService.queryWechatOrder("OUT_QUERY")).isSameAs(txn);
     }
 
+    // ==================== 详情支付状态同步 ====================
+
+    @Test
+    void syncPaymentStatus_shouldQueryWechatOnceWithinDebounceWindow() {
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT);
+        String outTradeNo = uniqueOutTradeNo();
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_PENDING, outTradeNo);
+        clearLazySyncKey(orderId);
+        Transaction txn = new Transaction();
+        txn.setTradeState(Transaction.TradeStateEnum.NOTPAY);
+        when(wechatPayGateway.queryOrder(outTradeNo)).thenReturn(txn);
+
+        payService.syncPaymentStatus(orderId);
+        payService.syncPaymentStatus(orderId);
+
+        verify(wechatPayGateway, times(1)).queryOrder(outTradeNo);
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_PENDING_PAYMENT);
+    }
+
+    @Test
+    void syncPaymentStatus_shouldRepairOrderToPendingShipment_whenRecordPaidButOrderPendingPayment() {
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT);
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        clearLazySyncKey(orderId);
+
+        payService.syncPaymentStatus(orderId);
+
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_PENDING_SHIPMENT);
+        assertThat(paymentRecordMapper.selectById(record.getId()).getStatus()).isEqualTo(PaymentRecord.STATUS_PAID);
+        verifyNoInteractions(wechatPayGateway);
+    }
+
+    @Test
+    void syncPaymentStatus_shouldNotRegressOrder_whenAlreadyAdvancedPastPendingPayment() {
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_SHIPMENT);
+        setupPaymentRecord(orderId, PaymentRecord.STATUS_PAID, uniqueOutTradeNo());
+        clearLazySyncKey(orderId);
+
+        payService.syncPaymentStatus(orderId);
+
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_PENDING_SHIPMENT);
+        verifyNoInteractions(wechatPayGateway);
+    }
+
+    @Test
+    void syncPaymentStatus_shouldProcessPaymentSuccess_whenWechatReportsSuccess() {
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT);
+        String outTradeNo = uniqueOutTradeNo();
+        PaymentRecord record = setupPaymentRecord(orderId, PaymentRecord.STATUS_PENDING, outTradeNo);
+        clearLazySyncKey(orderId);
+        Transaction txn = new Transaction();
+        txn.setTradeState(Transaction.TradeStateEnum.SUCCESS);
+        txn.setTransactionId("TXN_SYNC_" + System.nanoTime());
+        when(wechatPayGateway.queryOrder(outTradeNo)).thenReturn(txn);
+
+        payService.syncPaymentStatus(orderId);
+
+        PaymentRecord updated = paymentRecordMapper.selectById(record.getId());
+        assertThat(updated.getStatus()).isEqualTo(PaymentRecord.STATUS_PAID);
+        assertThat(updated.getTransactionId()).isEqualTo(txn.getTransactionId());
+        Order order = orderMapper.selectById(orderId);
+        assertThat(order.getStatus()).isEqualTo(StatusConstants.ORDER_PENDING_SHIPMENT);
+        assertThat(order.getPayTime()).isNotNull();
+    }
+
+    @Test
+    void syncPaymentStatus_shouldDoNothing_whenNoPaymentRecord() {
+        Long orderId = setupOrder(StatusConstants.ORDER_PENDING_PAYMENT);
+        clearLazySyncKey(orderId);
+
+        payService.syncPaymentStatus(orderId);
+
+        assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(StatusConstants.ORDER_PENDING_PAYMENT);
+        verifyNoInteractions(wechatPayGateway);
+    }
+
     // ==================== M7 事务分段 ====================
 
     @Test
@@ -882,6 +961,11 @@ class PayServiceImplTest {
 
     private static String uniqueOutTradeNo() {
         return "OUT_UNIQUE_" + System.nanoTime();
+    }
+
+    /** 详情同步去抖 key 存 Redis, 不随测试事务回滚, 每个用例先清理 */
+    private void clearLazySyncKey(Long orderId) {
+        redisUtil.delete("lazysync:order:" + orderId);
     }
 
     @SuppressWarnings("unchecked")
