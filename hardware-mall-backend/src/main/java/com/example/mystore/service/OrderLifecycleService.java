@@ -35,4 +35,18 @@ public interface OrderLifecycleService {
      * 用户删除订单: 已完成(4)/已取消(5) 才可删除, 只写用户删除时间, 不改状态。
      */
     void deleteOrder(Long userId, Long orderId);
+
+    /**
+     * 管理员发货: 待发货(2) → 已发货(3)。
+     *
+     * <p>自提无物流与单号; 同城配送校验物流并生成配送单号; 其它方式拒绝。
+     * 条件更新成功后上报微信发货, 失败只告警, 由重试任务兜底。
+     */
+    void shipOrder(Long orderId, Integer deliveryType, Long logisticsId);
+
+    /**
+     * 小程序确认收货组件回调后确认收货: 先查微信 order_state 并记录,
+     * 微信已确认(3)/交易完成(4)后再执行本地确认收货(3→4)。
+     */
+    void confirmReceiveByWechat(Long userId, Long orderId);
 }
