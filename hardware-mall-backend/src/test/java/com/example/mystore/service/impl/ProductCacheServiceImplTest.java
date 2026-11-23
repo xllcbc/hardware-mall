@@ -1,15 +1,19 @@
 package com.example.mystore.service.impl;
 
+import com.example.mystore.common.cache.BatchCacheLoader;
+import com.example.mystore.common.cache.CacheCell;
+import com.example.mystore.common.cache.CachePolicy;
 import com.example.mystore.common.constant.ProductCacheConstants;
 import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.vo.ProductDetailCache;
 import com.example.mystore.entity.vo.ProductListResult;
-import com.example.mystore.util.RedisLockUtil;
 import com.example.mystore.util.RedisUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -17,16 +21,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,14 +40,14 @@ class ProductCacheServiceImplTest {
     private RedisUtil redisUtil;
 
     @Mock
-    private RedisLockUtil redisLockUtil;
+    private BatchCacheLoader batchCacheLoader;
 
     @InjectMocks
     private ProductCacheServiceImpl productCacheService;
 
     @BeforeEach
     void setUp() {
-        when(redisUtil.get(RedisConstants.PREFIX_PRODUCT_CACHE_GENERATION))
+        lenient().when(redisUtil.get(RedisConstants.PREFIX_PRODUCT_CACHE_GENERATION))
                 .thenReturn(GENERATION);
         ReflectionTestUtils.setField(productCacheService, "lockWaitMillis", 100L);
         lenient().when(redisUtil.evictWithLock(any(), eq(100L))).thenReturn(true);
@@ -125,6 +127,19 @@ class ProductCacheServiceImplTest {
     }
 
     @Test
+    void invalidateAfterSkuChange_rotatesGenerationBeforeEvictingOldGenerationKeys() {
+        productCacheService.invalidateAfterSkuChange(11L, 22L);
+
+        InOrder order = inOrder(redisUtil);
+        // 先旋转代际，再按失效前读到的代际删除 key；顺序反过来会留下永久残留
+        order.verify(redisUtil).set(eq(RedisConstants.PREFIX_PRODUCT_CACHE_GENERATION), any());
+        order.verify(redisUtil).evictWithLock(
+                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":22", 100L);
+        order.verify(redisUtil).evictWithLock(
+                RedisConstants.PREFIX_PRODUCT_DETAIL + GENERATION + ":11", 100L);
+    }
+
+    @Test
     void invalidateAfterSkuBatchChange_evictsSkuInfoOnceAndProductCachesOnce() {
         productCacheService.invalidateAfterSkuBatchChange(11L, List.of(22L, 23L, 22L));
 
@@ -199,103 +214,28 @@ class ProductCacheServiceImplTest {
     }
 
     @Test
-    void getSkusByIds_usesBatchCacheWhenAllHit() {
+    void getSkusByIds_delegatesToBatchCacheLoaderWithSkuInfoCell() {
         Sku first = sku(1L);
-        Sku second = sku(2L);
-        when(redisUtil.multiGet(List.of(
-                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":1",
-                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2")))
-                .thenReturn(List.of(first, second));
+        List<Sku> moduleResult = List.of(first);
+        when(batchCacheLoader.<Sku>load(eq(List.of(1L)), any())).thenReturn(moduleResult);
 
-        List<Sku> result = productCacheService.getSkusByIds(List.of(1L, 2L), ids -> {
-            throw new AssertionError("全部命中时不应回源数据库");
-        });
+        List<Sku> result = productCacheService.getSkusByIds(List.of(1L), ids -> List.of(first));
 
-        assertThat(result).containsExactly(first, second);
-    }
+        assertThat(result).isSameAs(moduleResult);
 
-    @Test
-    void getSkusByIds_loadsMissesInOneBatchAndFillsCache() {
-        Sku first = sku(1L);
-        Sku second = sku(2L);
-        Sku third = sku(3L);
-        when(redisUtil.multiGet(List.of(
-                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":1",
-                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2",
-                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":3")))
-                .thenReturn(java.util.Arrays.asList(first, null, third));
-        when(redisUtil.multiGet(List.of(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2")))
-                .thenReturn(Collections.singletonList(null));
-        when(redisLockUtil.tryLock(
-                eq(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2"), anyLong()))
-                .thenReturn(true);
-
-        List<Sku> result = productCacheService.getSkusByIds(
-                List.of(1L, 2L, 3L),
-                ids -> {
-                    assertThat(ids).containsExactly(2L);
-                    return List.of(second);
-                });
-
-        assertThat(result).containsExactly(first, second, third);
-        verify(redisUtil).setWithJitter(
-                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2",
-                second,
-                ProductCacheConstants.TTL_SECONDS,
-                TimeUnit.SECONDS,
-                ProductCacheConstants.JITTER_SECONDS);
-        verify(redisLockUtil).unlock(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":2");
-    }
-
-    @Test
-    void getSkusByIds_cachesNullSentinelForMissingIds() {
-        when(redisUtil.multiGet(List.of(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9")))
-                .thenReturn(Collections.singletonList(null), Collections.singletonList(null));
-        when(redisLockUtil.tryLock(
-                eq(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9"), anyLong()))
-                .thenReturn(true);
-
-        List<Sku> result = productCacheService.getSkusByIds(
-                List.of(9L),
-                ids -> Collections.emptyList());
-
-        assertThat(result).containsExactly((Sku) null);
-        verify(redisUtil).set(
-                RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9",
-                RedisConstants.CACHE_NULL,
-                RedisConstants.CACHE_NULL_TTL,
-                TimeUnit.SECONDS);
-        verify(redisLockUtil).unlock(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9");
-    }
-
-    @Test
-    void getSkusByIds_nullSentinelHit_preservesNullPlaceholderWithoutLoading() {
-        when(redisUtil.multiGet(List.of(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9")))
-                .thenReturn(Collections.singletonList(RedisConstants.CACHE_NULL));
-        when(redisUtil.isNull(RedisConstants.CACHE_NULL)).thenReturn(true);
-
-        List<Sku> result = productCacheService.getSkusByIds(List.of(9L), ids -> {
-            throw new AssertionError("空值哨兵命中时不应回源数据库");
-        });
-
-        assertThat(result).containsExactly((Sku) null);
-        verify(redisUtil, never()).set(any(), any(), anyLong(), any());
-    }
-
-    @Test
-    void getSkusByIds_lockUnavailable_returnsDbDataWithoutWritingCache() {
-        when(redisUtil.multiGet(List.of(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9")))
-                .thenReturn(Collections.singletonList(null));
-        when(redisLockUtil.tryLock(
-                eq(RedisConstants.PREFIX_SKU_INFO + GENERATION + ":9"), anyLong()))
-                .thenReturn(false);
-        Sku loaded = sku(9L);
-
-        List<Sku> result = productCacheService.getSkusByIds(List.of(9L), ids -> List.of(loaded));
-
-        assertThat(result).containsExactly(loaded);
-        verify(redisUtil, never()).set(any(), any(), anyLong(), any());
-        verify(redisLockUtil, never()).unlock(any());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<CacheCell<Sku>> cellCaptor = ArgumentCaptor.forClass(CacheCell.class);
+        verify(batchCacheLoader).load(eq(List.of(1L)), cellCaptor.capture());
+        CacheCell<Sku> cell = cellCaptor.getValue();
+        // 用字面量断言 key 布局：SKU 基础信息 key 由商品 key 所有者产出，服务内不再拼 key
+        assertThat(cell.keys().currentKey(22L)).isEqualTo("sku:info:" + GENERATION + ":22");
+        assertThat(cell.keys().keyFor(22L, "old-generation"))
+                .isEqualTo("sku:info:old-generation:22");
+        assertThat(cell.keys().currentGeneration()).isEqualTo(GENERATION);
+        assertThat(cell.policy()).isEqualTo(new CachePolicy(240L, 60L, 300L, 100L));
+        assertThat(cell.decode(first)).isSameAs(first);
+        assertThat(cell.decode(42)).isNull();
+        assertThat(cell.loadFromSource(List.of(1L))).containsEntry(1L, first);
     }
 
     private Sku sku(Long id) {
