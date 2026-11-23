@@ -275,8 +275,26 @@ public class OrderServiceImpl implements OrderService {
         }
 
         BigDecimal freightAmount = BigDecimal.ZERO.setScale(2);
+        BigDecimal payAmount = goodsAmount.add(freightAmount);
+        requirePayableAmount(payAmount);
         return new SettlementSnapshot(
-                orderItems, goodsAmount.setScale(2), freightAmount, goodsAmount.add(freightAmount).setScale(2));
+                orderItems, goodsAmount.setScale(2), freightAmount, payAmount.setScale(2));
+    }
+
+    /**
+     * 结算金额下限：低于 1 分（含取整为 0 元）时直接拒绝下单，
+     * 不创建订单与支付记录，避免跳到支付页后才被微信网关拒绝。
+     */
+    private void requirePayableAmount(BigDecimal payAmount) {
+        long cents;
+        try {
+            cents = MoneyUtil.yuanToCents(payAmount);
+        } catch (BusinessException e) {
+            throw new BusinessException("订单金额非法，无法下单：" + e.getMessage());
+        }
+        if (cents < WechatConstants.Pay.MIN_TOTAL_CENTS) {
+            throw new BusinessException("订单金额低于 0.01 元，无法下单");
+        }
     }
 
     private void requireConfirmedAmount(BigDecimal expectedPayAmount, SettlementSnapshot settlement) {

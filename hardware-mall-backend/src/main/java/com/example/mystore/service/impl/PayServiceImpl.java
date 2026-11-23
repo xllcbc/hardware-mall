@@ -111,6 +111,10 @@ public class PayServiceImpl implements PayService {
 
         // 金额在事务内先换算：子分/负数直接回滚，不留下支付记录，也不把业务错误包装成网关失败
         long amountInCents = MoneyUtil.yuanToCents(order.getPayAmount());
+        if (amountInCents < WechatConstants.Pay.MIN_TOTAL_CENTS) {
+            // 历史遗留的 0 元订单也不能建支付记录或进入网关
+            throw new BusinessException("订单金额低于 0.01 元，无法支付");
+        }
         if (amountInCents > WechatConstants.Pay.MAX_TOTAL_CENTS) {
             throw new BusinessException("订单金额超出微信支付上限");
         }

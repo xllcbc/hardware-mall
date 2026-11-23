@@ -501,6 +501,101 @@ class OrderServiceImplTest {
     }
 
     @Test
+    void previewOrder_zeroAmountIsRejected() {
+        when(levelPricingService.priceAll(any(), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE,
+                        new BigDecimal("0.00"), new BigDecimal("0.00"))));
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(3);
+        CheckoutPreviewRequest request = new CheckoutPreviewRequest();
+        request.setItems(List.of(line));
+
+        assertThatThrownBy(() -> orderService.previewOrder(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("订单金额低于 0.01 元")
+                .hasMessageNotContaining("创建支付订单失败");
+    }
+
+    @Test
+    void previewOrder_subCentAmountIsRejected() {
+        when(levelPricingService.priceAll(any(), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE,
+                        new BigDecimal("0.004"), new BigDecimal("0.004"))));
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(2);
+        CheckoutPreviewRequest request = new CheckoutPreviewRequest();
+        request.setItems(List.of(line));
+
+        assertThatThrownBy(() -> orderService.previewOrder(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("订单金额非法")
+                .hasMessageNotContaining("创建支付订单失败");
+    }
+
+    @Test
+    void createOrder_zeroAmountIsRejectedBeforeCreatingPaymentRecord() {
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+        when(levelPricingService.priceAll(any(), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE,
+                        new BigDecimal("0.00"), new BigDecimal("0.00"))));
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(2);
+        CreateOrderRequest request = new CreateOrderRequest();
+        request.setAddressId(1L);
+        request.setLogisticsId(1L);
+        request.setItems(List.of(line));
+        request.setExpectedPayAmount(new BigDecimal("0.00"));
+
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "zero-key"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("订单金额低于 0.01 元")
+                .hasMessageNotContaining("创建支付订单失败");
+
+        verify(orderMapper, never()).insert(any(Order.class));
+        verify(skuService, never()).deductStock(anyLong(), anyInt());
+        verify(paymentRecordMapper, never()).insert(any(PaymentRecord.class));
+        verifyNoInteractions(payService);
+        verify(orderIdempotencyService).markFailed(10L, "owner-token");
+        verify(orderIdempotencyService).releaseLock(2L, "zero-key", "owner-token", true);
+    }
+
+    @Test
+    void previewOrder_oneCentAmountIsAccepted() {
+        when(levelPricingService.priceAll(any(), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE,
+                        new BigDecimal("0.01"), new BigDecimal("0.01"))));
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(1);
+        CheckoutPreviewRequest request = new CheckoutPreviewRequest();
+        request.setItems(List.of(line));
+
+        CheckoutPreviewVO preview = orderService.previewOrder(request);
+
+        assertThat(preview.getPayAmount()).isEqualByComparingTo("0.01");
+    }
+
+    @Test
     void previewOrder_excludeDiscountResolvesRetailRate() {
         UserContext.setLevelId(2L);
         try {
