@@ -41,6 +41,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -616,6 +617,31 @@ class SkuServiceImplTest {
     }
 
     @Test
+    void warmUpStockCache_writesOnlyPositiveStocksWithStockTtl() {
+        Sku positive = skuWithStock(1L, 50);
+        Sku zero = skuWithStock(2L, 0);
+        Sku withoutStock = skuWithStock(3L, null);
+        when(skuMapper.selectList(any())).thenReturn(Arrays.asList(positive, zero, withoutStock));
+
+        int warmed = skuService.warmUpStockCache();
+
+        assertThat(warmed).isEqualTo(1);
+        verify(redisUtil).setWithJitter("sku:stock:1", 50, 300L, TimeUnit.SECONDS, 0L);
+        verify(redisUtil, never()).setWithJitter(
+                eq("sku:stock:2"), any(), anyLong(), any(), anyLong());
+        verify(redisUtil, never()).setWithJitter(
+                eq("sku:stock:3"), any(), anyLong(), any(), anyLong());
+    }
+
+    @Test
+    void warmUpStockCache_noPositiveStock_writesNothing() {
+        when(skuMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        assertThat(skuService.warmUpStockCache()).isZero();
+        verify(redisUtil, never()).setWithJitter(any(), any(), anyLong(), any(), anyLong());
+    }
+
+    @Test
     void testCountBySpuIds_GroupsBySpu_ExcludesDeleted() {
         Sku sku3 = new Sku();
         sku3.setId(3L);
@@ -844,6 +870,15 @@ class SkuServiceImplTest {
                 eq(0L),
                 eq(100L),
                 any())).thenReturn(stock);
+    }
+
+    private Sku skuWithStock(Long id, Integer stock) {
+        Sku sku = new Sku();
+        sku.setId(id);
+        sku.setStock(stock);
+        sku.setDeleteTime(0L);
+        sku.setStatus(1);
+        return sku;
     }
 
     private SpecVO spec(Long templateId, Long itemId) {

@@ -186,6 +186,21 @@ public class SkuServiceImpl implements SkuService {
         }
     }
 
+    @Override
+    public int warmUpStockCache() {
+        LambdaQueryWrapper<Sku> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Sku::getDeleteTime, 0).eq(Sku::getStatus, 1);
+        int count = 0;
+        for (Sku sku : skuMapper.selectList(wrapper)) {
+            if (sku.getStock() != null && sku.getStock() > 0) {
+                redisUtil.setWithJitter(stockCacheKeys.stockKey(sku.getId()), sku.getStock(),
+                        RedisConstants.SKU_STOCK_TTL_SECONDS, TimeUnit.SECONDS, 0L);
+                count++;
+            }
+        }
+        return count;
+    }
+
     private List<Sku> loadStocksFromDb(Collection<Long> skuIds) {
         return skuMapper.selectBatchIds(skuIds);
     }
