@@ -308,6 +308,51 @@ class PricingIdentityHttpTest {
     }
 
     @Test
+    void checkoutBelowOneCentIsRejectedBeforeOrderAndPaymentRecord() {
+        LoginSession session = login(1L);
+        assignLevel(session.userId());
+        session = login(CUSTOM_LEVEL_ID);
+        insertAddressAndLogistics(session.userId());
+
+        // 25.00 × 0.0001 = 0.0025，等级结算价取整后为 0.00
+        LevelCategoryRate rate = levelCategoryRateMapper.selectOne(
+                new LambdaQueryWrapper<LevelCategoryRate>()
+                        .eq(LevelCategoryRate::getLevelId, CUSTOM_LEVEL_ID)
+                        .eq(LevelCategoryRate::getCategoryId, CATEGORY_ID));
+        rate.setRate(new BigDecimal("0.0001"));
+        levelCategoryRateMapper.updateById(rate);
+        redisUtil.delete(RedisConstants.PREFIX_PRICING_LEVEL + CUSTOM_LEVEL_ID);
+        Long paymentCountBefore = paymentRecordMapper.selectCount(new LambdaQueryWrapper<>());
+
+        JsonNode previewResponse = postJson(
+                "/api/user/order/preview",
+                Map.of("items", List.of(Map.of("skuId", 9301L, "quantity", 1))),
+                session.token(), null);
+        assertThat(previewResponse.path("code").asInt()).isNotEqualTo(200);
+        assertThat(previewResponse.path("message").asText())
+                .contains("订单金额低于 0.01 元")
+                .doesNotContain("创建支付订单失败");
+
+        JsonNode createResponse = postJson(
+                "/api/user/order/create",
+                Map.of(
+                        "items", List.of(Map.of("skuId", 9301L, "quantity", 1)),
+                        "addressId", ADDRESS_ID,
+                        "logisticsId", LOGISTICS_ID,
+                        "expectedPayAmount", new BigDecimal("0.00")),
+                session.token(), "http-below-cent");
+        assertThat(createResponse.path("code").asInt()).isNotEqualTo(200);
+        assertThat(createResponse.path("message").asText()).contains("订单金额低于 0.01 元");
+
+        assertThat(orderMapper.selectCount(new LambdaQueryWrapper<Order>()
+                .eq(Order::getUserId, session.userId()))).isZero();
+        assertThat(paymentRecordMapper.selectCount(new LambdaQueryWrapper<>()))
+                .isEqualTo(paymentCountBefore);
+        assertThat(orderIdempotencyMapper.selectByUserAndKey(session.userId(), "http-below-cent").getState())
+                .isEqualTo(OrderIdempotency.STATE_FAILED);
+    }
+
+    @Test
     void orderTransactionRollsBackEarlierStockDeductionAndReleasesIdempotencyKey() {
         LoginSession session = login(1L);
         assignLevel(session.userId());

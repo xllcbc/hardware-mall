@@ -87,6 +87,22 @@ class PayServiceMoneyContractTest {
     }
 
     @Test
+    void prepayRejectsZeroOrderAmountBeforeCreatingPaymentRecord() {
+        Order order = newOrder("0.00");
+        when(orderMapper.selectById(order.getId())).thenReturn(order);
+        when(userMapper.selectById(order.getUserId())).thenReturn(newUser(order.getUserId()));
+        when(transactionManager.getTransaction(any())).thenReturn(transactionStatus);
+
+        assertThatThrownBy(() -> payService.prepay(order.getUserId(), order.getId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("订单金额低于 0.01 元")
+                .hasMessageNotContaining("创建支付订单失败");
+
+        verify(paymentRecordMapper, never()).insert(any(PaymentRecord.class));
+        verifyNoInteractions(wechatPayGateway);
+    }
+
+    @Test
     void prepayRejectsSubCentOrderAmountWithoutCallingGateway() {
         Order order = newOrder("88.881");
         when(orderMapper.selectById(order.getId())).thenReturn(order);

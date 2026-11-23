@@ -18,4 +18,5 @@ public class CartItemVO implements Serializable {
     private BigDecimal minPrice;
     private BigDecimal maxPrice;
     private Integer stock;
+    private boolean sellable;
 }

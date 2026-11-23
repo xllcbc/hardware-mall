@@ -15,6 +15,12 @@ public final class MoneyUtil {
 
     private static final int CENTS_SCALE = 2;
 
+    /**
+     * 人民币最小可支付单位（1 分）。低于此值的金额任何支付渠道都无法收款，
+     * 结算与支付都必须在创建订单/支付记录前拒绝。
+     */
+    public static final long MIN_PAYABLE_CENTS = 1L;
+
     private MoneyUtil() {
     }
 

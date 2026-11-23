@@ -18,8 +18,8 @@
       </view>
 
       <scroll-view class="cart-list" scroll-y>
-        <view class="cart-item" v-for="item in cartStore.items" :key="item.skuId">
-          <view class="item-checkbox" @tap="toggleSelect(item)">
+        <view class="cart-item" v-for="item in cartStore.items" :key="item.skuId" :class="{ unsellable: item.sellable === false }">
+          <view class="item-checkbox" :class="{ disabled: item.sellable === false && !manageMode }" @tap="toggleSelect(item)">
             <view class="checkbox" :class="{ checked: item.selected }">
               <text v-if="item.selected" class="check-icon">✓</text>
             </view>
@@ -34,15 +34,18 @@
               <text v-if="item.stock === 0" class="soldout-badge">已售罄</text>
               <view class="item-bottom">
                 <view class="item-price">
-                  <text class="price-symbol">¥</text>
-                  <text class="price-value">{{ item.price.toFixed(2) }}</text>
+                  <text v-if="item.sellable === false" class="unsellable-text">暂不可售</text>
+                  <template v-else>
+                    <text class="price-symbol">¥</text>
+                    <text class="price-value">{{ formatPrice(item.price) }}</text>
+                  </template>
                 </view>
                 <CountStepper
                   v-if="!manageMode"
                   :model-value="item.quantity"
                   :min="1"
                   :max="item.stock ?? 99"
-                  :disabled="item.stock === 0"
+                  :disabled="item.sellable === false || item.stock === 0"
                   @update:model-value="updateQuantity(item, $event)"
                 />
               </view>
@@ -79,7 +82,7 @@
           </template>
           <template v-else>
             <view class="favorite-btn" @tap="moveToFavorites">添加收藏</view>
-            <view class="delete-btn" :class="{ disabled: !cartStore.selectedItems.length }" @tap="deleteSelected">
+            <view class="delete-btn" :class="{ disabled: !cartStore.pickedItems.length }" @tap="deleteSelected">
               删除
             </view>
           </template>
@@ -133,9 +136,15 @@ const goLogin = () => {
   uni.navigateTo({ url: '/pages/login/index' })
 }
 
-const isSelectAll = computed(() =>
-  cartStore.items.length > 0 && cartStore.items.every(item => item.selected)
+const selectableItems = computed(() =>
+  manageMode.value ? cartStore.items : cartStore.sellableItems
 )
+
+const isSelectAll = computed(() =>
+  selectableItems.value.length > 0 && selectableItems.value.every(item => item.selected)
+)
+
+const formatPrice = (price: number | null) => (price ?? 0).toFixed(2)
 
 const goShopping = () => {
   uni.switchTab({ url: '/pages/index/index' })
@@ -148,15 +157,21 @@ const goProductDetail = (id: number) => {
 
 const toggleManageMode = () => {
   manageMode.value = !manageMode.value
+  if (!manageMode.value) {
+    cartStore.items
+      .filter(item => item.sellable === false)
+      .forEach(item => { item.selected = false })
+  }
 }
 
 const toggleSelect = (item: CartItem) => {
+  if (item.sellable === false && !manageMode.value && !item.selected) return
   item.selected = !item.selected
 }
 
 const toggleSelectAll = () => {
   const allSelected = isSelectAll.value
-  cartStore.items.forEach(item => {
+  selectableItems.value.forEach(item => {
     item.selected = !allSelected
   })
 }
@@ -166,13 +181,14 @@ const updateQuantity = (item: CartItem, quantity: number) => {
 }
 
 const deleteSelected = () => {
-  if (!cartStore.selectedItems.length) return
+  const pickedItems = cartStore.pickedItems
+  if (!pickedItems.length) return
   uni.showModal({
     title: '提示',
-    content: `确定删除选中的 ${cartStore.selectedItems.length} 件商品?`,
+    content: `确定删除选中的 ${pickedItems.length} 件商品?`,
     success: (res) => {
       if (res.confirm) {
-        const itemsToDelete = [...cartStore.selectedItems]
+        const itemsToDelete = [...pickedItems]
         itemsToDelete.forEach(item => {
           cartStore.removeItem(item.skuId)
         })
@@ -182,7 +198,7 @@ const deleteSelected = () => {
 }
 
 const moveToFavorites = () => {
-  const selectedItems = cartStore.selectedItems
+  const selectedItems = cartStore.pickedItems.filter(item => item.sellable !== false)
   if (selectedItems.length === 0) {
     uni.showToast({ title: '请先选择商品', icon: 'none' })
     return
@@ -192,7 +208,7 @@ const moveToFavorites = () => {
       id: item.productId,
       name: item.productName,
       image: item.productImage,
-      minPrice: item.minPrice || item.price,
+      minPrice: item.minPrice ?? item.price,
       originalPrice: item.maxPrice
     })
   })
@@ -341,6 +357,20 @@ const goCheckout = async () => {
   color: #E53935;
   background: #FFEBEE;
   border-radius: 6rpx;
+}
+
+.unsellable-text {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #999999;
+}
+
+.cart-item.unsellable {
+  opacity: 0.7;
+}
+
+.item-checkbox.disabled {
+  opacity: 0.4;
 }
 
 .item-bottom {

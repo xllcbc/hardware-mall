@@ -13,11 +13,14 @@ import com.example.mystore.common.exception.PriceChangedException;
 import com.example.mystore.entity.db.*;
 import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;
+import com.example.mystore.entity.dto.LevelPricing;
+import com.example.mystore.entity.dto.LevelRateTable;
+import com.example.mystore.entity.dto.ProductPricingFacts;
 import com.example.mystore.entity.vo.CheckoutPreviewVO;
 import com.example.mystore.entity.vo.OrderVO;
-import com.example.mystore.entity.dto.PricingRateResolution;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.CartService;
+import com.example.mystore.service.LevelPricingService;
 import com.example.mystore.service.OrderIdempotencyService;
 import com.example.mystore.service.OrderIdempotencyService.ClaimOutcome;
 import com.example.mystore.service.PayService;
@@ -47,7 +50,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -95,6 +100,8 @@ class OrderServiceImplTest {
     private WechatOrderShippingService wechatOrderShippingService;
     @Mock
     private PricingRuleService pricingRuleService;
+    @Mock
+    private LevelPricingService levelPricingService;
     @Mock
     private UserLevelService userLevelService;
     @Mock
@@ -153,10 +160,27 @@ class OrderServiceImplTest {
         spu.setName("防盗门锁 C级");
         spu.setSalesCount(52);
         spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
-        lenient().when(pricingRuleService.rateFor(any(), any(), anyBoolean()))
-                .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
         lenient().when(pricingRuleService.resolveRetailLevelId()).thenReturn(1L);
-        lenient().when(userLevelService.getName(any())).thenReturn("零售");
+        lenient().when(levelPricingService.priceAll(any(), anyList())).thenAnswer(inv -> {
+            Long levelId = inv.getArgument(0);
+            List<ProductPricingFacts> facts = inv.getArgument(1);
+            Long effectiveLevelId = levelId == null ? 1L : levelId;
+            return facts.stream()
+                    .map(fact -> LevelPricing.priced(
+                            effectiveLevelId,
+                            BigDecimal.ONE,
+                            fact.basePriceMin(),
+                            fact.basePriceMax()))
+                    .toList();
+        });
+        lenient().when(userLevelService.getNames(anyCollection())).thenAnswer(inv -> {
+            Collection<Long> levelIds = inv.getArgument(0);
+            Map<Long, String> names = new HashMap<>();
+            for (Long levelId : levelIds) {
+                names.put(levelId, levelId == 2L ? "批发A" : "零售");
+            }
+            return names;
+        });
         lenient().when(orderIdempotencyService.claim(anyLong(), anyString(), anyString()))
                 .thenReturn(new ClaimOutcome(
                         ClaimOutcome.Kind.ACQUIRED, 10L, "owner-token", null, true));
@@ -421,8 +445,10 @@ class OrderServiceImplTest {
     void previewOrder_customLevel_returnsServerSettlementWithoutWriting() {
         UserContext.setLevelId(2L);
         try {
-            when(pricingRuleService.rateFor(2L, 1L, false))
-                    .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
+            when(levelPricingService.priceAll(eq(2L), anyList()))
+                    .thenReturn(List.of(LevelPricing.priced(
+                            2L, new BigDecimal("0.8000"),
+                            new BigDecimal("175.20"), new BigDecimal("175.20"))));
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
             when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
 
@@ -452,8 +478,8 @@ class OrderServiceImplTest {
     void previewOrder_gapIsRejected() {
         UserContext.setLevelId(2L);
         try {
-            when(pricingRuleService.rateFor(2L, 1L, false))
-                    .thenReturn(PricingRateResolution.missing(2L));
+            when(levelPricingService.priceAll(eq(2L), anyList()))
+                    .thenReturn(List.of(LevelPricing.missing(2L)));
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
             when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
 
@@ -465,7 +491,8 @@ class OrderServiceImplTest {
 
             assertThatThrownBy(() -> orderService.previewOrder(request))
                     .isInstanceOf(RuntimeException.class)
-                    .hasMessageContaining("商品暂不可售");
+                    .hasMessageContaining("商品暂不可售")
+                    .hasMessageContaining("防盗门锁 C级");
             verify(orderMapper, never()).insert(any(Order.class));
             verify(skuService, never()).deductStock(anyLong(), anyInt());
         } finally {
@@ -474,12 +501,111 @@ class OrderServiceImplTest {
     }
 
     @Test
+    void previewOrder_zeroAmountIsRejected() {
+        when(levelPricingService.priceAll(any(), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE,
+                        new BigDecimal("0.00"), new BigDecimal("0.00"))));
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(3);
+        CheckoutPreviewRequest request = new CheckoutPreviewRequest();
+        request.setItems(List.of(line));
+
+        assertThatThrownBy(() -> orderService.previewOrder(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("订单金额低于 0.01 元")
+                .hasMessageNotContaining("创建支付订单失败");
+    }
+
+    @Test
+    void previewOrder_subCentSettlementAmountIsRejected() {
+        // 等级结算价按契约已取整到分；这里模拟任何非法子分来源穿透到结算，
+        // 断言结算边界仍以业务错误失败关闭，而不是 ArithmeticException 或网关失败
+        when(levelPricingService.priceAll(any(), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE,
+                        new BigDecimal("0.004"), new BigDecimal("0.004"))));
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(2);
+        CheckoutPreviewRequest request = new CheckoutPreviewRequest();
+        request.setItems(List.of(line));
+
+        assertThatThrownBy(() -> orderService.previewOrder(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("订单金额非法")
+                .hasMessageNotContaining("创建支付订单失败");
+    }
+
+    @Test
+    void createOrder_zeroAmountIsRejectedBeforePaymentIsInitiated() {
+        when(addressMapper.selectById(1L)).thenReturn(address);
+        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+        when(levelPricingService.priceAll(any(), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE,
+                        new BigDecimal("0.00"), new BigDecimal("0.00"))));
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(2);
+        CreateOrderRequest request = new CreateOrderRequest();
+        request.setAddressId(1L);
+        request.setLogisticsId(1L);
+        request.setItems(List.of(line));
+        request.setExpectedPayAmount(new BigDecimal("0.00"));
+
+        assertThatThrownBy(() -> orderService.createOrder(2L, request, "zero-key"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("订单金额低于 0.01 元")
+                .hasMessageNotContaining("创建支付订单失败");
+
+        // 没有订单就没有可支付对象：不建单、不扣库存、不进入任何支付调用
+        verify(orderMapper, never()).insert(any(Order.class));
+        verify(skuService, never()).deductStock(anyLong(), anyInt());
+        verifyNoInteractions(payService);
+        verify(orderIdempotencyService).markFailed(10L, "owner-token");
+        verify(orderIdempotencyService).releaseLock(2L, "zero-key", "owner-token", true);
+    }
+
+    @Test
+    void previewOrder_oneCentAmountIsAccepted() {
+        when(levelPricingService.priceAll(any(), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE,
+                        new BigDecimal("0.01"), new BigDecimal("0.01"))));
+        when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
+        when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
+
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(5L);
+        line.setQuantity(1);
+        CheckoutPreviewRequest request = new CheckoutPreviewRequest();
+        request.setItems(List.of(line));
+
+        CheckoutPreviewVO preview = orderService.previewOrder(request);
+
+        assertThat(preview.getPayAmount()).isEqualByComparingTo("0.01");
+    }
+
+    @Test
     void previewOrder_excludeDiscountResolvesRetailRate() {
         UserContext.setLevelId(2L);
         try {
             spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
-            when(pricingRuleService.rateFor(2L, 1L, true))
-                    .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
+            when(levelPricingService.priceAll(eq(2L), anyList()))
+                    .thenReturn(List.of(LevelPricing.priced(
+                            1L, BigDecimal.ONE,
+                            new BigDecimal("219.00"), new BigDecimal("219.00"))));
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
             when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu));
 
@@ -493,7 +619,17 @@ class OrderServiceImplTest {
 
             assertThat(preview.getItems().get(0).getPrice()).isEqualByComparingTo("219.00");
             assertThat(preview.getPayAmount()).isEqualByComparingTo("438.00");
-            verify(pricingRuleService).rateFor(2L, 1L, true);
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<ProductPricingFacts>> factsCaptor =
+                    ArgumentCaptor.forClass((Class) List.class);
+            verify(levelPricingService).priceAll(eq(2L), factsCaptor.capture());
+            assertThat(factsCaptor.getValue())
+                    .singleElement()
+                    .satisfies(facts -> {
+                        assertThat(facts.categoryId()).isEqualTo(1L);
+                        assertThat(facts.basePriceMin()).isEqualByComparingTo("219.00");
+                        assertThat(facts.excludeDiscount()).isTrue();
+                    });
         } finally {
             UserContext.clear();
         }
@@ -503,8 +639,8 @@ class OrderServiceImplTest {
     void createOrder_gapIsRejectedBeforeWriting() {
         UserContext.setLevelId(2L);
         try {
-            when(pricingRuleService.rateFor(2L, 1L, false))
-                    .thenReturn(PricingRateResolution.missing(2L));
+            when(levelPricingService.priceAll(eq(2L), anyList()))
+                    .thenReturn(List.of(LevelPricing.missing(2L)));
                 when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
@@ -520,7 +656,8 @@ class OrderServiceImplTest {
 
             assertThatThrownBy(() -> orderService.createOrder(2L, request, "gap-key"))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("商品暂不可售");
+                    .hasMessageContaining("商品暂不可售")
+                    .hasMessageContaining("防盗门锁 C级");
 
             verify(orderMapper, never()).insert(any(Order.class));
             verify(skuService, never()).deductStock(anyLong(), anyInt());
@@ -537,8 +674,10 @@ class OrderServiceImplTest {
         UserContext.setLevelId(2L);
         try {
             spu.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
-            when(pricingRuleService.rateFor(2L, 1L, true))
-                    .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
+            when(levelPricingService.priceAll(eq(2L), anyList()))
+                    .thenReturn(List.of(LevelPricing.priced(
+                            1L, BigDecimal.ONE,
+                            new BigDecimal("219.00"), new BigDecimal("219.00"))));
                 when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
@@ -587,8 +726,10 @@ class OrderServiceImplTest {
     void createOrder_priceChanged_returnsLatestPreviewAndReleasesIdempotencyKey() {
         UserContext.setLevelId(2L);
         try {
-            when(pricingRuleService.rateFor(2L, 1L, false))
-                    .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
+            when(levelPricingService.priceAll(eq(2L), anyList()))
+                    .thenReturn(List.of(LevelPricing.priced(
+                            2L, new BigDecimal("0.8000"),
+                            new BigDecimal("175.20"), new BigDecimal("175.20"))));
                 when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
             when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
@@ -1071,8 +1212,10 @@ class OrderServiceImplTest {
     @Test
     @SuppressWarnings("unchecked")
     void orderWithoutLevelContextPricesAtRetail() {
-        when(pricingRuleService.rateFor(isNull(), eq(1L), eq(false)))
-                .thenReturn(PricingRateResolution.resolved(1L, BigDecimal.ONE));
+        when(levelPricingService.priceAll(isNull(), anyList()))
+                .thenReturn(List.of(LevelPricing.priced(
+                        1L, BigDecimal.ONE,
+                        new BigDecimal("219.00"), new BigDecimal("219.00"))));
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
         when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
@@ -1119,8 +1262,10 @@ class OrderServiceImplTest {
     void customLevel_getsDiscountedPriceAndSnapshot() {
         UserContext.setLevelId(2L);
         try {
-            when(pricingRuleService.rateFor(2L, 1L, false))
-                    .thenReturn(PricingRateResolution.resolved(2L, new BigDecimal("0.8000")));
+            when(levelPricingService.priceAll(eq(2L), anyList()))
+                    .thenReturn(List.of(LevelPricing.priced(
+                            2L, new BigDecimal("0.8000"),
+                            new BigDecimal("20.00"), new BigDecimal("20.00"))));
                 when(addressMapper.selectById(1L)).thenReturn(address);
             when(logisticsMapper.selectById(1L)).thenReturn(logistics);
 
@@ -1250,6 +1395,203 @@ class OrderServiceImplTest {
         } finally {
             UserContext.clear();
         }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void orderSnapshotFieldsAllComeFromOneLevelPricingResult() {
+        UserContext.setLevelId(2L);
+        try {
+            Sku skuB = new Sku();
+            skuB.setId(6L);
+            skuB.setSpuId(2L);
+            skuB.setPrice(new BigDecimal("219.00"));
+            skuB.setStock(10);
+            skuB.setStatus(1);
+
+            Spu spuB = new Spu();
+            spuB.setId(2L);
+            spuB.setCategoryId(1L);
+            spuB.setName("不锈钢合页");
+            spuB.setExcludeDiscount(DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+
+            when(levelPricingService.priceAll(eq(2L), anyList()))
+                    .thenReturn(List.of(
+                            LevelPricing.priced(7L, new BigDecimal("0.6500"),
+                                    new BigDecimal("142.35"), new BigDecimal("142.35")),
+                            LevelPricing.priced(7L, new BigDecimal("0.6500"),
+                                    new BigDecimal("142.35"), new BigDecimal("142.35"))));
+            when(userLevelService.getNames(anyCollection())).thenReturn(Map.of(7L, "工程客户"));
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+            when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku, 6L, skuB));
+            when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu, spuB));
+            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+                inv.getArgument(0, Order.class).setId(100L);
+                return 1;
+            });
+            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
+                Order order = new Order();
+                order.setId(100L);
+                order.setUserId(2L);
+                order.setOrderNo("SO1");
+                order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+                order.setAddressId(1L);
+                order.setLogisticsId(1L);
+                return order;
+            });
+            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+            CreateOrderRequest.CartItem first = new CreateOrderRequest.CartItem();
+            first.setSkuId(5L);
+            first.setQuantity(1);
+            CreateOrderRequest.CartItem second = new CreateOrderRequest.CartItem();
+            second.setSkuId(6L);
+            second.setQuantity(1);
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+            request.setItems(List.of(first, second));
+            request.setExpectedPayAmount(new BigDecimal("284.70"));
+
+            orderService.createOrder(2L, request, "snapshot-key");
+
+            ArgumentCaptor<List<OrderItem>> captor = ArgumentCaptor.forClass(List.class);
+            verify(orderItemMapper).insertBatch(captor.capture());
+            assertThat(captor.getValue()).allSatisfy(item -> {
+                assertThat(item.getLevelId()).isEqualTo(7L);
+                assertThat(item.getLevelName()).isEqualTo("工程客户");
+                assertThat(item.getPricingRate()).isEqualByComparingTo("0.6500");
+                assertThat(item.getPrice()).isEqualByComparingTo("142.35");
+                assertThat(item.getSubtotal()).isEqualByComparingTo("142.35");
+            });
+
+            verify(levelPricingService, times(1)).priceAll(eq(2L), anyList());
+            ArgumentCaptor<Collection<Long>> levelIdsCaptor = ArgumentCaptor.forClass((Class) Collection.class);
+            verify(userLevelService, times(1)).getNames(levelIdsCaptor.capture());
+            assertThat(levelIdsCaptor.getValue()).containsOnly(7L);
+            verify(userLevelService, never()).getName(any());
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    /**
+     * 切换前（逐项 rateFor → 单价取整 → 乘数量）记录的订单金额黄金值，切换后必须逐分一致。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void settlementAmountsMatchPreSwitchGoldenValues() {
+        UserContext.setLevelId(2L);
+        try {
+            LevelPricingService realLevelPricing =
+                    new LevelPricingServiceImpl(pricingRuleService, priceService);
+            ReflectionTestUtils.setField(orderService, "levelPricingService", realLevelPricing);
+            when(pricingRuleService.rateTable(2L)).thenReturn(new LevelRateTable(
+                    2L, Map.of(1L, new BigDecimal("0.8000"), 10L, new BigDecimal("1.0000"))));
+            when(pricingRuleService.rateTable(1L)).thenReturn(new LevelRateTable(
+                    1L, Map.of(1L, BigDecimal.ONE, 10L, BigDecimal.ONE)));
+
+            Sku skuB = sku(6L, 2L, "19.99");
+            Sku skuC = sku(7L, 3L, "10.00");
+            Sku skuD = sku(8L, 4L, "25.00");
+
+            Spu spuB = spu(2L, 1L, "不锈钢合页", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+            Spu spuC = spu(3L, 10L, "膨胀螺丝", DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+            Spu spuD = spu(4L, 1L, "不参与折扣商品", DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
+
+            when(addressMapper.selectById(1L)).thenReturn(address);
+            when(logisticsMapper.selectById(1L)).thenReturn(logistics);
+            when(skuService.getSkuMapByIds(any()))
+                    .thenReturn(Map.of(5L, sku, 6L, skuB, 7L, skuC, 8L, skuD));
+            when(spuMapper.selectBatchIds(any())).thenReturn(List.of(spu, spuB, spuC, spuD));
+            when(skuService.deductStock(anyLong(), anyInt())).thenReturn(true);
+            when(orderMapper.insert(any(Order.class))).thenAnswer(inv -> {
+                inv.getArgument(0, Order.class).setId(100L);
+                return 1;
+            });
+            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
+                Order order = new Order();
+                order.setId(100L);
+                order.setUserId(2L);
+                order.setOrderNo("SO1");
+                order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
+                order.setAddressId(1L);
+                order.setLogisticsId(1L);
+                return order;
+            });
+            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+            CreateOrderRequest request = new CreateOrderRequest();
+            request.setAddressId(1L);
+            request.setLogisticsId(1L);
+            request.setItems(List.of(
+                    line(5L, 2),
+                    line(6L, 3),
+                    line(7L, 1),
+                    line(8L, 2)));
+            request.setExpectedPayAmount(new BigDecimal("458.37"));
+
+            orderService.createOrder(2L, request, "golden-key");
+
+            ArgumentCaptor<List<OrderItem>> itemCaptor = ArgumentCaptor.forClass(List.class);
+            verify(orderItemMapper).insertBatch(itemCaptor.capture());
+            assertThat(itemCaptor.getValue()).extracting(OrderItem::getPrice)
+                    .containsExactly(
+                            new BigDecimal("175.20"),
+                            new BigDecimal("15.99"),
+                            new BigDecimal("10.00"),
+                            new BigDecimal("25.00"));
+            assertThat(itemCaptor.getValue()).extracting(OrderItem::getSubtotal)
+                    .containsExactly(
+                            new BigDecimal("350.40"),
+                            new BigDecimal("47.97"),
+                            new BigDecimal("10.00"),
+                            new BigDecimal("50.00"));
+            assertThat(itemCaptor.getValue()).extracting(OrderItem::getLevelId)
+                    .containsExactly(2L, 2L, 2L, 1L);
+            assertThat(itemCaptor.getValue()).extracting(OrderItem::getPricingRate)
+                    .usingElementComparator(BigDecimal::compareTo)
+                    .containsExactly(
+                            new BigDecimal("0.8000"),
+                            new BigDecimal("0.8000"),
+                            new BigDecimal("1.0000"),
+                            BigDecimal.ONE);
+
+            ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
+            verify(orderMapper).insert(orderCaptor.capture());
+            assertThat(orderCaptor.getValue().getTotalAmount()).isEqualByComparingTo("458.37");
+            assertThat(orderCaptor.getValue().getPayAmount()).isEqualByComparingTo("458.37");
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    private Sku sku(Long id, Long spuId, String price) {
+        Sku result = new Sku();
+        result.setId(id);
+        result.setSpuId(spuId);
+        result.setPrice(new BigDecimal(price));
+        result.setStock(10);
+        result.setStatus(1);
+        return result;
+    }
+
+    private Spu spu(Long id, Long categoryId, String name, int excludeDiscount) {
+        Spu result = new Spu();
+        result.setId(id);
+        result.setCategoryId(categoryId);
+        result.setName(name);
+        result.setExcludeDiscount(excludeDiscount);
+        return result;
+    }
+
+    private CreateOrderRequest.CartItem line(Long skuId, int quantity) {
+        CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
+        line.setSkuId(skuId);
+        line.setQuantity(quantity);
+        return line;
     }
 
     @Test

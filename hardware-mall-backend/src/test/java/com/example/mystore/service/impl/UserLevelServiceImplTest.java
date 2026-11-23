@@ -10,13 +10,20 @@ import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.PricingRuleService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -116,6 +123,27 @@ class UserLevelServiceImplTest {
 
         verify(eventPublisher).publishEvent(new PricingCacheInvalidationEvent(
                 PricingCacheInvalidationEvent.Type.LEVEL_AVAILABILITY_CHANGED, 2L));
+    }
+
+    @Test
+    void getNames_readsDistinctLevelsInOneBatch() {
+        UserLevel retail = customLevel(1L);
+        retail.setName("零售");
+        UserLevel wholesale = customLevel(2L);
+        wholesale.setName("批发A");
+        when(userLevelMapper.selectBatchIds(anyCollection())).thenReturn(List.of(retail, wholesale));
+
+        Map<Long, String> names = userLevelService.getNames(List.of(2L, 1L, 2L));
+
+        assertThat(names)
+                .containsEntry(1L, "零售")
+                .containsEntry(2L, "批发A")
+                .hasSize(2);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Collection<Long>> idsCaptor = ArgumentCaptor.forClass((Class) Collection.class);
+        verify(userLevelMapper, times(1)).selectBatchIds(idsCaptor.capture());
+        assertThat(idsCaptor.getValue()).containsExactlyInAnyOrder(1L, 2L);
+        verify(userLevelMapper, never()).selectById(any());
     }
 
     private UserLevel customLevel(Long id) {
