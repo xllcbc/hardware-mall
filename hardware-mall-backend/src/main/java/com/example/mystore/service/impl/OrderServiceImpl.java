@@ -42,6 +42,7 @@ import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.UserLevelService;
 import com.example.mystore.service.WechatOrderShippingService;
+import com.example.mystore.util.MoneyUtil;
 import com.example.mystore.util.OrderRequestFingerprint;
 import com.example.mystore.util.RedisUtil;
 import com.example.mystore.util.UserContext;
@@ -659,7 +660,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private static long toCents(BigDecimal amount) {
-        return amount == null ? 0L : amount.movePointRight(2).longValue();
+        return amount == null ? 0L : MoneyUtil.yuanToCents(amount);
     }
 
     @Override

@@ -20,6 +20,7 @@ import com.example.mystore.service.PayService;
 import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.WechatPayGateway;
+import com.example.mystore.util.MoneyUtil;
 import com.wechat.pay.java.core.exception.ServiceException;
 import com.wechat.pay.java.core.notification.NotificationParser;
 import com.wechat.pay.java.core.notification.RequestParam;
@@ -34,7 +35,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -68,7 +68,7 @@ public class PayServiceImpl implements PayService {
                 .execute(status -> preparePrepay(userId, orderId));
 
         try {
-            return wechatPayGateway.prepay(prep.outTradeNo(), prep.amount(), prep.openid());
+            return wechatPayGateway.prepay(prep.outTradeNo(), prep.amountInCents(), prep.openid());
         } catch (Exception e) {
             log.error("微信统一下单失败, orderId={}, outTradeNo={}", orderId, prep.outTradeNo(), e);
             if (prep.closeOnFailure()) {
@@ -109,11 +109,17 @@ public class PayServiceImpl implements PayService {
             throw new BusinessException("用户信息异常，请重新登录");
         }
 
+        // 金额在事务内先换算：子分/负数直接回滚，不留下支付记录，也不把业务错误包装成网关失败
+        long amountInCents = MoneyUtil.yuanToCents(order.getPayAmount());
+        if (amountInCents > WechatConstants.Pay.MAX_TOTAL_CENTS) {
+            throw new BusinessException("订单金额超出微信支付上限");
+        }
+
         PaymentRecord existing = queryByOrderId(orderId);
         if (existing != null) {
             if (existing.getStatus() == PaymentRecord.STATUS_PENDING) {
                 // 复用既有 PENDING 记录(上次 prepay HTTP 失败可重试), 失败时不标 CLOSED
-                return new PendingPrepay(existing.getOutTradeNo(), user.getOpenid(), order.getPayAmount(), false);
+                return new PendingPrepay(existing.getOutTradeNo(), user.getOpenid(), amountInCents, false);
             }
             if (existing.getStatus() == PaymentRecord.STATUS_CLOSED) {
                 // CAS 回待支付: 并发下只有一方能把同一行重新激活
@@ -126,7 +132,7 @@ public class PayServiceImpl implements PayService {
                 if (reopened == 0) {
                     throw new BusinessException("支付记录状态已变化，请重试");
                 }
-                return new PendingPrepay(existing.getOutTradeNo(), user.getOpenid(), order.getPayAmount(), true);
+                return new PendingPrepay(existing.getOutTradeNo(), user.getOpenid(), amountInCents, true);
             }
             if (existing.getStatus() == PaymentRecord.STATUS_PAID) {
                 throw new BusinessException("订单已支付，无法重新发起支付");
@@ -150,10 +156,10 @@ public class PayServiceImpl implements PayService {
         record.setCreateTime(LocalDateTime.now());
         record.setUpdateTime(LocalDateTime.now());
         paymentRecordMapper.insert(record);
-        return new PendingPrepay(outTradeNo, user.getOpenid(), order.getPayAmount(), true);
+        return new PendingPrepay(outTradeNo, user.getOpenid(), amountInCents, true);
     }
 
-    private record PendingPrepay(String outTradeNo, String openid, BigDecimal amount, boolean closeOnFailure) {}
+    private record PendingPrepay(String outTradeNo, String openid, long amountInCents, boolean closeOnFailure) {}
 
     @Override
     public Map<String, String> callback(String body, String signature, String nonce, String timestamp, String serial) {
@@ -188,9 +194,11 @@ public class PayServiceImpl implements PayService {
                 return Map.of("code", "SUCCESS", "message", "成功");
             }
 
-            BigDecimal callbackAmount = new BigDecimal(totalAmount).divide(new BigDecimal("100"));
-            if (callbackAmount.compareTo(record.getAmount()) != 0) {
-                log.error("支付金额不一致, outTradeNo={}, 期望={}, 实际={}", outTradeNo, record.getAmount(), callbackAmount);
+            long expectedAmountInCents = MoneyUtil.yuanToCents(record.getAmount());
+            if (totalAmount.longValue() != expectedAmountInCents) {
+                log.error("支付金额不一致, outTradeNo={}, 期望={}分({}元), 实际={}分({}元)", outTradeNo,
+                        expectedAmountInCents, MoneyUtil.centsToYuan(expectedAmountInCents),
+                        totalAmount, MoneyUtil.centsToYuan(totalAmount));
                 return Map.of("code", "FAIL", "message", "支付金额不一致");
             }
 
@@ -398,6 +406,9 @@ public class PayServiceImpl implements PayService {
             throw new BusinessException("未找到已支付的支付记录");
         }
 
+        // 金额必须是合法整数分：子分/负数在认领前失败，不改变记录状态，也不静默截断
+        long amountInCents = MoneyUtil.yuanToCents(record.getAmount());
+
         // claim-first: CAS PAID→REFUNDING 提前到外呼之前。
         // 外呼结果未知(超时/响应丢失)时本地已记录"已发起", 由退款回调或对账查询判定最终结果。
         if (!claimPaidRefund(record)) {
@@ -409,7 +420,7 @@ public class PayServiceImpl implements PayService {
 
         String outRefundNo = "REFUND_" + record.getOutTradeNo();
         try {
-            wechatPayGateway.createRefund(record.getOutTradeNo(), outRefundNo, record.getAmount(), reason);
+            wechatPayGateway.createRefund(record.getOutTradeNo(), outRefundNo, amountInCents, reason);
             log.info("退款受理成功, orderId={}, outRefundNo={}, 待回调确认", orderId, outRefundNo);
             return RefundResult.ACCEPTED;
         } catch (Exception e) {
@@ -619,6 +630,17 @@ public class PayServiceImpl implements PayService {
      * 受理成功保持退款中; 确定失败回退; 结果未知保持退款中并告警。
      */
     private void resubmitRefund(PaymentRecord record, String outRefundNo) {
+        long amountInCents;
+        try {
+            amountInCents = MoneyUtil.yuanToCents(record.getAmount());
+        } catch (BusinessException e) {
+            // 金额非法属于本地校验失败，与微信明确拒绝同样处理：回退并告警，避免每轮对账静默重试
+            rollbackRefund(record, "退款对账金额非法: " + e.getMessage());
+            dingTalkAlertService.alert(PaymentAlertConstants.Alert.REFUND_DEFINITE_FAILED,
+                    record.getOrderId(), "订单=" + record.getOrderId() + " 退款对账金额非法已回退, outRefundNo="
+                            + outRefundNo + ", error=" + e.getMessage());
+            return;
+        }
         if (record.getStatus() == PaymentRecord.STATUS_PAID && !claimPaidRefund(record)) {
             log.info("退款对账: 支付记录已被并发处理, 跳过补发, orderId={}", record.getOrderId());
             return;
@@ -626,7 +648,7 @@ public class PayServiceImpl implements PayService {
 
         try {
             wechatPayGateway.createRefund(record.getOutTradeNo(), outRefundNo,
-                    record.getAmount(), RECONCILE_REFUND_REASON);
+                    amountInCents, RECONCILE_REFUND_REASON);
             log.info("退款对账: 补发退款受理成功, orderId={}, outRefundNo={}",
                     record.getOrderId(), outRefundNo);
         } catch (Exception e) {
