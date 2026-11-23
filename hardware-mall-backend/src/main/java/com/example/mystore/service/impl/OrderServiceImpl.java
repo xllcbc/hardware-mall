@@ -17,7 +17,6 @@ import com.example.mystore.entity.db.Spu;
 import com.example.mystore.entity.db.Address;
 import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.entity.db.Cart;
-import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.entity.vo.OrderVO;
 import com.example.mystore.entity.vo.CheckoutItemVO;
 import com.example.mystore.entity.vo.CheckoutPreviewVO;
@@ -36,7 +35,6 @@ import com.example.mystore.service.OrderLifecycleService;
 import com.example.mystore.service.OrderQueryService;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
-import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.UserLevelService;
 import com.example.mystore.util.MoneyUtil;
@@ -454,66 +452,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public void refundOrder(Long orderId, String reason) {
-        // null 守卫必须在 CAS claim 之前: claim 是单条 UPDATE 自动提交, 事后报错回滚不了"退款中"状态
-        if (payService == null) {
-            throw new BusinessException("支付服务未启用，无法退款");
-        }
-        Order order = orderMapper.selectById(orderId);
-        if (order == null) {
-            throw new BusinessException("订单不存在");
-        }
-        // 已取消订单的迟到支付: 只校验最新支付记录已支付后直接退款, 订单保持 5
-        if (order.getStatus() == StatusConstants.ORDER_CANCELLED) {
-            retryCancelledOrderRefund(orderId, reason);
-            return;
-        }
-        // 预检: 明显错状态直接报错 (CAS 才是权威并发守卫, 预检仅为友好提示)
-        // 8(退款申请中) 视为管理员审核通过; 9(退款失败) 允许管理员重试: 沿用同一 CAS 占位链路 →6→微信退款→回调→7
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT
-                && order.getStatus() != StatusConstants.ORDER_SHIPPED
-                && order.getStatus() != StatusConstants.ORDER_REFUND_REQUESTED
-                && order.getStatus() != StatusConstants.ORDER_REFUND_FAILED) {
-            throw new BusinessException("该订单状态不支持退款");
-        }
-
-        // claim-first: 先 CAS 占位 6(退款中), 命中 0 行说明状态被并发改走, 中止 (不退款不还库存)
-        // 此处不加 @Transactional: claim 是本方法唯一 DB 写(库存恢复已迁至退款回调), 单条 UPDATE 自动提交;
-        // 事务外的微信退款调用失败时 claim 已提交, status 保持 6 等回调自愈或人工对账
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .in(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT,
-                                StatusConstants.ORDER_SHIPPED, StatusConstants.ORDER_REFUND_REQUESTED,
-                                StatusConstants.ORDER_REFUND_FAILED)
-                        .set(Order::getStatus, StatusConstants.ORDER_REFUNDING)
-                        .set(Order::getCancelReason, reason)
-                        .set(Order::getCancelTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
-        log.info("订单置退款中, orderId={}, 等待微信退款回调确认", orderId);
-
-        handleRefundResult(orderId, payService.refund(orderId, reason));
-    }
-
-    private void retryCancelledOrderRefund(Long orderId, String reason) {
-        PaymentRecord latest = payService.queryByOrderId(orderId);
-        if (latest == null || latest.getStatus() != PaymentRecord.STATUS_PAID) {
-            throw new BusinessException("已取消订单的最新支付记录不是已支付状态，无法重试退款");
-        }
-        RefundResult result = payService.refund(orderId, reason);
-        log.info("已取消订单重试退款, orderId={}, result={}", orderId, result);
-        handleRefundResult(orderId, result);
-    }
-
-    private void handleRefundResult(Long orderId, RefundResult result) {
-        if (result == RefundResult.DEFINITE_FAILED) {
-            throw new BusinessException("退款确定失败：微信明确拒绝，支付记录已回退，请稍后重试");
-        }
-        if (result == RefundResult.UNKNOWN) {
-            log.warn("退款结果未知, 等待退款回调或对账确认, orderId={}", orderId);
-        }
+        orderLifecycleService.refundOrder(orderId, reason);
     }
 
     @Override

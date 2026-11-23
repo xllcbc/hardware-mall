@@ -63,6 +63,16 @@ public interface OrderLifecycleService {
     void shipOrder(Long orderId, Integer deliveryType, Long logisticsId);
 
     /**
+     * 管理员退款入口（含已取消订单重试）: 先 CAS 占位退款中(6), 再调用支付模块退款。
+     *
+     * <p>可发起状态: 待发货(2)/已发货(3)/退款申请中(8)/退款失败(9), 均占位为退款中;
+     * 已取消(5) 订单只校验最新支付记录为已支付后重试退款, 不推进订单状态。
+     * 确定失败抛可重试业务提示; 结果未知保持退款中, 等待退款回调或对账收敛。
+     * 本命令不加事务: 占位是单条 UPDATE, 外呼失败时占位已提交, 由回调自愈或人工对账。
+     */
+    void refundOrder(Long orderId, String reason);
+
+    /**
      * 小程序确认收货组件回调后确认收货: 先查微信 order_state 并记录,
      * 微信已确认(3)/交易完成(4)后再执行本地确认收货(3→4)。
      */

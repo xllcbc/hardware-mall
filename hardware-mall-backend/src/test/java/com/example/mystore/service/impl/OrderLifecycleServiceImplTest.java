@@ -9,14 +9,18 @@ import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
+import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.LogisticsMapper;
 import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
+import com.example.mystore.service.PayService;
+import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.WechatOrderShippingService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -25,6 +29,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.reflect.Method;
@@ -71,6 +76,8 @@ class OrderLifecycleServiceImplTest {
     private DingTalkAlertService dingTalkAlertService;
     @Mock
     private ApplicationEventPublisher applicationEventPublisher;
+    @Mock
+    private PayService payService;
 
     @InjectMocks
     private OrderLifecycleServiceImpl lifecycleService;
@@ -80,6 +87,13 @@ class OrderLifecycleServiceImplTest {
         // LambdaUpdateWrapper.set() 立即解析列名, 单测无 Spring 上下文需手动注册 Order 元数据
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Order.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), OrderItem.class);
+    }
+
+    @BeforeEach
+    void setUp() {
+        // payService 在实现类中是 @Autowired(required=false) 字段注入,
+        // @InjectMocks 走构造器注入不会覆盖它, 需手动注入
+        ReflectionTestUtils.setField(lifecycleService, "payService", payService);
     }
 
     // ==================== 确认收货 ====================
@@ -606,6 +620,235 @@ class OrderLifecycleServiceImplTest {
         assertThat(sqlSets.get(1)).contains("receive_time=");
     }
 
+    // ==================== 退款入口 ====================
+
+    @Test
+    void refundOrder_claimFirst_casBeforeRefund() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        when(payService.refund(1L, "质量问题")).thenReturn(RefundResult.ACCEPTED);
+
+        lifecycleService.refundOrder(1L, "质量问题");
+
+        InOrder inOrder = inOrder(orderMapper, payService);
+        inOrder.verify(orderMapper).update(isNull(), any());   // 先 CAS 占位
+        inOrder.verify(payService).refund(1L, "质量问题");      // 后调微信退款
+        assertThat(capturedUpdateValues())
+                .contains(StatusConstants.ORDER_PENDING_SHIPMENT,
+                        StatusConstants.ORDER_SHIPPED,
+                        StatusConstants.ORDER_REFUNDING,
+                        "质量问题");
+        assertThat(capturedSqlSet())
+                .contains("cancel_reason=")
+                .contains("cancel_time=");
+    }
+
+    @Test
+    void refundOrder_casMiss_throwsAndNoRefund() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+        when(orderMapper.update(isNull(), any())).thenReturn(0); // 竞态输了
+
+        assertThatThrownBy(() -> lifecycleService.refundOrder(1L, "质量问题"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单状态已变更，请刷新后重试");
+
+        verify(payService, never()).refund(any(), any()); // 未占位成功绝不退款
+    }
+
+    @Test
+    void refundOrder_doesNotRestoreStockOrPublishEvent() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        when(payService.refund(1L, "质量问题")).thenReturn(RefundResult.ACCEPTED);
+
+        lifecycleService.refundOrder(1L, "质量问题");
+
+        // 库存恢复已迁到退款回调(6→7 确认成功后), 退款入口不再还库存不发事件
+        verifyNoInteractions(skuService, applicationEventPublisher);
+    }
+
+    @Test
+    void refundOrder_refundThrows_propagatesButClaimed() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        doThrow(new RuntimeException("wechat error")).when(payService).refund(any(), any());
+
+        assertThatThrownBy(() -> lifecycleService.refundOrder(1L, "质量问题"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("wechat error");
+
+        verify(orderMapper).update(isNull(), any()); // claim 已提交, status 保持 6
+    }
+
+    @Test
+    void refundOrder_requestedStatus8_approved_casClaimIncludes8() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_REFUND_REQUESTED));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        when(payService.refund(1L, "同意退款")).thenReturn(RefundResult.ACCEPTED);
+
+        lifecycleService.refundOrder(1L, "同意退款");
+
+        // 预检放行状态 8; 占位为退款中后走既有微信退款链路
+        assertThat(capturedUpdateValues())
+                .contains(StatusConstants.ORDER_REFUND_REQUESTED, StatusConstants.ORDER_REFUNDING);
+        verify(payService).refund(1L, "同意退款");
+    }
+
+    @Test
+    void refundOrder_cancelledAndPaid_retriesRefundWithoutChangingOrderStatus() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_CANCELLED));
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+        when(payService.refund(1L, "管理员重试退款")).thenReturn(RefundResult.ACCEPTED);
+
+        lifecycleService.refundOrder(1L, "管理员重试退款");
+
+        // 已取消订单只校验最新支付记录, 不推进订单状态
+        verify(orderMapper, never()).update(any(), any());
+        verify(payService).refund(1L, "管理员重试退款");
+    }
+
+    @Test
+    void refundOrder_cancelledButUnpaid_rejectsWithoutRefund() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_CANCELLED));
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PENDING));
+
+        assertThatThrownBy(() -> lifecycleService.refundOrder(1L, "管理员重试退款"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不是已支付");
+
+        verify(payService, never()).refund(any(), any());
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_cancelledWithoutPaymentRecord_rejectsWithoutRefund() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_CANCELLED));
+        when(payService.queryByOrderId(1L)).thenReturn(null);
+
+        assertThatThrownBy(() -> lifecycleService.refundOrder(1L, "管理员重试退款"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不是已支付");
+
+        verify(payService, never()).refund(any(), any());
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_cancelledPaymentDefiniteFailure_returnsClearErrorAndKeepsOrderStatus() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_CANCELLED));
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+        when(payService.refund(1L, "管理员重试退款")).thenReturn(RefundResult.DEFINITE_FAILED);
+
+        assertThatThrownBy(() -> lifecycleService.refundOrder(1L, "管理员重试退款"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("退款确定失败");
+
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_cancelledPaymentResultUnknown_returnsNormally() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_CANCELLED));
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+        when(payService.refund(1L, "管理员重试退款")).thenReturn(RefundResult.UNKNOWN);
+
+        lifecycleService.refundOrder(1L, "管理员重试退款");
+
+        verify(payService).refund(1L, "管理员重试退款");
+        verify(orderMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void refundOrder_activePaymentDefiniteFailure_returnsClearError() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        when(payService.refund(1L, "质量问题")).thenReturn(RefundResult.DEFINITE_FAILED);
+
+        assertThatThrownBy(() -> lifecycleService.refundOrder(1L, "质量问题"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("退款确定失败：微信明确拒绝，支付记录已回退，请稍后重试");
+    }
+
+    @Test
+    void refundOrder_activePaymentResultUnknown_returnsNormally() {
+        when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, StatusConstants.ORDER_SHIPPED));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        when(payService.refund(1L, "质量问题")).thenReturn(RefundResult.UNKNOWN);
+
+        lifecycleService.refundOrder(1L, "质量问题");
+
+        verify(payService).refund(1L, "质量问题");
+    }
+
+    @Test
+    void refundOrder_legacyStatusesIncludingFailure9_keepCasRefundChain() {
+        // 状态 9(退款失败) 是历史状态: 管理员重试沿用同一 CAS 占位链路
+        for (int status : new int[]{
+                StatusConstants.ORDER_PENDING_SHIPMENT,
+                StatusConstants.ORDER_SHIPPED,
+                StatusConstants.ORDER_REFUND_REQUESTED,
+                StatusConstants.ORDER_REFUND_FAILED}) {
+            when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, status));
+            when(orderMapper.update(isNull(), any())).thenReturn(1);
+            when(payService.refund(1L, "质量问题")).thenReturn(RefundResult.ACCEPTED);
+
+            lifecycleService.refundOrder(1L, "质量问题");
+        }
+
+        verify(orderMapper, times(4)).update(isNull(), any());
+        verify(payService, times(4)).refund(1L, "质量问题");
+        assertThat(capturedUpdateValues(4))
+                .contains(StatusConstants.ORDER_PENDING_SHIPMENT,
+                        StatusConstants.ORDER_SHIPPED,
+                        StatusConstants.ORDER_REFUND_REQUESTED,
+                        StatusConstants.ORDER_REFUND_FAILED,
+                        StatusConstants.ORDER_REFUNDING);
+    }
+
+    @Test
+    void refundOrder_invalidStatus_rejectsBeforeCasClaim() {
+        int[] invalidStatuses = {
+                StatusConstants.ORDER_PENDING_PAYMENT,
+                StatusConstants.ORDER_COMPLETED,
+                StatusConstants.ORDER_REFUNDED
+        };
+        for (int status : invalidStatuses) {
+            when(orderMapper.selectById(1L)).thenReturn(orderWithStatus(1L, status));
+
+            assertThatThrownBy(() -> lifecycleService.refundOrder(1L, "质量问题"))
+                    .as("status=%d 应被拒绝", status)
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessage("该订单状态不支持退款");
+        }
+
+        verify(orderMapper, never()).update(any(), any());
+        verifyNoInteractions(payService);
+    }
+
+    @Test
+    void refundOrder_missingOrder_throwsOrderNotFound() {
+        when(orderMapper.selectById(1L)).thenReturn(null);
+
+        assertThatThrownBy(() -> lifecycleService.refundOrder(1L, "质量问题"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单不存在");
+
+        verify(orderMapper, never()).update(any(), any());
+        verifyNoInteractions(payService);
+    }
+
+    @Test
+    void refundOrder_payServiceMissing_throwsBeforeCasClaim() {
+        // payService 缺失时必须明确报错, 不得静默跳过; 且守卫在 CAS claim 之前, 订单不会卡"退款中"
+        ReflectionTestUtils.setField(lifecycleService, "payService", null);
+
+        assertThatThrownBy(() -> lifecycleService.refundOrder(1L, "质量问题"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("支付服务未启用，无法退款");
+
+        verifyNoInteractions(orderMapper); // 连 selectById 都未发生, 任何 DB 写都不允许
+    }
+
     // ==================== 用户取消 ====================
 
     @Test
@@ -796,6 +1039,16 @@ class OrderLifecycleServiceImplTest {
         order.setAddressId(1L);
         order.setLogisticsId(1L);
         return order;
+    }
+
+    private PaymentRecord paymentRecord(Long orderId, int status) {
+        PaymentRecord record = new PaymentRecord();
+        record.setOrderId(orderId);
+        record.setStatus(status);
+        record.setAmount(new java.math.BigDecimal("100.00"));
+        record.setOutTradeNo("OUT_" + orderId);
+        record.setCreateTime(LocalDateTime.now());
+        return record;
     }
 
     private java.util.List<Object> capturedUpdateValues() {

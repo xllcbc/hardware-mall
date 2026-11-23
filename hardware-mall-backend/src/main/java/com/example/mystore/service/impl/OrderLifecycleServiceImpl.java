@@ -9,15 +9,19 @@ import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.Logistics;
 import com.example.mystore.entity.db.Order;
 import com.example.mystore.entity.db.OrderItem;
+import com.example.mystore.entity.db.PaymentRecord;
 import com.example.mystore.event.StockCacheEvent;
 import com.example.mystore.mapper.LogisticsMapper;
 import com.example.mystore.mapper.OrderItemMapper;
 import com.example.mystore.mapper.OrderMapper;
 import com.example.mystore.service.OrderLifecycleService;
+import com.example.mystore.service.PayService;
+import com.example.mystore.service.RefundResult;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.WechatOrderShippingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,6 +60,13 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
     static final Set<Integer> DELETE_FROM = Set.of(
             StatusConstants.ORDER_COMPLETED, StatusConstants.ORDER_CANCELLED);
 
+    /** 管理员退款: 待发货/已发货/退款申请中/退款失败(9) 均可占位退款中 */
+    static final Set<Integer> REFUND_FROM = Set.of(
+            StatusConstants.ORDER_PENDING_SHIPMENT,
+            StatusConstants.ORDER_SHIPPED,
+            StatusConstants.ORDER_REFUND_REQUESTED,
+            StatusConstants.ORDER_REFUND_FAILED);
+
     static final String STATUS_CHANGED_MESSAGE = "订单状态已变更，请刷新后重试";
 
     private final OrderMapper orderMapper;
@@ -65,6 +76,10 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
     private final WechatOrderShippingService wechatOrderShippingService;
     private final DingTalkAlertService dingTalkAlertService;
     private final ApplicationEventPublisher applicationEventPublisher;
+
+    /** 支付服务可选注入: 未启用支付时退款必须明确报错, 不得静默跳过 */
+    @Autowired(required = false)
+    private PayService payService;
 
     @Override
     @Transactional
@@ -185,6 +200,57 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
                         .set(Order::getCancelTime, null));
         requireAffected(affected);
         log.info("管理员拒绝退款申请, orderId={}, 回退至状态{}, 原因: {}", orderId, targetStatus, rejectReason);
+    }
+
+    @Override
+    public void refundOrder(Long orderId, String reason) {
+        // null 守卫必须在 CAS 占位之前: 占位是单条 UPDATE 自动提交, 事后报错回滚不了"退款中"状态
+        if (payService == null) {
+            throw new BusinessException("支付服务未启用，无法退款");
+        }
+        Order order = requireOrder(orderId);
+        // 已取消订单的迟到支付: 只校验最新支付记录已支付后直接退款, 订单保持 5
+        if (order.getStatus() == StatusConstants.ORDER_CANCELLED) {
+            retryCancelledOrderRefund(orderId, reason);
+            return;
+        }
+        // 预检: 明显错状态直接报错 (CAS 才是权威并发守卫, 预检仅为友好提示)
+        // 8(退款申请中) 视为管理员审核通过; 9(退款失败) 允许管理员重试: 沿用同一 CAS 占位链路 →6→微信退款→回调→7
+        if (!REFUND_FROM.contains(order.getStatus())) {
+            throw new BusinessException("该订单状态不支持退款");
+        }
+
+        // claim-first: 先 CAS 占位 6(退款中), 命中 0 行说明状态被并发改走, 中止 (不退款不还库存)
+        // 此处不加 @Transactional: 占位是本方法唯一 DB 写(库存恢复已迁至退款回调), 单条 UPDATE 自动提交;
+        // 事务外的微信退款调用失败时占位已提交, status 保持 6 等回调自愈或人工对账
+        int affected = OrderStatusTransition.apply(
+                orderMapper, orderId, REFUND_FROM, StatusConstants.ORDER_REFUNDING,
+                wrapper -> wrapper
+                        .set(Order::getCancelReason, reason)
+                        .set(Order::getCancelTime, LocalDateTime.now()));
+        requireAffected(affected);
+        log.info("订单置退款中, orderId={}, 等待微信退款回调确认", orderId);
+
+        handleRefundResult(orderId, payService.refund(orderId, reason));
+    }
+
+    private void retryCancelledOrderRefund(Long orderId, String reason) {
+        PaymentRecord latest = payService.queryByOrderId(orderId);
+        if (latest == null || latest.getStatus() != PaymentRecord.STATUS_PAID) {
+            throw new BusinessException("已取消订单的最新支付记录不是已支付状态，无法重试退款");
+        }
+        RefundResult result = payService.refund(orderId, reason);
+        log.info("已取消订单重试退款, orderId={}, result={}", orderId, result);
+        handleRefundResult(orderId, result);
+    }
+
+    private void handleRefundResult(Long orderId, RefundResult result) {
+        if (result == RefundResult.DEFINITE_FAILED) {
+            throw new BusinessException("退款确定失败：微信明确拒绝，支付记录已回退，请稍后重试");
+        }
+        if (result == RefundResult.UNKNOWN) {
+            log.warn("退款结果未知, 等待退款回调或对账确认, orderId={}", orderId);
+        }
     }
 
     @Override
