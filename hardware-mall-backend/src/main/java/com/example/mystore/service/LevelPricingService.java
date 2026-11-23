@@ -1,5 +1,6 @@
 package com.example.mystore.service;
 
+import com.example.mystore.entity.dto.AdminLevelPricing;
 import com.example.mystore.entity.dto.LevelPricing;
 import com.example.mystore.entity.dto.ProductPricingFacts;
 
@@ -23,4 +24,16 @@ public interface LevelPricingService {
      * 返回顺序与入参一致。
      */
     List<LevelPricing> priceAll(Long levelId, List<ProductPricingFacts> facts);
+
+    /**
+     * 管理端单商品入口：返回批发基价、视角等级与零售等级两份结果，并给出最终生效报价。
+     */
+    AdminLevelPricing priceForAdmin(Long viewLevelId, ProductPricingFacts facts);
+
+    /**
+     * 管理端批量入口：一次取齐视角等级与零售等级两张倍率表，逐商品匹配。
+     * 返回顺序与入参一致。
+     */
+    List<AdminLevelPricing> priceAllForAdmin(
+            Long viewLevelId, List<ProductPricingFacts> facts);
 }

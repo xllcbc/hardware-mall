@@ -1,15 +1,18 @@
 package com.example.mystore.service.impl;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.Spu;
+import com.example.mystore.entity.dto.AdminLevelPricing;
+import com.example.mystore.entity.dto.LevelPricing;
+import com.example.mystore.entity.vo.AdminProductPricingVO;
 import com.example.mystore.entity.vo.ProductDetailCache;
 import com.example.mystore.entity.vo.ProductDetailVO;
 import com.example.mystore.entity.vo.ProductListCacheItem;
 import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.entity.vo.ProductListVO;
-import com.example.mystore.entity.dto.LevelPricing;
 import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
@@ -34,6 +37,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -350,6 +354,43 @@ class SpuServiceImplTest {
                 && facts.get(1).basePriceMin().compareTo(new BigDecimal("10.00")) == 0
                 && facts.get(1).basePriceMax().compareTo(new BigDecimal("20.00")) == 0));
         verify(pricingRuleService, never()).rateFor(any(), any(), anyBoolean());
+    }
+
+    @Test
+    void adminPricingPageUsesOneBatchCallAndPreservesResponseFields() {
+        Spu item = spu(1L, 9L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        Page<Spu> source = new Page<>(1, 20, 1);
+        source.setRecords(List.of(item));
+        when(spuMapper.selectPage(any(), any())).thenReturn(source);
+        when(skuService.getSkusBySpuIds(List.of(1L))).thenReturn(Map.of(
+                1L, List.of(sku(11L, 1L, "10.00"), sku(12L, 1L, "20.00"))));
+        when(levelPricingService.priceAllForAdmin(eq(2L), argThat(facts -> facts.size() == 1
+                && facts.get(0).categoryId().equals(9L)
+                && facts.get(0).basePriceMin().compareTo(new BigDecimal("10.00")) == 0
+                && facts.get(0).basePriceMax().compareTo(new BigDecimal("20.00")) == 0)))
+                .thenReturn(List.of(new AdminLevelPricing(
+                        new BigDecimal("10.00"),
+                        new BigDecimal("20.00"),
+                        LevelPricing.priced(2L, new BigDecimal("0.8000"),
+                                new BigDecimal("8.00"), new BigDecimal("16.00")),
+                        LevelPricing.priced(1L, new BigDecimal("1.2000"),
+                                new BigDecimal("12.00"), new BigDecimal("24.00")),
+                        LevelPricing.priced(2L, new BigDecimal("0.8000"),
+                                new BigDecimal("8.00"), new BigDecimal("16.00")))));
+
+        Page<AdminProductPricingVO> page = spuService.getAdminProductPricingPage(
+                2L, null, null, null, 1, 20);
+
+        AdminProductPricingVO vo = page.getRecords().get(0);
+        assertThat(vo.getRetailMinPrice()).isEqualByComparingTo("10.00");
+        assertThat(vo.getRetailMaxPrice()).isEqualByComparingTo("20.00");
+        assertThat(vo.getPricingRate()).isEqualByComparingTo("0.8000");
+        assertThat(vo.getEffectiveRate()).isEqualByComparingTo("0.8000");
+        assertThat(vo.getSettlementMinPrice()).isEqualByComparingTo("8.00");
+        assertThat(vo.getSettlementMaxPrice()).isEqualByComparingTo("16.00");
+        assertThat(vo.isRateMissing()).isFalse();
+        verify(levelPricingService, times(1)).priceAllForAdmin(eq(2L), anyList());
+        verify(levelPricingService, never()).priceForAdmin(anyLong(), any());
     }
 
     @Test

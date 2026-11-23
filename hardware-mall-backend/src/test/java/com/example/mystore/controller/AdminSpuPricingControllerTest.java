@@ -2,6 +2,7 @@ package com.example.mystore.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.mystore.common.constant.DiscountConstants;
+import com.example.mystore.common.constant.RedisConstants;
 import com.example.mystore.common.constant.StatusConstants;
 import com.example.mystore.common.constant.UserLevelStatusConstants;
 import com.example.mystore.entity.db.Category;
@@ -15,6 +16,7 @@ import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.mapper.UserLevelMapper;
 import com.example.mystore.util.JwtUtil;
+import com.example.mystore.util.RedisUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,16 +56,20 @@ class AdminSpuPricingControllerTest {
     private SpuMapper spuMapper;
     @Autowired
     private SkuMapper skuMapper;
+    @Autowired
+    private RedisUtil redisUtil;
 
     private String token;
     private Category category;
     private Category gapCategory;
     private Category excludedGapCategory;
+    private Category explicitOneCategory;
     private UserLevel level;
     private UserLevel retailLevel;
 
     @BeforeEach
     void setUp() {
+        clearPricingCaches();
         token = jwtUtil.generateToken(Map.of(
                 "userId", 1L,
                 "role", StatusConstants.USER_ROLE_ADMIN));
@@ -71,6 +77,7 @@ class AdminSpuPricingControllerTest {
         category = category("价格视角分类");
         gapCategory = category("价格缺口分类");
         excludedGapCategory = category("控价缺口分类");
+        explicitOneCategory = category("显式一倍率分类");
 
         retailLevel = userLevelMapper.selectOne(new LambdaQueryWrapper<UserLevel>()
                 .eq(UserLevel::getIsRetail, UserLevelStatusConstants.IS_RETAIL)
@@ -86,6 +93,7 @@ class AdminSpuPricingControllerTest {
 
         rate(level.getId(), category.getId(), "0.8000");
         rate(level.getId(), excludedGapCategory.getId(), "0.9000");
+        rate(level.getId(), explicitOneCategory.getId(), "1.0000");
 
         Spu visible = spu(category.getId(), "八折锁具", 1, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         sku(visible.getId(), "10.00");
@@ -101,6 +109,10 @@ class AdminSpuPricingControllerTest {
         Spu excludedGap = spu(excludedGapCategory.getId(), "控价缺口胶类", 1,
                 DiscountConstants.DISCOUNT_PARTICIPATION_DISABLED);
         sku(excludedGap.getId(), "50.00");
+
+        Spu explicitOne = spu(explicitOneCategory.getId(), "原价砂纸", 1,
+                DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        sku(explicitOne.getId(), "12.00");
     }
 
     @Test
@@ -149,6 +161,35 @@ class AdminSpuPricingControllerTest {
                 .andExpect(jsonPath("$.data.records[0].settlementMinPrice").doesNotExist())
                 .andExpect(jsonPath("$.data.records[0].settlementMaxPrice").doesNotExist())
                 .andExpect(jsonPath("$.data.records[0].rateMissing").value(true));
+    }
+
+    @Test
+    void explicitOneRateIsPricedRatherThanMarkedAsGap() throws Exception {
+        mvc.perform(get("/api/admin/spu/pricing-list")
+                        .header("Authorization", "Bearer " + token)
+                        .param("levelId", String.valueOf(level.getId()))
+                        .param("categoryId", String.valueOf(explicitOneCategory.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].retailMinPrice").value(12.0))
+                .andExpect(jsonPath("$.data.records[0].pricingRate").value(1.0))
+                .andExpect(jsonPath("$.data.records[0].effectiveRate").value(1.0))
+                .andExpect(jsonPath("$.data.records[0].settlementMinPrice").value(12.0))
+                .andExpect(jsonPath("$.data.records[0].settlementMaxPrice").value(12.0))
+                .andExpect(jsonPath("$.data.records[0].rateMissing").value(false));
+    }
+
+    @Test
+    void regularShopperCannotUseAdminPricingListToSeeOtherLevels() throws Exception {
+        String shopperToken = jwtUtil.generateToken(Map.of(
+                "userId", 99L,
+                "role", StatusConstants.USER_ROLE_REGULAR,
+                "levelId", level.getId()));
+
+        mvc.perform(get("/api/admin/spu/pricing-list")
+                        .header("Authorization", "Bearer " + shopperToken)
+                        .param("levelId", String.valueOf(level.getId())))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -228,8 +269,12 @@ class AdminSpuPricingControllerTest {
                 .andExpect(jsonPath("$.data.records[0].settlementMaxPrice").value(79.2));
     }
 
-    private Category category(String name) {
-        Category item = new Category();
+    private void clearPricingCaches() {
+        redisUtil.deleteByPattern(RedisConstants.PREFIX_PRICING_LEVEL + "*");
+        redisUtil.delete(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID);
+    }
+
+    private Category category(String name) {        Category item = new Category();
         item.setName(name);
         item.setSortOrder(0);
         item.setStatus(1);
