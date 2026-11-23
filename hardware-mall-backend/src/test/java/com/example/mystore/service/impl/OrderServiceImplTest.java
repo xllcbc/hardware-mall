@@ -17,11 +17,14 @@ import com.example.mystore.entity.dto.LevelPricing;
 import com.example.mystore.entity.dto.LevelRateTable;
 import com.example.mystore.entity.dto.ProductPricingFacts;
 import com.example.mystore.entity.vo.CheckoutPreviewVO;
+import com.example.mystore.entity.vo.DashboardStatsVO;
 import com.example.mystore.entity.vo.OrderVO;
+import com.example.mystore.entity.vo.RecentOrderVO;
 import com.example.mystore.mapper.*;
 import com.example.mystore.service.LevelPricingService;
 import com.example.mystore.service.OrderIdempotencyService;
 import com.example.mystore.service.OrderIdempotencyService.ClaimOutcome;
+import com.example.mystore.service.OrderQueryService;
 import com.example.mystore.service.PayService;
 import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.RefundResult;
@@ -53,6 +56,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -89,7 +93,7 @@ class OrderServiceImplTest {
     @Mock
     private org.springframework.transaction.PlatformTransactionManager transactionManager;
     @Mock
-    private PaymentRecordMapper paymentRecordMapper;
+    private OrderQueryService orderQueryService;
     @Mock
     private WechatOrderShippingService wechatOrderShippingService;
     @Mock
@@ -175,6 +179,8 @@ class OrderServiceImplTest {
         lenient().when(orderIdempotencyService.claim(anyLong(), anyString(), anyString()))
                 .thenReturn(new ClaimOutcome(
                         ClaimOutcome.Kind.ACQUIRED, 10L, "owner-token", null, true));
+        lenient().when(orderQueryService.getOrderView(anyLong()))
+                .thenReturn(new OrderVO());
     }
 
     @Test
@@ -251,17 +257,10 @@ class OrderServiceImplTest {
         when(orderIdempotencyService.claim(eq(2L), eq("k1"), anyString()))
                 .thenReturn(new ClaimOutcome(
                         ClaimOutcome.Kind.SUCCEEDED, 10L, "owner-token", 77L, false));
-        Order existing = new Order();
-        existing.setId(77L);
-        existing.setOrderNo("SO-ORIGINAL");
-        existing.setUserId(2L);
-        existing.setAddressId(1L);
-        existing.setLogisticsId(1L);
-        existing.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-        when(orderMapper.selectById(77L)).thenReturn(existing);
-        when(addressMapper.selectById(1L)).thenReturn(address);
-        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+        OrderVO original = new OrderVO();
+        original.setId(77L);
+        original.setOrderNo("SO-ORIGINAL");
+        when(orderQueryService.getOrderView(77L)).thenReturn(original);
 
         OrderVO vo = orderService.createOrder(2L, stubValidRequest(), "k1");
 
@@ -324,7 +323,7 @@ class OrderServiceImplTest {
     @SuppressWarnings("unchecked")
     void createOrder_voAssemblyFails_doesNotFailOrReleaseRecord() {
         stubSuccessfulOrderCreation();
-        when(orderMapper.selectById(100L)).thenReturn(null);
+        when(orderQueryService.getOrderView(100L)).thenThrow(new RuntimeException("vo assembly failed"));
 
         CreateOrderRequest.CartItem line = new CreateOrderRequest.CartItem();
         line.setSkuId(5L);
@@ -355,17 +354,10 @@ class OrderServiceImplTest {
     }
 
     private void stubOrderVo(Long orderId) {
-        when(orderMapper.selectById(orderId)).thenAnswer(inv -> {
-            Order order = new Order();
-            order.setId(orderId);
-            order.setOrderNo("SO" + orderId);
-            order.setUserId(2L);
-            order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-            order.setAddressId(1L);
-            order.setLogisticsId(1L);
-            return order;
-        });
-        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+        OrderVO vo = new OrderVO();
+        vo.setId(orderId);
+        vo.setOrderNo("SO" + orderId);
+        when(orderQueryService.getOrderView(orderId)).thenReturn(vo);
     }
 
     @Test
@@ -745,67 +737,6 @@ class OrderServiceImplTest {
         verify(cartMapper, never()).update(any(), any());
     }
 
-    @Test
-    void getAdminOrderPage_invalidDateFormat_throws() {
-        // M9: 日期参数格式错误必须入口拦截, 而不是拼进 SQL 报 500
-        assertThatThrownBy(() -> orderService.getAdminOrderPage(null, null, null, "2026/01/01", null, 1, 20))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage("日期格式应为 yyyy-MM-dd");
-    }
-
-    @Test
-    void getAdminOrderPage_withSearchArgs_queriesPage() {
-        when(orderMapper.selectPage(any(), any())).thenReturn(new Page<>(1, 20));
-
-        Page<OrderVO> result = orderService.getAdminOrderPage(null, null, "SO123", "2026-01-01", "2026-01-31", 1, 20);
-
-        assertThat(result.getRecords()).isEmpty();
-        verify(orderMapper).selectPage(any(), any());
-    }
-
-    @Test
-    void getAdminOrderPage_batchLoadsLatestPaymentStatus() {
-        Order cancelled = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
-        Order shipped = orderWithStatus(2L, StatusConstants.ORDER_SHIPPED);
-        Order cancelledWithoutPayment = orderWithStatus(3L, StatusConstants.ORDER_CANCELLED);
-        Page<Order> orderPage = new Page<>(1, 20, 3);
-        orderPage.setRecords(List.of(cancelled, shipped, cancelledWithoutPayment));
-
-        when(orderMapper.selectPage(any(), any())).thenReturn(orderPage);
-        when(addressMapper.selectById(any())).thenReturn(address);
-        when(logisticsMapper.selectById(any())).thenReturn(logistics);
-        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-
-        PaymentRecord latestPaid = paymentRecord(1L, PaymentRecord.STATUS_PAID);
-        PaymentRecord olderRefunded = paymentRecord(1L, PaymentRecord.STATUS_REFUNDED);
-        PaymentRecord refunded = paymentRecord(2L, PaymentRecord.STATUS_REFUNDED);
-        when(paymentRecordMapper.selectList(any())).thenReturn(List.of(latestPaid, olderRefunded, refunded));
-
-        Page<OrderVO> result = orderService.getAdminOrderPage(null, null, null, null, null, 1, 20);
-
-        assertThat(result.getRecords()).extracting(OrderVO::getPaymentStatus)
-                .containsExactly(PaymentRecord.STATUS_PAID, PaymentRecord.STATUS_REFUNDED, null);
-        assertThat(result.getRecords()).extracting(OrderVO::getPaymentStatusText)
-                .containsExactly("已支付", "已退款", "未支付");
-        verify(paymentRecordMapper, times(1)).selectList(any());
-        verify(paymentRecordMapper, never()).selectOne(any());
-    }
-
-    @Test
-    void getAdminOrderById_exposesPaymentStatus() {
-        Order order = orderWithStatus(1L, StatusConstants.ORDER_CANCELLED);
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(addressMapper.selectById(1L)).thenReturn(address);
-        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(paymentRecordMapper.selectOne(any())).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
-
-        OrderVO vo = orderService.getAdminOrderById(1L);
-
-        assertThat(vo.getPaymentStatus()).isEqualTo(PaymentRecord.STATUS_PAID);
-        assertThat(vo.getPaymentStatusText()).isEqualTo("已支付");
-    }
-
     private Order orderWithStatus(Long id, int status) {
         Order order = new Order();
         order.setId(id);
@@ -979,20 +910,6 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void testGetOrderStats() {
-        when(orderMapper.selectCount(any()))
-                .thenReturn(3L)  // pendingPay
-                .thenReturn(2L)  // pendingShip
-                .thenReturn(1L); // shipped
-
-        Map<String, Object> stats = orderService.getOrderStats();
-
-        assertThat(stats.get("pendingPay")).isEqualTo(3L);
-        assertThat(stats.get("pendingShip")).isEqualTo(2L);
-        assertThat(stats.get("shipped")).isEqualTo(1L);
-    }
-
-    @Test
     void testGetOrderById_OrderNotExist() {
         when(orderMapper.selectById(999L)).thenReturn(null);
 
@@ -1092,18 +1009,6 @@ class OrderServiceImplTest {
             inv.getArgument(0, Order.class).setId(100L);
             return 1;
         });
-        when(orderMapper.selectById(100L)).thenAnswer(inv -> {
-            Order o = new Order();
-            o.setId(100L);
-            o.setUserId(2L);
-            o.setOrderNo("SO1");
-            o.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-            o.setAddressId(1L);
-            o.setLogisticsId(1L);
-            return o;
-        });
-        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-
         CreateOrderRequest.CartItem i1 = new CreateOrderRequest.CartItem();
         i1.setSkuId(5L);
         i1.setQuantity(2);
@@ -1178,18 +1083,6 @@ class OrderServiceImplTest {
                 inv.getArgument(0, Order.class).setId(100L);
                 return 1;
             });
-            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
-                Order order = new Order();
-                order.setId(100L);
-                order.setUserId(2L);
-                order.setOrderNo("SO1");
-                order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-                order.setAddressId(1L);
-                order.setLogisticsId(1L);
-                return order;
-            });
-            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-
             CreateOrderRequest.CartItem first = new CreateOrderRequest.CartItem();
             first.setSkuId(5L);
             first.setQuantity(1);
@@ -1258,18 +1151,6 @@ class OrderServiceImplTest {
                 inv.getArgument(0, Order.class).setId(100L);
                 return 1;
             });
-            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
-                Order order = new Order();
-                order.setId(100L);
-                order.setUserId(2L);
-                order.setOrderNo("SO1");
-                order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-                order.setAddressId(1L);
-                order.setLogisticsId(1L);
-                return order;
-            });
-            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-
             CreateOrderRequest request = new CreateOrderRequest();
             request.setAddressId(1L);
             request.setLogisticsId(1L);
@@ -1342,46 +1223,6 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void orderSnapshot_isVisibleToAdminOnly() {
-        Order order = new Order();
-        order.setId(100L);
-        order.setOrderNo("SO-SNAPSHOT");
-        order.setUserId(2L);
-        order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-        order.setAddressId(1L);
-        order.setLogisticsId(1L);
-        when(orderMapper.selectOne(any())).thenReturn(order);
-        when(orderMapper.selectById(100L)).thenReturn(order);
-        when(addressMapper.selectById(1L)).thenReturn(address);
-        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(paymentRecordMapper.selectOne(any())).thenReturn(null);
-
-        OrderItem item = new OrderItem();
-        item.setId(1L);
-        item.setOrderId(100L);
-        item.setSkuId(5L);
-        item.setSpuId(1L);
-        item.setProductName("防盗门锁 C级");
-        item.setPrice(new BigDecimal("20.00"));
-        item.setLevelId(2L);
-        item.setLevelName("批发A");
-        item.setPricingRate(new BigDecimal("0.8000"));
-        item.setQuantity(1);
-        item.setSubtotal(new BigDecimal("20.00"));
-        when(orderItemMapper.selectList(any())).thenReturn(List.of(item));
-
-        OrderVO userView = orderService.getOrderByOrderNo("SO-SNAPSHOT");
-        assertThat(userView.getItems().get(0).getLevelId()).isNull();
-        assertThat(userView.getItems().get(0).getLevelName()).isNull();
-        assertThat(userView.getItems().get(0).getPricingRate()).isNull();
-
-        OrderVO adminView = orderService.getAdminOrderById(100L);
-        assertThat(adminView.getItems().get(0).getLevelId()).isEqualTo(2L);
-        assertThat(adminView.getItems().get(0).getLevelName()).isEqualTo("批发A");
-        assertThat(adminView.getItems().get(0).getPricingRate()).isEqualByComparingTo("0.8000");
-    }
-
-    @Test
     @SuppressWarnings("unchecked")
     void order_usesBatchSkuLookupForDuplicateLines() {
         UserContext.setLevelId(1L);
@@ -1395,18 +1236,6 @@ class OrderServiceImplTest {
                 inv.getArgument(0, Order.class).setId(100L);
                 return 1;
             });
-            when(orderMapper.selectById(100L)).thenAnswer(inv -> {
-                Order order = new Order();
-                order.setId(100L);
-                order.setUserId(2L);
-                order.setOrderNo("SO2");
-                order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-                order.setAddressId(1L);
-                order.setLogisticsId(1L);
-                return order;
-            });
-            when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-
             CreateOrderRequest.CartItem first = new CreateOrderRequest.CartItem();
             first.setSkuId(5L);
             first.setQuantity(1);
@@ -1866,58 +1695,7 @@ class OrderServiceImplTest {
 
     // ==================== Seam 2: 状态 8 的 VO 文案与原因透出 ====================
 
-    @Test
-    void orderDetail_status8_exposesCancelReasonAndRefundRequestedText() {
-        Order order = new Order();
-        order.setId(1L);
-        order.setUserId(2L);
-        order.setStatus(StatusConstants.ORDER_REFUND_REQUESTED);
-        order.setAddressId(1L);
-        order.setLogisticsId(1L);
-        order.setCancelReason("不想要了");
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(addressMapper.selectById(1L)).thenReturn(address);
-        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-
-        OrderVO vo = orderService.getOrderById(2L, 1L);
-
-        assertThat(vo.getStatusText()).isEqualTo("退款申请中");
-        assertThat(vo.getCancelReason()).isEqualTo("不想要了");
-    }
-
-    @Test
-    void orderDetail_rejectedRefund_exposesAdminRemark() {
-        // 拒绝退款后状态回退 2/3, 拒绝原因经 adminRemark 透出给用户
-        Order order = new Order();
-        order.setId(1L);
-        order.setUserId(2L);
-        order.setStatus(StatusConstants.ORDER_PENDING_SHIPMENT);
-        order.setAddressId(1L);
-        order.setLogisticsId(1L);
-        order.setAdminRemark("凭证不足");
-        when(orderMapper.selectById(1L)).thenReturn(order);
-        when(addressMapper.selectById(1L)).thenReturn(address);
-        when(logisticsMapper.selectById(1L)).thenReturn(logistics);
-        when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
-
-        OrderVO vo = orderService.getOrderById(2L, 1L);
-
-        assertThat(vo.getStatus()).isEqualTo(StatusConstants.ORDER_PENDING_SHIPMENT);
-        assertThat(vo.getAdminRemark()).isEqualTo("凭证不足");
-    }
-
     // ==================== Seam 3: stats 透出退款申请计数 ====================
-
-    @Test
-    void orderStats_containsRefundRequestedCount() {
-        // 4 次 selectCount 依次: 待付款 1, 待发货 2, 已发货 3, 退款申请中 4
-        when(orderMapper.selectCount(any())).thenReturn(1L, 2L, 3L, 4L);
-
-        Map<String, Object> stats = orderService.getOrderStats();
-
-        assertThat(stats.get("refundRequested")).isEqualTo(4L);
-    }
 
     @Test
     void refundOrder_payServiceMissing_throwsBeforeCasClaim() {
@@ -1962,5 +1740,86 @@ class OrderServiceImplTest {
         assertThatThrownBy(() -> orderService.confirmReceive(2L, 1L))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("状态已变更");
+    }
+
+    // ==================== 读模型门面接线（只验证委托目标与详情触发顺序） ====================
+
+    @Test
+    void readOnlyQueries_delegateToQueryModule() {
+        Page<OrderVO> page = new Page<>(1, 10);
+        Map<String, Object> stats = Map.of("pendingPay", 1L);
+        DashboardStatsVO dashboard = new DashboardStatsVO();
+        List<RecentOrderVO> recent = List.of(new RecentOrderVO());
+        when(orderQueryService.getOrderPage(2L, 1, 1, 10)).thenReturn(page);
+        when(orderQueryService.getAdminOrderPage(3L, 2, "SO1", "2026-01-01", "2026-01-31", 1, 10)).thenReturn(page);
+        when(orderQueryService.getOrderByOrderNo("SO1")).thenReturn(new OrderVO());
+        when(orderQueryService.getAdminOrderById(1L)).thenReturn(new OrderVO());
+        when(orderQueryService.getOrderStats()).thenReturn(stats);
+        when(orderQueryService.getDashboardStats()).thenReturn(dashboard);
+        when(orderQueryService.getRecentOrders(5)).thenReturn(recent);
+
+        assertThat(orderService.getOrderPage(2L, 1, 1, 10)).isSameAs(page);
+        assertThat(orderService.getAdminOrderPage(3L, 2, "SO1", "2026-01-01", "2026-01-31", 1, 10)).isSameAs(page);
+        assertThat(orderService.getOrderByOrderNo("SO1")).isNotNull();
+        assertThat(orderService.getAdminOrderById(1L)).isNotNull();
+        assertThat(orderService.getOrderStats()).isSameAs(stats);
+        assertThat(orderService.getDashboardStats()).isSameAs(dashboard);
+        assertThat(orderService.getRecentOrders(5)).isSameAs(recent);
+        verifyNoInteractions(orderMapper);
+    }
+
+    @Test
+    void orderDetail_pendingPayment_syncsThenAssemblesViewThroughQueryModule() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_PENDING_PAYMENT);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(redisUtil.setIfAbsent("lazysync:order:1", "1", 30, TimeUnit.SECONDS)).thenReturn(true);
+        when(payService.queryByOrderId(1L)).thenReturn(paymentRecord(1L, PaymentRecord.STATUS_PAID));
+        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        OrderVO view = new OrderVO();
+        when(orderQueryService.getOrderView(1L)).thenReturn(view);
+
+        assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
+
+        InOrder inOrder = inOrder(redisUtil, payService, orderQueryService);
+        inOrder.verify(redisUtil).setIfAbsent("lazysync:order:1", "1", 30, TimeUnit.SECONDS);
+        inOrder.verify(payService).queryByOrderId(1L);
+        inOrder.verify(orderQueryService).getOrderView(1L);
+    }
+
+    @Test
+    void orderDetail_syncFailure_stillReturnsView() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_PENDING_PAYMENT);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        when(redisUtil.setIfAbsent("lazysync:order:1", "1", 30, TimeUnit.SECONDS)).thenReturn(true);
+        when(payService.queryByOrderId(1L)).thenThrow(new RuntimeException("wechat down"));
+        OrderVO view = new OrderVO();
+        when(orderQueryService.getOrderView(1L)).thenReturn(view);
+
+        assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
+    }
+
+    @Test
+    void orderDetail_otherUsersOrder_throwsWithoutSyncOrView() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_PENDING_PAYMENT);
+        order.setUserId(3L);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+
+        assertThatThrownBy(() -> orderService.getOrderById(2L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单不存在");
+
+        verifyNoInteractions(redisUtil, payService, orderQueryService);
+    }
+
+    @Test
+    void orderDetail_notPendingPayment_skipsSyncButAssemblesView() {
+        Order order = orderWithStatus(1L, StatusConstants.ORDER_SHIPPED);
+        when(orderMapper.selectById(1L)).thenReturn(order);
+        OrderVO view = new OrderVO();
+        when(orderQueryService.getOrderView(1L)).thenReturn(view);
+
+        assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
+
+        verifyNoInteractions(redisUtil, payService);
     }
 }
