@@ -1,5 +1,6 @@
 package com.example.mystore.service.impl;
 
+import com.example.mystore.entity.dto.AdminLevelPricing;
 import com.example.mystore.entity.dto.LevelPricing;
 import com.example.mystore.entity.dto.LevelRateTable;
 import com.example.mystore.entity.dto.ProductPricingFacts;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 等级定价模块实现。取整仍委托唯一的纯定价函数，倍率解析委托定价缓存适配器；
@@ -48,6 +50,29 @@ public class LevelPricingServiceImpl implements LevelPricingService {
         List<LevelPricing> result = new ArrayList<>(facts.size());
         for (ProductPricingFacts fact : facts) {
             result.add(resolve(fact.excludeDiscount() ? retailTable : levelTable, fact));
+        }
+        return result;
+    }
+
+    @Override
+    public List<AdminLevelPricing> priceAllForAdmin(
+            Long viewLevelId, List<ProductPricingFacts> facts) {
+        if (facts == null || facts.isEmpty()) {
+            return List.of();
+        }
+        Long retailLevelId = pricingRuleService.resolveRetailLevelId();
+        LevelRateTable viewTable = pricingRuleService.rateTable(viewLevelId);
+        LevelRateTable retailTable = Objects.equals(viewTable.levelId(), retailLevelId)
+                ? viewTable
+                : pricingRuleService.rateTable(retailLevelId);
+
+        List<AdminLevelPricing> result = new ArrayList<>(facts.size());
+        for (ProductPricingFacts fact : facts) {
+            LevelPricing view = resolve(viewTable, fact);
+            LevelPricing retail = resolve(retailTable, fact);
+            LevelPricing effective = fact.excludeDiscount() ? retail : view;
+            result.add(new AdminLevelPricing(
+                    fact.basePriceMin(), fact.basePriceMax(), view, retail, effective));
         }
         return result;
     }

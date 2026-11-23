@@ -10,21 +10,19 @@ import com.example.mystore.entity.db.Sku;
 import com.example.mystore.entity.db.SpecItem;
 import com.example.mystore.entity.db.SpecTemplate;
 import com.example.mystore.entity.vo.AdminProductPricingVO;
-import com.example.mystore.entity.vo.LevelRateVO;
 import com.example.mystore.entity.vo.ProductListVO;
 import com.example.mystore.entity.vo.ProductDetailVO;
 import com.example.mystore.entity.vo.ProductDetailCache;
 import com.example.mystore.entity.vo.ProductListCacheItem;
 import com.example.mystore.entity.vo.ProductListResult;
 import com.example.mystore.entity.vo.ProductSkuVO;
+import com.example.mystore.entity.dto.AdminLevelPricing;
 import com.example.mystore.entity.dto.LevelPricing;
 import com.example.mystore.entity.dto.ProductPricingFacts;
 import com.example.mystore.entity.vo.UserLevelProductPreviewVO;
 import com.example.mystore.event.ProductCacheInvalidationEvent;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.service.LevelPricingService;
-import com.example.mystore.service.PriceService;
-import com.example.mystore.service.PricingRuleService;
 import com.example.mystore.service.ProductCacheService;
 import com.example.mystore.service.SpuService;
 import com.example.mystore.service.SkuService;
@@ -60,8 +58,6 @@ public class SpuServiceImpl implements SpuService {
     private final SkuService skuService;
     private final SpecTemplateService specTemplateService;
     private final SpecItemService specItemService;
-    private final PriceService priceService;
-    private final PricingRuleService pricingRuleService;
     private final LevelPricingService levelPricingService;
     private final ProductCacheService productCacheService;
     private final ApplicationEventPublisher eventPublisher;
@@ -529,36 +525,16 @@ public class SpuServiceImpl implements SpuService {
                 .collect(Collectors.toList());
         Map<Long, List<Sku>> skusBySpu = skuService.getSkusBySpuIds(spuIds);
 
-        Long retailLevelId = pricingRuleService.resolveRetailLevelId();
-        Long viewLevelId = levelId != null ? levelId : retailLevelId;
-        Map<Long, BigDecimal> viewRates = loadConfiguredRates(viewLevelId);
-        Map<Long, BigDecimal> retailRates = viewLevelId.equals(retailLevelId)
-                ? viewRates
-                : loadConfiguredRates(retailLevelId);
+        List<ProductPricingFacts> facts = source.getRecords().stream()
+                .map(spu -> toAdminPricingFacts(spu, skusBySpu.getOrDefault(spu.getId(), Collections.emptyList())))
+                .collect(Collectors.toList());
+        // 整页只取视角等级与零售等级两张倍率表，不逐商品读取倍率。
+        List<AdminLevelPricing> pricings = levelPricingService.priceAllForAdmin(levelId, facts);
 
-        List<AdminProductPricingVO> records = source.getRecords().stream().map(spu -> {
-            List<Sku> skus = skusBySpu.getOrDefault(spu.getId(), Collections.emptyList());
-            BigDecimal baseMinPrice;
-            BigDecimal baseMaxPrice;
-            if (!skus.isEmpty()) {
-                baseMinPrice = skus.stream()
-                        .map(Sku::getPrice)
-                        .min(BigDecimal::compareTo)
-                        .orElse(null);
-                baseMaxPrice = skus.stream()
-                        .map(Sku::getPrice)
-                        .max(BigDecimal::compareTo)
-                        .orElse(null);
-            } else {
-                baseMinPrice = spu.getOriginalPrice();
-                baseMaxPrice = spu.getOriginalPrice();
-            }
-
-            BigDecimal pricingRate = viewRates.get(spu.getCategoryId());
-            BigDecimal effectiveRate = DiscountConstants.isExcluded(spu.getExcludeDiscount())
-                    ? retailRates.get(spu.getCategoryId())
-                    : pricingRate;
-            boolean rateMissing = effectiveRate == null;
+        List<AdminProductPricingVO> records = new ArrayList<>(source.getRecords().size());
+        for (int i = 0; i < source.getRecords().size(); i++) {
+            Spu spu = source.getRecords().get(i);
+            AdminLevelPricing pricing = pricings.get(i);
 
             AdminProductPricingVO vo = new AdminProductPricingVO();
             vo.setId(spu.getId());
@@ -569,29 +545,44 @@ public class SpuServiceImpl implements SpuService {
             vo.setImages(spu.getImages());
             vo.setOriginalPrice(spu.getOriginalPrice());
             vo.setWeight(spu.getWeight());
-            vo.setRetailMinPrice(baseMinPrice);
-            vo.setRetailMaxPrice(baseMaxPrice);
-            vo.setPricingRate(pricingRate);
-            vo.setEffectiveRate(effectiveRate);
-            vo.setSettlementMinPrice(rateMissing || baseMinPrice == null
-                    ? null : priceService.resolveUnitPrice(baseMinPrice, effectiveRate));
-            vo.setSettlementMaxPrice(rateMissing || baseMaxPrice == null
-                    ? null : priceService.resolveUnitPrice(baseMaxPrice, effectiveRate));
-            vo.setRateMissing(rateMissing);
+            vo.setRetailMinPrice(pricing.basePriceMin());
+            vo.setRetailMaxPrice(pricing.basePriceMax());
+            vo.setPricingRate(pricing.viewLevel().rate());
+            vo.setEffectiveRate(pricing.effective().rate());
+            vo.setSettlementMinPrice(pricing.effective().minPrice());
+            vo.setSettlementMaxPrice(pricing.effective().maxPrice());
+            vo.setRateMissing(pricing.rateMissing());
             vo.setExcludeDiscount(spu.getExcludeDiscount());
             vo.setStatus(spu.getStatus());
             vo.setIsRecommend(spu.getIsRecommend());
             vo.setSalesCount(spu.getSalesCount());
-            return vo;
-        }).collect(Collectors.toList());
+            records.add(vo);
+        }
         result.setRecords(records);
         return result;
     }
 
-    private Map<Long, BigDecimal> loadConfiguredRates(Long levelId) {
-        return pricingRuleService.getRates(levelId).stream()
-                .filter(item -> item.getRate() != null)
-                .collect(Collectors.toMap(LevelRateVO::getCategoryId, LevelRateVO::getRate));
+    private ProductPricingFacts toAdminPricingFacts(Spu spu, List<Sku> skus) {
+        BigDecimal baseMinPrice;
+        BigDecimal baseMaxPrice;
+        if (!skus.isEmpty()) {
+            baseMinPrice = skus.stream()
+                    .map(Sku::getPrice)
+                    .min(BigDecimal::compareTo)
+                    .orElse(null);
+            baseMaxPrice = skus.stream()
+                    .map(Sku::getPrice)
+                    .max(BigDecimal::compareTo)
+                    .orElse(null);
+        } else {
+            baseMinPrice = spu.getOriginalPrice();
+            baseMaxPrice = spu.getOriginalPrice();
+        }
+        return ProductPricingFacts.range(
+                spu.getCategoryId(),
+                baseMinPrice,
+                baseMaxPrice,
+                DiscountConstants.isExcluded(spu.getExcludeDiscount()));
     }
 
     @Override
