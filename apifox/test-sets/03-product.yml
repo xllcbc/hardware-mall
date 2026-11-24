@@ -16,7 +16,7 @@ testCases:
       body:
         code: 200
         data:
-          list:
+          records:
             "@isArray()"
           total: "@isNumber()"
           page: 1
@@ -35,7 +35,7 @@ testCases:
       body:
         code: 200
         data:
-          list:
+          records:
             "@isArray()"
 
   - name: "TC-303: 用户端-搜索商品"
@@ -51,7 +51,7 @@ testCases:
       body:
         code: 200
         data:
-          list:
+          records:
             "@isArray()"
 
   - name: "TC-304: 用户端-获取推荐商品"
@@ -88,10 +88,10 @@ testCases:
         code: 404
         message: "@contains(商品不存在)"
 
-  - name: "TC-307: 管理端-获取商品列表"
+  - name: "TC-307: 管理端-获取SPU列表"
     request:
       method: GET
-      url: "/api/admin/product/list"
+      url: "/api/admin/spu/list"
       headers:
         Authorization: "Bearer {{adminToken}}"
       query:
@@ -102,13 +102,13 @@ testCases:
       body:
         code: 200
         data:
-          list:
+          records:
             "@isArray()"
 
-  - name: "TC-308: 管理端-获取商品详情"
+  - name: "TC-308: 管理端-获取SPU详情"
     request:
       method: GET
-      url: "/api/admin/product/1"
+      url: "/api/admin/spu/1"
       headers:
         Authorization: "Bearer {{adminToken}}"
     expect:
@@ -118,10 +118,10 @@ testCases:
         data:
           id: 1
 
-  - name: "TC-309: 管理端-创建商品"
+  - name: "TC-309: 管理端-创建SPU"
     request:
       method: POST
-      url: "/api/admin/product"
+      url: "/api/admin/spu"
       headers:
         Authorization: "Bearer {{adminToken}}"
         Content-Type: "application/json"
@@ -129,14 +129,12 @@ testCases:
         categoryId: 1
         name: "测试商品-临时"
         subtitle: "测试副标题"
-        spec: "测试规格"
         description: "测试描述"
         images: ["https://example.com/test.jpg"]
-        price: 9999
         originalPrice: 12999
-        stock: 100
-        status: 1
         isRecommend: 0
+        excludeDiscount: 0
+        status: 1
     expect:
       statusCode: 200
       body:
@@ -146,10 +144,10 @@ testCases:
     extract:
       newProductId: "body.data.id"
 
-  - name: "TC-310: 管理端-更新商品"
+  - name: "TC-310: 管理端-更新SPU"
     request:
       method: PUT
-      url: "/api/admin/product/{{newProductId}}"
+      url: "/api/admin/spu/{{newProductId}}"
       headers:
         Authorization: "Bearer {{adminToken}}"
         Content-Type: "application/json"
@@ -157,12 +155,9 @@ testCases:
         categoryId: 1
         name: "测试商品-已更新"
         subtitle: "测试副标题-已更新"
-        spec: "测试规格-已更新"
         description: "测试描述-已更新"
         images: ["https://example.com/test-updated.jpg"]
-        price: 19999
         originalPrice: 25999
-        stock: 200
         status: 1
         isRecommend: 1
     expect:
@@ -171,10 +166,10 @@ testCases:
         code: 200
         message: "success"
 
-  - name: "TC-311: 管理端-更新商品状态"
+  - name: "TC-311: 管理端-更新SPU状态"
     request:
       method: PUT
-      url: "/api/admin/product/{{newProductId}}/status"
+      url: "/api/admin/spu/{{newProductId}}/status"
       headers:
         Authorization: "Bearer {{adminToken}}"
         Content-Type: "application/json"
@@ -186,10 +181,10 @@ testCases:
         code: 200
         message: "success"
 
-  - name: "TC-312: 管理端-删除商品"
+  - name: "TC-312: 管理端-删除SPU"
     request:
       method: DELETE
-      url: "/api/admin/product/{{newProductId}}"
+      url: "/api/admin/spu/{{newProductId}}"
       headers:
         Authorization: "Bearer {{adminToken}}"
     expect:

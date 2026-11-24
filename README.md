@@ -1,27 +1,31 @@
 # 乾程锁具生意通（微信小程序 + Web 管理端）
 
-> 面向实体五金店的自用商城系统：用户端微信小程序（浏览、购物车、下单、微信支付、退款、收货）+ 商家 Web 管理后台（SPU/SKU、分类、订单发货、退款审核）。已在自有域名部署上线并实际运行。
+> 面向实体五金店的自用商城系统：用户端微信小程序（浏览、多级定价、购物车、下单、微信支付、退款、收货）+ 商家 Web 管理后台（SPU/SKU、用户等级与分类倍率、订单发货、退款审核）。已在自有域名部署上线并实际运行。
 
 ## 功能总览
 
 ### 用户端（微信小程序 · uni-app + Vue3）
 - 商品：分类、搜索、商品详情（SPU + SKU 规格选择）、推荐
+- 多级定价：按用户等级展示等级结算价；倍率缺口商品标记不可售，不泄漏批发基价
 - 购物车、收货地址、收藏、浏览足迹
-- 下单、微信支付（JSAPI）、订单列表/详情、取消订单、申请退款、确认收货
+- 下单（幂等键 + 结算预览）、微信支付（JSAPI）、订单列表/详情、取消订单、申请退款、确认收货
 - 物流方式选择（同城配送 / 到店自提）
 
 ### 管理端（Web · Vue3 + Element Plus）
 - 商品：SPU、SKU、规格模板/规格项、分类管理
-- 订单：列表/详情、发货（对接微信发货管理）、退款审核、订单统计
-- 用户管理、物流管理、图片上传、仪表盘
+- 多级定价：用户等级、等级分类倍率矩阵、批量填充/复制、按等级价格视角与商品预览
+- 订单：列表/详情、发货（对接微信发货管理）、退款审核/重试、订单统计
+- 用户管理（等级/地区/状态）、物流管理、图片上传、仪表盘
 
 ### 后端（Spring Boot）
 - JWT 认证与鉴权、统一响应、全局异常处理、接口限流
+- 多级定价：批发基价 × 等级分类倍率，订单等级/倍率快照，倍率缺口失败关闭
 - 订单状态机（CAS 乐观锁并发控制）
 - 退款可靠性：claim-first 先占位再外呼 + 退款回调三态自愈 + 定时对账
+- 下单幂等：数据库为权威 + Redis 短时快锁，支持同键重放与冲突检测
 - Redis 缓存三防（穿透 / 击穿 / 雪崩）与 SKU 读写分离缓存
-- 微信支付 / 退款回调、微信消息推送、OSS 图片存储
-- 定时任务：超时取消、自动收货、库存缓存补偿、退款对账
+- 微信支付 / 退款回调、微信消息推送、OSS 图片存储与图片生命周期治理
+- 定时任务：超时取消、自动收货、库存缓存补偿、退款对账、图片回收
 
 ## 技术栈
 
@@ -64,7 +68,8 @@ flowchart LR
 ## 核心亮点
 
 - **订单状态机并发一致性**：以 CAS 乐观锁（条件 UPDATE + affected rows）收敛取消 / 支付回调 / 退款 / 自动收货多路竞态；退款先占位「退款中」再外呼，超时或响应丢失不回滚，由回调与定时对账任务收敛——成功才回补库存，失败落可重试态，区分「确定失败」与「响应丢失」。
-- **事务边界与幂等**：下单只读校验移出事务，写操作以 `TransactionTemplate` 编程式事务包裹；支付链路隔离微信 HTTP 外呼，消除长事务连接占用与 `UnexpectedRollbackException`；下单幂等采用 SETNX + 归属校验 + 失败释放。
+- **多级定价**：`sku.price` 作为批发基价，按「等级 × 分类」倍率矩阵计算等级结算价；缺口不回落 `1.0000`，`exclude_discount` 商品按零售价兜底；商品缓存只存中性价格区间，倍率独立缓存，下单写入等级与倍率快照。
+- **事务边界与幂等**：下单只读校验移出事务，写操作以 `TransactionTemplate` 编程式事务包裹；支付链路隔离微信 HTTP 外呼，消除长事务连接占用与 `UnexpectedRollbackException`；下单幂等以 `order_idempotency` 数据库记录为权威，Redis 仅作短时快锁（ADR-0006）。
 - **缓存三防**：空值哨兵防穿透、Redisson 互斥锁 + double-check 防击穿、TTL 随机抖动防雪崩，保证热点 key 单请求回源 DB。
 - **SKU 读写分离缓存**：高频库存与低频元数据拆分独立 key，写操作分级失效，将库存变更的失效范围收敛至单 key。
 - **双端交付与上线运维**：独立完成小程序 / 管理端 / 后端三端，GitHub Actions 自动化测试、构建与部署，Nginx 双域名 HTTPS、ICP 备案、每日数据库备份。
@@ -76,7 +81,9 @@ hardware-mall/
 ├── hardware-mall-backend/     # Spring Boot 后端
 ├── hardware-mall-admin/       # Vue3 管理端
 ├── hardware-mall-uniapp/      # uni-app 微信小程序
-├── apifox/                    # Apifox 接口测试用例与报告
+├── db/                        # 建库、Flyway 迁移、历史发布脚本
+├── e2e/                       # Playwright 浏览器验收（管理端定价 / H5 下单）
+├── apifox/                    # Apifox 接口测试用例与报告（历史用例）
 ├── scripts/                   # 部署 / 备份 / 压测 / 数据导入脚本
 └── docs/                      # 项目文档
 ```
@@ -122,13 +129,22 @@ npm run dev:mp-weixin   # 或用 HBuilderX 打开项目
 
 ## 测试
 
-- 后端单元测试：JUnit 5 + Mockito + AssertJ
+- 后端单元 / 集成测试：JUnit 5 + Mockito + AssertJ
 
 ```bash
 cd hardware-mall-backend && mvn test
 ```
 
-- 接口测试：`apifox/` 下的用例集与测试报告（`apifox/reports/api-test-report.html`）
+- 浏览器验收：Playwright（管理端定价、H5 下单链路）
+
+```bash
+npm ci --prefix hardware-mall-admin && npm run build --prefix hardware-mall-admin
+VITE_API_BASE_URL=/api npm run build:h5 --prefix hardware-mall-uniapp
+cd e2e && npm ci && npx playwright install chromium && npm test
+```
+
+- CI：`.github/workflows/test.yml` 依次执行后端单测、管理端构建、小程序构建、浏览器验收与发布门禁
+- 接口用例：`apifox/` 为早期手工用例集，接口口径以《接口规范文档》与 Controller 为准
 - 压测：`scripts/loadtest/`（Apache JMeter，下单链路）
 
 ## 部署与 CI/CD
@@ -140,11 +156,15 @@ cd hardware-mall-backend && mvn test
 
 ## 文档
 
+- [领域词汇表](./CONTEXT.md)
 - [项目背景](./docs/项目背景.md)
 - [数据库设计文档](./docs/数据库设计文档.md)
 - [接口规范文档](./docs/商城单体项目接口规范文档.md)
 - [部署说明](./docs/部署说明.md)
+- [发布与迁移手册](./docs/release-runbook.md)
+- [定价发布手册](./docs/pricing-release-runbook.md)
 - [图片回收运维手册](./docs/image-gc-runbook.md)
+- [架构决策记录（ADR）](./docs/adr/)
 
 ## License
 
