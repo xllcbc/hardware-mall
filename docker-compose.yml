@@ -55,6 +55,8 @@ services:
     build:
       context: ./hardware-mall-admin
       dockerfile: Dockerfile
+      args:
+        VITE_OSS_HOSTS: ${VITE_OSS_HOSTS:-}
     container_name: hw-admin
     restart: unless-stopped
     depends_on:

@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { THUMB_WIDTHS, thumb } from './thumb'
 
 const OSS_IMAGE = 'https://java0251014.oss-cn-beijing.aliyuncs.com/products/20261124120000abcd.jpg'
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.resetModules()
+})
 
 describe('thumb', () => {
   it('appends resize, webp and quality parameters to OSS images', () => {
@@ -14,11 +19,28 @@ describe('thumb', () => {
   })
 
   it('uses the documented display widths for admin surfaces', () => {
-    expect(THUMB_WIDTHS).toEqual({
-      productList: 120,
-      productDialog: 240,
-      userAvatar: 80
-    })
+    expect(thumb(OSS_IMAGE, THUMB_WIDTHS.productList)).toContain(
+      '/resize,w_120/format,webp/quality,q_80'
+    )
+    expect(thumb(OSS_IMAGE, THUMB_WIDTHS.productDialog)).toContain(
+      '/resize,w_240/format,webp/quality,q_80'
+    )
+    expect(thumb(OSS_IMAGE, THUMB_WIDTHS.userAvatar)).toContain(
+      '/resize,w_80/format,webp/quality,q_80'
+    )
+  })
+
+  it('treats configured custom domains as OSS images', async () => {
+    vi.stubEnv('VITE_OSS_HOSTS', 'img.example.com, cdn.example.com')
+    vi.resetModules()
+    const { thumb: thumbWithConfiguredHosts } = await import('./thumb')
+
+    expect(thumbWithConfiguredHosts('https://img.example.com/products/a.jpg', 120)).toBe(
+      'https://img.example.com/products/a.jpg?x-oss-process=image/resize,w_120/format,webp/quality,q_80'
+    )
+    expect(thumbWithConfiguredHosts('https://cdn.example.com/products/a.jpg', 120)).toBe(
+      'https://cdn.example.com/products/a.jpg?x-oss-process=image/resize,w_120/format,webp/quality,q_80'
+    )
   })
 
   it('appends with & when the URL already has query parameters', () => {

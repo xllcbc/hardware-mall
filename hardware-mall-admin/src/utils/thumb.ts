@@ -4,7 +4,7 @@ export const THUMB_WIDTHS = {
   userAvatar: 80
 } as const
 
-export const THUMB_QUALITY = 80
+const THUMB_QUALITY = 80
 
 const OSS_HOST_SUFFIX = '.aliyuncs.com'
 const PROCESS_PARAM = 'x-oss-process'
@@ -35,10 +35,7 @@ const hasProcessParam = (urlWithoutFragment: string): boolean => {
   if (queryIndex === -1) {
     return false
   }
-  return urlWithoutFragment
-    .slice(queryIndex + 1)
-    .split('&')
-    .some(pair => pair.split('=')[0] === PROCESS_PARAM)
+  return new URLSearchParams(urlWithoutFragment.slice(queryIndex + 1)).has(PROCESS_PARAM)
 }
 
 /**
