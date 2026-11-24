@@ -35,6 +35,7 @@ npm run dev:h5            # H5 预览（可选）
 | 变量 | 说明 |
 |------|------|
 | `VITE_API_BASE_URL` | 后端 API 地址；生产环境必须为 HTTPS，并加入小程序后台 request 合法域名白名单 |
+| `VITE_OSS_HOSTS` | 额外视作 OSS 的图片域名（逗号分隔，用于自定义域名/CDN 切换；默认识别 `*.aliyuncs.com`） |
 
 ## 主要功能
 

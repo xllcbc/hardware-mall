@@ -26,7 +26,7 @@
           </view>
 
           <view class="item-main" @tap="goProductDetail(item.productId)">
-            <image class="item-image" :src="item.productImage || '/static/images/default.png'" mode="aspectFill" lazy-load />
+            <image class="item-image" :src="thumb(item.productImage, THUMB_WIDTHS.listItem) || '/static/images/default.png'" mode="aspectFill" lazy-load />
 
             <view class="item-content">
               <text class="item-name">{{ item.productName }}</text>
@@ -102,6 +102,7 @@ import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import { getCartList } from '@/api/cart'
 import { requireLogin } from '@/utils/auth'
+import { THUMB_WIDTHS, thumb } from '@/utils/thumb'
 import type { CartItem } from '@/types'
 
 const cartStore = useCartStore()

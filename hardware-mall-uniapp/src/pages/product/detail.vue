@@ -6,7 +6,7 @@
     <template v-else>
     <swiper v-if="currentImages?.length" class="product-swiper" :current="swiperCurrent" indicator-dots indicator-active-color="#C9A86C">
       <swiper-item v-for="(img, index) in currentImages" :key="index">
-        <image class="product-image" :src="img" mode="aspectFill" />
+        <image class="product-image" :src="thumb(img, THUMB_WIDTHS.productDetail)" mode="aspectFill" />
       </swiper-item>
     </swiper>
     <view v-else class="product-image-placeholder">
@@ -88,6 +88,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import { onShareAppMessage } from '@dcloudio/uni-app'
 import { getProductDetail } from '@/api/product'
 import { addToCart as addToCartApi } from '@/api/cart'
 import { useAppStore } from '@/stores/app'
@@ -95,6 +96,7 @@ import { usePreOrderStore } from '@/stores/preOrder'
 import CountStepper from '@/components/common/CountStepper.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import { requireLogin } from '@/utils/auth'
+import { THUMB_WIDTHS, thumb } from '@/utils/thumb'
 import type { ProductDetail, SpecTemplate, SpecItem, Sku, SpecVO } from '@/types'
 
 const appStore = useAppStore()
@@ -346,6 +348,13 @@ const buyNow = async () => {
 const onShare = () => {
   uni.showShareMenu({ withShareTicket: true })
 }
+
+// 分享卡片始终使用原图, 不使用缩略图
+onShareAppMessage(() => ({
+  title: product.value.name || '',
+  path: `/pages/product/detail?id=${product.value.id}`,
+  imageUrl: product.value.images?.[0] || ''
+}))
 </script>
 
 <style lang="scss" scoped>

@@ -36,6 +36,8 @@ const product = (id: number, minPrice: number): Product => ({
   status: 1
 })
 
+const OSS_IMAGE = 'https://java0251014.oss-cn-beijing.aliyuncs.com/products/home.jpg'
+
 describe('index page refreshes prices on show', () => {
   beforeEach(() => {
     showHandlers.length = 0
@@ -64,5 +66,20 @@ describe('index page refreshes prices on show', () => {
 
     expect(vi.mocked(getRecommendProducts)).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('20.00')
+  })
+
+  it('renders recommend cards as 400px thumbnails', async () => {
+    const withImage = product(1, 10)
+    withImage.images = [OSS_IMAGE]
+    vi.mocked(getRecommendProducts).mockResolvedValue([withImage])
+
+    const wrapper = mount(IndexPage, {
+      global: { stubs: { LoadingState: true, EmptyState: true } }
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.product-image').attributes('src')).toBe(
+      `${OSS_IMAGE}?x-oss-process=image/resize,w_400/format,webp/quality,q_80`
+    )
   })
 })
