@@ -33,7 +33,7 @@
           </view>
 
           <view class="item-image-wrap" @tap="goProductDetail(item.id)">
-            <image class="item-image" :src="item.image || '/static/images/placeholder.svg'" mode="aspectFill" lazy-load />
+            <image class="item-image" :src="thumb(item.image, THUMB_WIDTHS.listItem) || '/static/images/placeholder.svg'" mode="aspectFill" lazy-load />
           </view>
 
           <view class="item-info">
@@ -68,6 +68,7 @@ import { onShow } from '@dcloudio/uni-app'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { useAppStore } from '@/stores/app'
 import { getProductPrices } from '@/api/product'
+import { THUMB_WIDTHS, thumb } from '@/utils/thumb'
 
 const appStore = useAppStore()
 const loaded = ref(false)

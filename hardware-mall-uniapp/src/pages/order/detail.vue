@@ -98,7 +98,7 @@
         <view class="items-header">商品清单</view>
         <view class="item" v-for="(item, index) in order.items" :key="item.id">
           <view class="item-inner" :class="{ 'border-bottom': index < order.items.length - 1 }">
-            <image class="item-image" :src="item.productImage || '/static/images/default.png'" mode="aspectFill" lazy-load />
+            <image class="item-image" :src="thumb(item.productImage, THUMB_WIDTHS.listItem) || '/static/images/default.png'" mode="aspectFill" lazy-load />
             <view class="item-info">
               <text class="item-name">{{ item.productName }}</text>
               <text class="item-spec" v-if="item.productSpec">{{ item.productSpec }}</text>
@@ -157,6 +157,7 @@ import type { Order } from '@/types'
 import { cancelOrder as cancelOrderApi, confirmReceiveVerify, deleteOrder as deleteOrderApi, getOrderDetail, applyRefund as applyRefundApi } from '@/api/order'
 import { prepayOrder } from '@/api/pay'
 import LoadingState from '@/components/common/LoadingState.vue'
+import { THUMB_WIDTHS, thumb } from '@/utils/thumb'
 
 const order = ref<Partial<Order>>({})
 const loading = ref(true)

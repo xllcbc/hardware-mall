@@ -7,7 +7,6 @@ import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpecItemMapper;
 import com.example.mystore.mapper.SpecTemplateMapper;
 import com.example.mystore.mapper.SpuMapper;
-import com.example.mystore.service.OssService;
 import com.example.mystore.service.ProductCacheService;
 import com.example.mystore.service.SpecItemService;
 import com.example.mystore.service.SpecTemplateService;
@@ -160,7 +159,6 @@ class StockCacheIntegrationTest {
                 mock(SpecItemMapper.class),
                 mock(SpecTemplateService.class),
                 mock(SpecItemService.class),
-                mock(OssService.class),
                 redisUtil,
                 mock(ProductCacheService.class),
                 new BatchCacheLoader(redisUtil, redisLockUtil),

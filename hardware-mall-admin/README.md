@@ -37,3 +37,4 @@ npm run build    # 构建（vue-tsc + vite build）
 | 变量 | 说明 |
 |------|------|
 | `VITE_BACKEND_URL` | 开发环境后端地址（开发经 Vite 代理；生产由 Nginx 代理，可留空） |
+| `VITE_OSS_HOSTS` | 额外视作 OSS 的图片域名（逗号分隔，用于自定义域名/CDN 切换；默认识别 `*.aliyuncs.com`） |

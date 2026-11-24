@@ -144,6 +144,7 @@ cd hardware-mall-backend && mvn test
 - [数据库设计文档](./docs/数据库设计文档.md)
 - [接口规范文档](./docs/商城单体项目接口规范文档.md)
 - [部署说明](./docs/部署说明.md)
+- [图片回收运维手册](./docs/image-gc-runbook.md)
 
 ## License
 

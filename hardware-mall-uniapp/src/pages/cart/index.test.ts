@@ -60,6 +60,8 @@ const gapItem = (): CartItem => ({
   sellable: false
 })
 
+const OSS_IMAGE = 'https://java0251014.oss-cn-beijing.aliyuncs.com/products/cart.jpg'
+
 const mountCart = () =>
   mount(CartPage, {
     global: {
@@ -157,5 +159,20 @@ describe('cart page unsellable rows', () => {
 
     await wrapper.find('.manage-btn').trigger('tap')
     expect(gapRow.find('.checkbox').classes()).not.toContain('checked')
+  })
+
+  it('renders cart images as 200px thumbnails and keeps the placeholder intact', async () => {
+    const withImage = normalItem()
+    withImage.productImage = OSS_IMAGE
+    vi.mocked(getCartList).mockResolvedValue([withImage, gapItem()])
+
+    const wrapper = mountCart()
+    await flushPromises()
+
+    const images = wrapper.findAll('.item-image')
+    expect(images[0].attributes('src')).toBe(
+      `${OSS_IMAGE}?x-oss-process=image/resize,w_200/format,webp/quality,q_80`
+    )
+    expect(images[1].attributes('src')).toBe('/static/images/default.png')
   })
 })

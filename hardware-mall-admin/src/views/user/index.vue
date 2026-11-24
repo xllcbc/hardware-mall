@@ -48,9 +48,22 @@
         <el-table-column label="用户" min-width="180">
           <template #default="{ row }">
             <div class="user-info-cell">
-              <el-avatar :size="40" class="user-avatar" :src="row.avatarUrl">
+              <el-image
+                v-if="row.avatarUrl"
+                :src="thumb(row.avatarUrl, THUMB_WIDTHS.userAvatar)"
+                class="user-avatar"
+                fit="cover"
+                lazy
+              >
+                <template #error>
+                  <div class="avatar-fallback">
+                    <el-icon><User /></el-icon>
+                  </div>
+                </template>
+              </el-image>
+              <div v-else class="user-avatar avatar-fallback">
                 <el-icon><User /></el-icon>
-              </el-avatar>
+              </div>
               <div class="user-detail">
                 <span class="user-name">{{ row.nickname || '未设置昵称' }}</span>
                 <span class="user-id">ID: {{ row.id }}</span>
@@ -219,6 +232,7 @@ import { provinceCityOptions } from '@/utils/regions'
 import { getUserList, updateUserStatus, updateUserRegion, updateUserLevel } from '@/api/admin/user'
 import { getUserLevelList, type UserLevel } from '@/api/admin/userLevel'
 import { USER_ROLE, USER_ROLE_TEXT, USER_STATUS, USER_STATUS_TEXT } from '@/constants/status'
+import { THUMB_WIDTHS, thumb } from '@/utils/thumb'
 
 const router = useRouter()
 const route = useRoute()
@@ -483,9 +497,21 @@ function parseLevelIdQuery(value: unknown): number | null {
 }
 
 .user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
   background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
   color: white;
   flex-shrink: 0;
+}
+
+.avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
 }
 
 .user-detail {

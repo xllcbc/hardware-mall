@@ -46,6 +46,14 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
       DINGTALK_WEBHOOK: ${DINGTALK_WEBHOOK:-}
       DINGTALK_SECRET: ${DINGTALK_SECRET:-}
+      IMAGE_GC_MODE: ${IMAGE_GC_MODE:-off}
+      IMAGE_GC_GRACE_DAYS: ${IMAGE_GC_GRACE_DAYS:-7}
+      IMAGE_GC_TRASH_RETENTION_DAYS: ${IMAGE_GC_TRASH_RETENTION_DAYS:-30}
+      IMAGE_GC_ALERT_MAX_BYTES: ${IMAGE_GC_ALERT_MAX_BYTES:-209715200}
+      IMAGE_GC_ALERT_MAX_COUNT: ${IMAGE_GC_ALERT_MAX_COUNT:-200}
+      IMAGE_GC_REPORT_CRON: ${IMAGE_GC_REPORT_CRON:-0 0 3 * * MON}
+      IMAGE_GC_PURGE_CRON: ${IMAGE_GC_PURGE_CRON:-0 40 3 * * *}
+      IMAGE_GC_RESTORE_OBJECT_KEY: ${IMAGE_GC_RESTORE_OBJECT_KEY:-}
     ports:
       - "8080:8080"
     networks:
@@ -55,6 +63,8 @@ services:
     build:
       context: ./hardware-mall-admin
       dockerfile: Dockerfile
+      args:
+        VITE_OSS_HOSTS: ${VITE_OSS_HOSTS:-}
     container_name: hw-admin
     restart: unless-stopped
     depends_on:

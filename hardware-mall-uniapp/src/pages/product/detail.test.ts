@@ -21,6 +21,14 @@ vi.mock('@/utils/auth', () => ({
   requireLogin: vi.fn().mockResolvedValue(true)
 }))
 
+const { shareHandlers } = vi.hoisted(() => ({ shareHandlers: [] as Array<() => any> }))
+
+vi.mock('@dcloudio/uni-app', () => ({
+  onShareAppMessage: (cb: () => any) => { shareHandlers.push(cb) }
+}))
+
+const OSS_IMAGE = 'https://java0251014.oss-cn-beijing.aliyuncs.com/products/detail.jpg'
+
 const uniMock = {
   getStorageSync: vi.fn(() => ''),
   setStorageSync: vi.fn(),
@@ -79,6 +87,7 @@ describe('product detail unsellable handling', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    shareHandlers.length = 0
     vi.stubGlobal('uni', uniMock)
     vi.stubGlobal('getCurrentPages', () => [{ options: { id: '7' } }])
     uniMock.getStorageSync.mockReturnValue('')
@@ -128,5 +137,21 @@ describe('product detail unsellable handling', () => {
 
     const appStore = useAppStore()
     expect(appStore.footprint[0]?.price).toBe(12.5)
+  })
+
+  it('uses 750px thumbnails in the carousel but shares the original image', async () => {
+    const detail = sellableDetail()
+    detail.spu.images = [OSS_IMAGE]
+    vi.mocked(getProductDetail).mockResolvedValue(detail)
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('.product-image').attributes('src')).toBe(
+      `${OSS_IMAGE}?x-oss-process=image/resize,w_750/format,webp/quality,q_80`
+    )
+
+    expect(shareHandlers).toHaveLength(1)
+    expect(shareHandlers[0]().imageUrl).toBe(OSS_IMAGE)
   })
 })

@@ -5,9 +5,10 @@
       <text class="search-text">搜索商品</text>
     </view>
 
+    <!-- Banner 接口尚未接入, 保留停用状态; 恢复时按 750px 缩略图请求 (引入 @/utils/thumb) -->
     <!-- <swiper class="banner" indicator-dots autoplay circular indicator-active-color="#C9A86C">
       <swiper-item v-for="(banner, index) in banners" :key="index" @tap="onBannerClick(banner)">
-        <image v-if="banner.image" class="banner-image" :src="banner.image" mode="aspectFill" />
+        <image v-if="banner.image" class="banner-image" :src="thumb(banner.image, THUMB_WIDTHS.banner)" mode="aspectFill" />
         <view v-else class="banner-slide" :class="`banner-${index}`">
           <text class="banner-title">{{ banner.title }}</text>
         </view>

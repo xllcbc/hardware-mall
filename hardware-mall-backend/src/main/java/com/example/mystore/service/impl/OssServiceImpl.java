@@ -21,9 +21,16 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class OssServiceImpl implements OssService {
 
+    /** 30 天公共缓存：对象键含时间戳与 UUID，不会覆盖，长缓存安全。 */
+    private static final String CACHE_CONTROL_30_DAYS = "public, max-age=2592000";
+
     private final OSS ossClient;
     private final OssProperties ossProperties;
 
+    /**
+     * 上传图片并返回公网地址。写入 30 天公共缓存头，因此只适用于公开可访问的图片目录
+     * （products/、avatars/、banners/），不可用于私有文件。
+     */
     @Override
     public String uploadFile(MultipartFile file, String dir) {
         long startedAt = System.nanoTime();
@@ -47,6 +54,7 @@ public class OssServiceImpl implements OssService {
             if (file.getContentType() != null && !file.getContentType().isBlank()) {
                 metadata.setContentType(file.getContentType());
             }
+            metadata.setCacheControl(CACHE_CONTROL_30_DAYS);
             ossClient.putObject(new PutObjectRequest(
                     ossProperties.getBucketName(),
                     objectName,
@@ -62,24 +70,6 @@ public class OssServiceImpl implements OssService {
         }
 
         return ossProperties.getDomain() + "/" + objectName;
-    }
-
-    @Override
-    public void deleteFile(String url) {
-        if (url == null || url.isBlank()) {
-            return;
-        }
-        String prefix = ossProperties.getDomain() + "/";
-        if (!url.startsWith(prefix)) {
-            log.warn("OSS 删除跳过：URL 不属于当前域名, url={}", url);
-            return;
-        }
-        String objectName = url.substring(prefix.length());
-        try {
-            ossClient.deleteObject(ossProperties.getBucketName(), objectName);
-        } catch (Exception e) {
-            log.warn("OSS 删除失败, objectName={}, error={}", objectName, e.getMessage());
-        }
     }
 
     private long elapsedMillis(long startedAt) {

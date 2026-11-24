@@ -38,6 +38,8 @@ const freshPrice = (id: number, minPrice: number): ProductListVO => ({
   status: 1
 })
 
+const OSS_IMAGE = 'https://java0251014.oss-cn-beijing.aliyuncs.com/products/favorite.jpg'
+
 describe('favorites page refreshes prices on show', () => {
   beforeEach(() => {
     showHandlers.length = 0
@@ -62,5 +64,23 @@ describe('favorites page refreshes prices on show', () => {
 
     expect(vi.mocked(getProductPrices)).toHaveBeenCalledWith([1])
     expect(appStore.favorites[0].minPrice).toBe(20)
+  })
+
+  it('renders favorite images as 200px thumbnails', async () => {
+    const appStore = useAppStore()
+    appStore.favorites.push({
+      id: 1,
+      name: '商品1',
+      image: OSS_IMAGE,
+      minPrice: 10,
+      addTime: 0
+    })
+
+    const wrapper = mount(FavoritesPage, { global: { stubs: { EmptyState: true } } })
+    await flushPromises()
+
+    expect(wrapper.find('.item-image').attributes('src')).toBe(
+      `${OSS_IMAGE}?x-oss-process=image/resize,w_200/format,webp/quality,q_80`
+    )
   })
 })
