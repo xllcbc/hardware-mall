@@ -27,6 +27,10 @@ public class OssServiceImpl implements OssService {
     private final OSS ossClient;
     private final OssProperties ossProperties;
 
+    /**
+     * 上传图片并返回公网地址。写入 30 天公共缓存头，因此只适用于公开可访问的图片目录
+     * （products/、avatars/、banners/），不可用于私有文件。
+     */
     @Override
     public String uploadFile(MultipartFile file, String dir) {
         long startedAt = System.nanoTime();
