@@ -29,8 +29,10 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -112,6 +114,7 @@ public class ImageGcServiceImpl implements ImageGcService {
         int referencedObjects = 0;
         int unreferencedObjects = 0;
         List<String> candidateKeys = new ArrayList<>();
+        Map<String, Long> candidateBytesByKey = new HashMap<>();
 
         for (OSSObjectSummary object : objects) {
             String key = object.getKey();
@@ -123,6 +126,7 @@ public class ImageGcServiceImpl implements ImageGcService {
             Date lastModified = object.getLastModified();
             if (lastModified != null && lastModified.toInstant().isBefore(cutoff)) {
                 candidateKeys.add(key);
+                candidateBytesByKey.put(key, object.getSize());
             }
         }
 
@@ -137,7 +141,7 @@ public class ImageGcServiceImpl implements ImageGcService {
                 .toList();
 
         TrashOutcome trashOutcome = mode == ImageGcConstants.Mode.TRASH
-                ? moveCandidatesToTrash(candidateKeys)
+                ? moveCandidatesToTrash(candidateKeys, candidateBytesByKey)
                 : TrashOutcome.NOT_EXECUTED;
 
         if (trashOutcome.abortReason() != null) {
@@ -157,6 +161,7 @@ public class ImageGcServiceImpl implements ImageGcService {
                 .sampleObjectKeys(samples)
                 .trashedObjectCount(trashOutcome.trashedCount())
                 .trashFailedObjectCount(trashOutcome.failedCount())
+                .trashedBytes(trashOutcome.trashedBytes())
                 .build();
     }
 
@@ -164,11 +169,12 @@ public class ImageGcServiceImpl implements ImageGcService {
      * 逐个候选先复制到 {@code trash/<批次日期>/<原对象键>}，复制成功后才删除原对象。
      * 复制或删除失败即中止本轮且不再处理后续候选，失败对象和后续候选的原对象全部保留（失败关闭）。
      */
-    private TrashOutcome moveCandidatesToTrash(List<String> candidateKeys) {
+    private TrashOutcome moveCandidatesToTrash(List<String> candidateKeys, Map<String, Long> candidateBytesByKey) {
         String batchDate = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
         String bucket = ossProperties.getBucketName();
         int trashed = 0;
         int failed = 0;
+        long trashedBytes = 0;
         for (String key : candidateKeys) {
             String trashKey = ImageGcConstants.Trash.PREFIX + batchDate + "/" + key;
             try {
@@ -176,27 +182,28 @@ public class ImageGcServiceImpl implements ImageGcService {
             } catch (RuntimeException e) {
                 log.error("图片回收：复制到回收站失败，中止本轮，后续候选不再删除。key={}, trashKey={}",
                         key, trashKey, e);
-                return new TrashOutcome(trashed, failed + 1,
+                return new TrashOutcome(trashed, failed + 1, trashedBytes,
                         "复制到回收站失败，已中止本轮且不再删除后续对象: " + e.getMessage());
             }
             try {
                 ossClient.deleteObject(bucket, key);
                 trashed++;
+                trashedBytes += candidateBytesByKey.getOrDefault(key, 0L);
             } catch (RuntimeException e) {
                 log.error("图片回收：回收站副本已写入，但删除原对象失败，中止本轮。key={}, trashKey={}",
                         key, trashKey, e);
-                return new TrashOutcome(trashed, failed + 1,
+                return new TrashOutcome(trashed, failed + 1, trashedBytes,
                         "删除原对象失败，已中止本轮且不再删除后续对象: " + e.getMessage());
             }
         }
-        log.info("图片回收(trash)：已移入回收站 {} 个对象，失败 {} 个对象，批次={}",
-                trashed, failed, batchDate);
-        return new TrashOutcome(trashed, failed, null);
+        log.info("图片回收(trash)：已移入回收站 {} 个对象，共 {} 字节，失败 {} 个对象，批次={}",
+                trashed, trashedBytes, failed, batchDate);
+        return new TrashOutcome(trashed, failed, trashedBytes, null);
     }
 
-    private record TrashOutcome(int trashedCount, int failedCount, String abortReason) {
+    private record TrashOutcome(int trashedCount, int failedCount, long trashedBytes, String abortReason) {
 
-        private static final TrashOutcome NOT_EXECUTED = new TrashOutcome(0, 0, null);
+        private static final TrashOutcome NOT_EXECUTED = new TrashOutcome(0, 0, 0, null);
     }
 
     @Override

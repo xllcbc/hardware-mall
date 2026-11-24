@@ -29,6 +29,12 @@ public final class ImageGcConstants {
 
         public static final String ABORTED = "IMAGE_GC_ABORTED";
         public static final String FAILED = "IMAGE_GC_FAILED";
+        /** 单次回收量超过配置阈值。 */
+        public static final String THRESHOLD = "IMAGE_GC_THRESHOLD";
+        /** 回收站清理失败、中止或部分删除失败（失败对象下一轮重试）。 */
+        public static final String PURGE_FAILED = "IMAGE_TRASH_PURGE_FAILED";
+        /** 单次回收站清理量超过配置阈值。 */
+        public static final String PURGE_THRESHOLD = "IMAGE_TRASH_PURGE_THRESHOLD";
     }
 
     /** 回收站对象键布局：trash/&lt;yyyyMMdd&gt;/&lt;原对象键&gt;。该前缀永不参与扫描。 */

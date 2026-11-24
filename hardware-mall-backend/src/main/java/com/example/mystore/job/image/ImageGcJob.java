@@ -1,6 +1,7 @@
 package com.example.mystore.job.image;
 
 import com.example.mystore.common.constant.ImageGcConstants;
+import com.example.mystore.config.ImageGcProperties;
 import com.example.mystore.entity.vo.ImageGcReport;
 import com.example.mystore.service.ImageGcService;
 import com.example.mystore.service.impl.DingTalkAlertService;
@@ -14,7 +15,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 每周图片回收任务。多实例同时触发时只有拿到分布式锁的实例执行；
- * 失败或中止只记录日志和告警，不向调度线程抛出。
+ * 失败或中止只记录日志和告警，不向调度线程抛出。单轮回收量超过配置阈值时额外告警。
  */
 @Slf4j
 @Component
@@ -26,6 +27,7 @@ public class ImageGcJob {
     private final ImageGcService imageGcService;
     private final RedisLockUtil redisLockUtil;
     private final DingTalkAlertService dingTalkAlertService;
+    private final ImageGcProperties properties;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Scheduled(cron = "${image.gc.report-cron:0 0 3 * * MON}")
@@ -47,6 +49,14 @@ public class ImageGcJob {
                 return;
             }
             log.info("图片回收报告: {}", summary(report));
+            if (properties.exceedsDeleteThreshold(report.getTrashedBytes(), report.getTrashedObjectCount())) {
+                log.warn("图片回收单轮回收量超过阈值: objects={}, bytes={}",
+                        report.getTrashedObjectCount(), report.getTrashedBytes());
+                dingTalkAlertService.alert(ImageGcConstants.Alert.THRESHOLD,
+                        "本轮回收对象数=" + report.getTrashedObjectCount()
+                                + ", 字节数=" + report.getTrashedBytes()
+                                + "\n" + summary(report));
+            }
         } catch (Exception e) {
             log.error("图片回收任务执行失败", e);
             dingTalkAlertService.alert(ImageGcConstants.Alert.FAILED,
