@@ -150,3 +150,7 @@ completed_at=<UTC timestamp>
 ```
 
 如需把关键日志、baseline 输出与回滚演练结果归档，写入 `docs/release/` 下带日期的文件，并在 PR / issue 中链接。
+
+## 9. 图片回收运维
+
+图片回收（每周报告/回收、每日回收站清理、单张恢复、一键关闭）独立于发布流程，见 [`docs/image-gc-runbook.md`](./image-gc-runbook.md)。
