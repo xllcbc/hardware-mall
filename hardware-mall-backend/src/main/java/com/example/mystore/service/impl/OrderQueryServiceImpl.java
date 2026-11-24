@@ -70,24 +70,30 @@ public class OrderQueryServiceImpl implements OrderQueryService {
         Page<OrderVO> voPage = new Page<>(orderPage.getCurrent(), orderPage.getSize(), orderPage.getTotal());
         List<OrderVO> voList = new ArrayList<>();
         for (Order order : orderPage.getRecords()) {
-            voList.add(getOrderView(order.getId()));
+            // 分页查询已按用户过滤, 直接复用已读取的订单组装, 避免逐条重读
+            voList.add(buildOrderVO(order, false, null));
         }
         voPage.setRecords(voList);
         return voPage;
     }
 
     @Override
-    public OrderVO getOrderView(Long orderId) {
-        return buildOrderVO(orderMapper.selectById(orderId), false, null);
+    public OrderVO getOrderView(Long userId, Long orderId) {
+        return buildOrderVO(requireOwnedOrder(userId, orderId), false, null);
     }
 
     @Override
     public Integer getUserOrderStatus(Long userId, Long orderId) {
+        return requireOwnedOrder(userId, orderId).getStatus();
+    }
+
+    /** 用户侧订单访问的唯一归属校验: 不存在与不属于当前用户使用同一错误语义。 */
+    private Order requireOwnedOrder(Long userId, Long orderId) {
         Order order = orderMapper.selectById(orderId);
         if (order == null || !order.getUserId().equals(userId)) {
             throw new BusinessException("订单不存在");
         }
-        return order.getStatus();
+        return order;
     }
 
     @Override
@@ -151,7 +157,7 @@ public class OrderQueryServiceImpl implements OrderQueryService {
         if (order == null) {
             throw new BusinessException("订单不存在");
         }
-        return getOrderView(order.getId());
+        return buildOrderVO(order, false, null);
     }
 
     @Override

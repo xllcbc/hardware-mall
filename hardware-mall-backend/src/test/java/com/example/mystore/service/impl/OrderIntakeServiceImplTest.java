@@ -177,7 +177,7 @@ class OrderIntakeServiceImplTest {
         lenient().when(orderIdempotencyService.claim(anyLong(), anyString(), anyString()))
                 .thenReturn(new ClaimOutcome(
                         ClaimOutcome.Kind.ACQUIRED, 10L, "owner-token", null, true));
-        lenient().when(orderQueryService.getOrderView(anyLong()))
+        lenient().when(orderQueryService.getOrderView(anyLong(), anyLong()))
                 .thenReturn(new OrderVO());
     }
 
@@ -262,7 +262,7 @@ class OrderIntakeServiceImplTest {
         OrderVO original = new OrderVO();
         original.setId(77L);
         original.setOrderNo("SO-ORIGINAL");
-        when(orderQueryService.getOrderView(77L)).thenReturn(original);
+        when(orderQueryService.getOrderView(2L, 77L)).thenReturn(original);
 
         OrderVO vo = intakeService.createOrder(2L, stubValidRequest(), "k1");
 
@@ -375,7 +375,7 @@ class OrderIntakeServiceImplTest {
     @Test
     void createOrder_voAssemblyFails_doesNotFailOrReleaseRecord() {
         stubSuccessfulOrderCreation();
-        when(orderQueryService.getOrderView(100L)).thenThrow(new RuntimeException("vo assembly failed"));
+        when(orderQueryService.getOrderView(2L, 100L)).thenThrow(new RuntimeException("vo assembly failed"));
 
         assertThatThrownBy(() -> intakeService.createOrder(
                 2L, singleLineRequest(1, "219.00"), "vo-key"))
@@ -980,7 +980,7 @@ class OrderIntakeServiceImplTest {
         OrderVO vo = new OrderVO();
         vo.setId(orderId);
         vo.setOrderNo("SO" + orderId);
-        when(orderQueryService.getOrderView(orderId)).thenReturn(vo);
+        when(orderQueryService.getOrderView(2L, orderId)).thenReturn(vo);
     }
 
     private CreateOrderRequest singleLineRequest(int quantity, String expectedPayAmount) {
