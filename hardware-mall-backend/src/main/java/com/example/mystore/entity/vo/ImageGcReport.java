@@ -52,6 +52,9 @@ public class ImageGcReport {
     /** trash 模式下复制或删除失败、原对象因此保留的数量。 */
     int trashFailedObjectCount;
 
+    /** trash 模式下成功移入回收站的对象总字节数；report 模式恒为 0。 */
+    long trashedBytes;
+
     public static ImageGcReport notExecuted(ImageGcConstants.Mode mode) {
         return ImageGcReport.builder()
                 .executed(false)

@@ -134,6 +134,13 @@ image:
     # restore-object-key: ${IMAGE_GC_RESTORE_OBJECT_KEY:}
     # 宽限期：最后修改早于该天数的对象才可能被回收
     grace-days: ${IMAGE_GC_GRACE_DAYS:7}
+    # 回收站保留天数：只按回收路径中的批次日期判断，超过后由每日清理任务物理删除
+    trash-retention-days: ${IMAGE_GC_TRASH_RETENTION_DAYS:30}
+    # 单轮删除量告警阈值（trash 回收 / 回收站清理），任一维度超过即钉钉告警；<=0 关闭该维度
+    alert-max-bytes: ${IMAGE_GC_ALERT_MAX_BYTES:209715200}
+    alert-max-count: ${IMAGE_GC_ALERT_MAX_COUNT:200}
+    # 每日 03:40 清理超过保留期的回收站副本
+    purge-cron: ${IMAGE_GC_PURGE_CRON:0 40 3 * * *}
     # 每周一 03:00 输出图片回收报告
     report-cron: ${IMAGE_GC_REPORT_CRON:0 0 3 * * MON}
 

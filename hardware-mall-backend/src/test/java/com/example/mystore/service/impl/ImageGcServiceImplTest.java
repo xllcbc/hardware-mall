@@ -225,6 +225,7 @@ class ImageGcServiceImplTest {
         assertThat(report.getCandidateCount()).isEqualTo(1);
         assertThat(report.getTrashedObjectCount()).isEqualTo(1);
         assertThat(report.getTrashFailedObjectCount()).isZero();
+        assertThat(report.getTrashedBytes()).isEqualTo(1000);
     }
 
     @Test
@@ -248,6 +249,7 @@ class ImageGcServiceImplTest {
         assertThat(report.getCandidateCount()).isEqualTo(2);
         assertThat(report.getTrashedObjectCount()).isZero();
         assertThat(report.getTrashFailedObjectCount()).isEqualTo(1);
+        assertThat(report.getTrashedBytes()).isZero();
         verify(ossClient, never()).deleteObject(anyString(), anyString());
         verify(ossClient, never()).copyObject("test-bucket", "products/untouched.jpg", "test-bucket",
                 "trash/" + batch + "/products/untouched.jpg");
