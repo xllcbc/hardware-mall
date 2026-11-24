@@ -349,10 +349,8 @@ const onShare = () => {
   uni.showShareMenu({ withShareTicket: true })
 }
 
-// 分享卡片始终使用原图, 不使用缩略图
+// 分享卡片始终使用原图, 不使用缩略图; 标题与路径沿用微信默认值
 onShareAppMessage(() => ({
-  title: product.value.name || '',
-  path: `/pages/product/detail?id=${product.value.id}`,
   imageUrl: product.value.images?.[0] || ''
 }))
 </script>
