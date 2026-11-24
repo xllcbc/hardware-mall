@@ -24,6 +24,8 @@ import org.springframework.stereotype.Service;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
@@ -34,7 +36,7 @@ import java.util.Set;
 
 /**
  * 图片回收服务：先列 OSS 对象，再读取数据库引用快照，最后用最新引用快照再确认一次，
- * 降低扫描期间新增引用的竞态。报告模式只读，不复制、不删除任何对象。
+ * 降低扫描期间新增引用的竞态。报告模式只读；回收模式先复制到回收站，复制成功后才删除原对象。
  */
 @Slf4j
 @Service
@@ -120,6 +122,10 @@ public class ImageGcServiceImpl implements ImageGcService {
                 .limit(SAMPLE_LIMIT)
                 .toList();
 
+        TrashOutcome trashOutcome = mode == ImageGcConstants.Mode.TRASH
+                ? moveCandidatesToTrash(candidateKeys)
+                : TrashOutcome.NOT_EXECUTED;
+
         return ImageGcReport.builder()
                 .executed(true)
                 .mode(mode)
@@ -131,7 +137,104 @@ public class ImageGcServiceImpl implements ImageGcService {
                 .candidateCount(candidateKeys.size())
                 .reclaimableBytes(reclaimableBytes)
                 .sampleObjectKeys(samples)
+                .trashedObjectCount(trashOutcome.trashed())
+                .trashFailedObjectCount(trashOutcome.failed())
                 .build();
+    }
+
+    /**
+     * 逐个候选先复制到 {@code trash/<批次日期>/<原对象键>}，复制成功后才删除原对象。
+     * 复制失败时跳过该对象并保留原对象；删除失败时原对象同样保留（回收站副本留下，下次可幂等重试）。
+     */
+    private TrashOutcome moveCandidatesToTrash(List<String> candidateKeys) {
+        String batchDate = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
+        String bucket = ossProperties.getBucketName();
+        int trashed = 0;
+        int failed = 0;
+        for (String key : candidateKeys) {
+            String trashKey = ImageGcConstants.Trash.PREFIX + batchDate + "/" + key;
+            try {
+                ossClient.copyObject(bucket, key, bucket, trashKey);
+            } catch (RuntimeException e) {
+                failed++;
+                log.warn("图片回收：复制到回收站失败，保留原对象。key={}, trashKey={}", key, trashKey, e);
+                continue;
+            }
+            try {
+                ossClient.deleteObject(bucket, key);
+                trashed++;
+            } catch (RuntimeException e) {
+                failed++;
+                log.warn("图片回收：回收站副本已写入，但删除原对象失败，原对象保留。key={}, trashKey={}",
+                        key, trashKey, e);
+            }
+        }
+        log.info("图片回收(trash)：已移入回收站 {} 个对象，失败保留 {} 个对象，批次={}",
+                trashed, failed, batchDate);
+        return new TrashOutcome(trashed, failed);
+    }
+
+    private record TrashOutcome(int trashed, int failed) {
+
+        private static final TrashOutcome NOT_EXECUTED = new TrashOutcome(0, 0);
+    }
+
+    @Override
+    public boolean restoreFromTrash(String trashObjectKey) {
+        Optional<String> originalKey = toOriginalKey(trashObjectKey);
+        if (originalKey.isEmpty()) {
+            log.warn("从回收站恢复图片失败：对象键不是 trash/<yyyyMMdd>/<原对象键> 形式。key={}", trashObjectKey);
+            return false;
+        }
+        String bucket = ossProperties.getBucketName();
+        try {
+            ossClient.copyObject(bucket, trashObjectKey, bucket, originalKey.get());
+        } catch (RuntimeException e) {
+            log.error("从回收站恢复图片失败：复制回原对象键失败，回收站副本已保留。key={}", trashObjectKey, e);
+            return false;
+        }
+        boolean accessible;
+        try {
+            accessible = ossClient.doesObjectExist(bucket, originalKey.get());
+        } catch (RuntimeException e) {
+            log.error("从回收站恢复图片失败：校验原对象可访问性时出错，回收站副本已保留。key={}",
+                    trashObjectKey, e);
+            return false;
+        }
+        if (!accessible) {
+            log.error("从回收站恢复图片失败：复制后原对象仍不可访问，回收站副本已保留。key={}", trashObjectKey);
+            return false;
+        }
+        try {
+            ossClient.deleteObject(bucket, trashObjectKey);
+        } catch (RuntimeException e) {
+            log.warn("图片已恢复且可访问，但删除回收站副本失败，副本将在保留期清理时处理。key={}",
+                    trashObjectKey, e);
+        }
+        log.info("已从回收站恢复图片: {} -> {}", trashObjectKey, originalKey.get());
+        return true;
+    }
+
+    /**
+     * 解析回收站对象键：前缀必须是 {@code trash/}，紧随其后的日期段必须是 {@code yyyyMMdd}，
+     * 日期之后必须还有非空的原对象键。
+     */
+    private static Optional<String> toOriginalKey(String trashObjectKey) {
+        if (trashObjectKey == null
+                || !trashObjectKey.startsWith(ImageGcConstants.Trash.PREFIX)) {
+            return Optional.empty();
+        }
+        String rest = trashObjectKey.substring(ImageGcConstants.Trash.PREFIX.length());
+        int separator = rest.indexOf('/');
+        if (separator <= 0 || separator == rest.length() - 1) {
+            return Optional.empty();
+        }
+        try {
+            LocalDate.parse(rest.substring(0, separator), DateTimeFormatter.BASIC_ISO_DATE);
+        } catch (RuntimeException e) {
+            return Optional.empty();
+        }
+        return Optional.of(rest.substring(separator + 1));
     }
 
     private ImageGcReport abort(ImageGcConstants.Mode mode, String reason, int scanned,

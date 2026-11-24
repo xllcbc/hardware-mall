@@ -128,8 +128,10 @@ dingtalk:
 
 image:
   gc:
-    # off / report；默认关闭，首次上线先以 report 观察两周
+    # off / report / trash；默认关闭，首次上线先以 report 观察两周，稳定后再切 trash
     mode: ${IMAGE_GC_MODE:off}
+    # 一次性恢复回收站中的单张图片，值形如 trash/<yyyyMMdd>/<原对象键>，恢复完成后移除该配置
+    # restore-object-key: ${IMAGE_GC_RESTORE_OBJECT_KEY:}
     # 宽限期：最后修改早于该天数的对象才可能被回收
     grace-days: ${IMAGE_GC_GRACE_DAYS:7}
     # 每周一 03:00 输出图片回收报告

@@ -46,6 +46,12 @@ public class ImageGcReport {
     /** 候选对象键样例，按对象键排序后截断。 */
     List<String> sampleObjectKeys;
 
+    /** trash 模式下成功复制到回收站并删除原对象的数量；report 模式恒为 0。 */
+    int trashedObjectCount;
+
+    /** trash 模式下复制或删除失败、原对象因此保留的数量。 */
+    int trashFailedObjectCount;
+
     public static ImageGcReport notExecuted(ImageGcConstants.Mode mode) {
         return ImageGcReport.builder()
                 .executed(false)

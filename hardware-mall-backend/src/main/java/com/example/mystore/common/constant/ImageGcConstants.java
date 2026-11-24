@@ -31,11 +31,24 @@ public final class ImageGcConstants {
         public static final String FAILED = "IMAGE_GC_FAILED";
     }
 
+    /** 回收站对象键布局：trash/&lt;yyyyMMdd&gt;/&lt;原对象键&gt;。该前缀永不参与扫描。 */
+    public static final class Trash {
+
+        private Trash() {
+        }
+
+        public static final String PREFIX = "trash/";
+        /** 路径中的批次日期格式，用于保留期清理。 */
+        public static final String DATE_PATTERN = "yyyyMMdd";
+    }
+
     /** 运行模式 */
     public enum Mode {
         /** 关闭：任务不列目录、不读库。 */
         OFF,
         /** 只读报告：只输出统计与样例，不复制、不删除。 */
-        REPORT
+        REPORT,
+        /** 回收：先复制到回收站，复制成功后才删除原对象。 */
+        TRASH
     }
 }
