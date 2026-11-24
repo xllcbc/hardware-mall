@@ -26,6 +26,13 @@ public interface OrderQueryService {
     OrderVO getOrderView(Long orderId);
 
     /**
+     * 读取用户订单状态：供门面判断详情是否需要触发支付同步。
+     *
+     * <p>只读不写库；订单不存在或不属于该用户时抛「订单不存在」。
+     */
+    Integer getUserOrderStatus(Long userId, Long orderId);
+
+    /**
      * 管理端订单分页：按用户、状态、订单号与创建日期筛选，批量加载最新支付记录。
      */
     Page<OrderVO> getAdminOrderPage(Long userId, Integer status, String orderNo, String startDate, String endDate,
