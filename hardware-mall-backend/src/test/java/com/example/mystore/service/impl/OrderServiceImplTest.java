@@ -121,14 +121,14 @@ class OrderServiceImplTest {
         when(orderQueryService.getUserOrderStatus(2L, 1L))
                 .thenReturn(StatusConstants.ORDER_PENDING_PAYMENT);
         OrderVO view = new OrderVO();
-        when(orderQueryService.getOrderView(1L)).thenReturn(view);
+        when(orderQueryService.getOrderView(2L, 1L)).thenReturn(view);
 
         assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
 
         InOrder inOrder = inOrder(payService, orderQueryService);
         inOrder.verify(orderQueryService).getUserOrderStatus(2L, 1L);
         inOrder.verify(payService).syncPaymentStatus(1L);
-        inOrder.verify(orderQueryService).getOrderView(1L);
+        inOrder.verify(orderQueryService).getOrderView(2L, 1L);
         // 内联修复与微信查单已迁入支付模块: 订单门面详情只读
         verify(payService, never()).queryWechatOrder(any());
     }
@@ -139,11 +139,11 @@ class OrderServiceImplTest {
                 .thenReturn(StatusConstants.ORDER_PENDING_PAYMENT);
         doThrow(new RuntimeException("wechat down")).when(payService).syncPaymentStatus(1L);
         OrderVO view = new OrderVO();
-        when(orderQueryService.getOrderView(1L)).thenReturn(view);
+        when(orderQueryService.getOrderView(2L, 1L)).thenReturn(view);
 
         assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
 
-        verify(orderQueryService).getOrderView(1L);
+        verify(orderQueryService).getOrderView(2L, 1L);
     }
 
     @Test
@@ -156,7 +156,7 @@ class OrderServiceImplTest {
                 .hasMessage("订单不存在");
 
         verifyNoInteractions(payService);
-        verify(orderQueryService, never()).getOrderView(anyLong());
+        verify(orderQueryService, never()).getOrderView(anyLong(), anyLong());
     }
 
     @Test
@@ -164,12 +164,12 @@ class OrderServiceImplTest {
         when(orderQueryService.getUserOrderStatus(2L, 1L))
                 .thenReturn(StatusConstants.ORDER_SHIPPED);
         OrderVO view = new OrderVO();
-        when(orderQueryService.getOrderView(1L)).thenReturn(view);
+        when(orderQueryService.getOrderView(2L, 1L)).thenReturn(view);
 
         assertThat(orderService.getOrderById(2L, 1L)).isSameAs(view);
 
         verifyNoInteractions(payService);
-        verify(orderQueryService).getOrderView(1L);
+        verify(orderQueryService).getOrderView(2L, 1L);
     }
 
     // ==================== 生命周期门面接线 ====================

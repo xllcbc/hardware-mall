@@ -41,6 +41,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -170,7 +171,6 @@ class OrderQueryServiceImplTest {
         orderPage.setRecords(List.of(order));
 
         when(orderMapper.selectPage(any(), any())).thenReturn(orderPage);
-        when(orderMapper.selectById(1L)).thenReturn(order);
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
         OrderItem item = new OrderItem();
@@ -256,7 +256,7 @@ class OrderQueryServiceImplTest {
         when(orderItemMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(paymentRecordMapper.selectOne(any())).thenReturn(null);
 
-        OrderVO vo = queryService.getOrderView(1L);
+        OrderVO vo = queryService.getOrderView(2L, 1L);
 
         assertThat(vo.getStatusText()).isEqualTo("退款申请中");
         assertThat(vo.getCancelReason()).isEqualTo("不想要了");
@@ -436,6 +436,18 @@ class OrderQueryServiceImplTest {
         assertThatThrownBy(() -> queryService.getUserOrderStatus(2L, 1L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("订单不存在");
+    }
+
+    @Test
+    void userOrderView_otherUsersOrder_throwsNotFound() {
+        Order others = order(1L, StatusConstants.ORDER_PENDING_PAYMENT);
+        others.setUserId(3L);
+        when(orderMapper.selectById(1L)).thenReturn(others);
+
+        assertThatThrownBy(() -> queryService.getOrderView(2L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单不存在");
+        verifyNoInteractions(addressMapper, logisticsMapper, orderItemMapper, paymentRecordMapper);
     }
 
     private Order order(Long id, int status) {

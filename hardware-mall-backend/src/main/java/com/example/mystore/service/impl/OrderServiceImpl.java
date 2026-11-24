@@ -73,7 +73,7 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        return orderQueryService.getOrderView(orderId);
+        return orderQueryService.getOrderView(userId, orderId);
     }
 
     @Override
