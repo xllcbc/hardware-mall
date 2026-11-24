@@ -410,6 +410,34 @@ class OrderQueryServiceImplTest {
         }
     }
 
+    @Test
+    void userOrderStatus_ownedOrder_returnsStatus() {
+        when(orderMapper.selectById(1L)).thenReturn(order(1L, StatusConstants.ORDER_PENDING_PAYMENT));
+
+        assertThat(queryService.getUserOrderStatus(2L, 1L))
+                .isEqualTo(StatusConstants.ORDER_PENDING_PAYMENT);
+    }
+
+    @Test
+    void userOrderStatus_missingOrder_throwsNotFound() {
+        when(orderMapper.selectById(1L)).thenReturn(null);
+
+        assertThatThrownBy(() -> queryService.getUserOrderStatus(2L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单不存在");
+    }
+
+    @Test
+    void userOrderStatus_otherUsersOrder_throwsNotFound() {
+        Order others = order(1L, StatusConstants.ORDER_PENDING_PAYMENT);
+        others.setUserId(3L);
+        when(orderMapper.selectById(1L)).thenReturn(others);
+
+        assertThatThrownBy(() -> queryService.getUserOrderStatus(2L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("订单不存在");
+    }
+
     private Order order(Long id, int status) {
         Order order = new Order();
         order.setId(id);

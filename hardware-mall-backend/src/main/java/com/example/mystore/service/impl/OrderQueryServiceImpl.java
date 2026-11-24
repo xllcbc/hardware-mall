@@ -82,6 +82,15 @@ public class OrderQueryServiceImpl implements OrderQueryService {
     }
 
     @Override
+    public Integer getUserOrderStatus(Long userId, Long orderId) {
+        Order order = orderMapper.selectById(orderId);
+        if (order == null || !order.getUserId().equals(userId)) {
+            throw new BusinessException("订单不存在");
+        }
+        return order.getStatus();
+    }
+
+    @Override
     public Page<OrderVO> getAdminOrderPage(Long userId, Integer status, String orderNo, String startDate, String endDate,
                                            Integer page, Integer limit) {
         Page<Order> pageParam = new Page<>(page, limit);
