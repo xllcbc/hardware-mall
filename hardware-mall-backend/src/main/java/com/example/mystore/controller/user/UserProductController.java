@@ -44,6 +44,11 @@ public class UserProductController {
         return Result.success(spuService.getRecommendProductListVO(PageUtil.clampLimit(limit, 10, 20)));
     }
 
+    @GetMapping("/prices")
+    public Result<List<ProductListVO>> getProductPrices(@RequestParam List<Long> ids) {
+        return Result.success(spuService.getProductPriceList(ids));
+    }
+
     @GetMapping("/{id}")
     public Result<ProductDetailVO> getProductDetail(@PathVariable Long id) {
         return Result.success(spuService.getProductDetailVO(id));

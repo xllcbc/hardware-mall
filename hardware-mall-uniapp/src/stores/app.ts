@@ -105,6 +105,26 @@ export const useAppStore = defineStore('app', () => {
     preselectedCategoryId.value = id
   }
 
+  /** 用后端按当前等级重算的价格刷新收藏快照(等级/倍率变更后价格需重算)。 */
+  const updateFavoritePrices = (fresh: Array<{ id: number; minPrice: number | null }>) => {
+    const byId = new Map(fresh.map(i => [i.id, i]))
+    favorites.value = favorites.value.map(f => {
+      const next = byId.get(f.id)
+      return next ? { ...f, minPrice: next.minPrice ?? null } : f
+    })
+    saveFavorites()
+  }
+
+  /** 用后端按当前等级重算的价格刷新足迹快照(等级/倍率变更后价格需重算)。 */
+  const updateFootprintPrices = (fresh: Array<{ id: number; minPrice: number | null }>) => {
+    const byId = new Map(fresh.map(i => [i.id, i]))
+    footprint.value = footprint.value.map(f => {
+      const next = byId.get(f.id)
+      return next ? { ...f, price: next.minPrice ?? null } : f
+    })
+    saveFootprint()
+  }
+
   return {
     preselectedCategoryId,
     selectCategory,
@@ -118,6 +138,8 @@ export const useAppStore = defineStore('app', () => {
     toggleFavorite,
     addFootprint,
     clearFootprint,
-    removeFootprint
+    removeFootprint,
+    updateFavoritePrices,
+    updateFootprintPrices
   }
 })

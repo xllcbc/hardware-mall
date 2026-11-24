@@ -24,6 +24,8 @@ public interface SpuService {
 
     Page<ProductListVO> getProductListVO(Long categoryId, String keyword, Integer page, Integer limit, Integer status);
     List<ProductListVO> getRecommendProductListVO(Integer limit);
+    /** 按商品 ID 批量取当前等级结算价(收藏/足迹等本地价格快照刷新用)。 */
+    List<ProductListVO> getProductPriceList(List<Long> ids);
     ProductDetailVO getProductDetailVO(Long id);
     List<ProductSkuVO> getProductSkuVOs(Long spuId);
     Page<AdminProductPricingVO> getAdminProductPricingPage(

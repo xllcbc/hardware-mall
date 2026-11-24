@@ -64,8 +64,10 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { useAppStore } from '@/stores/app'
+import { getProductPrices } from '@/api/product'
 
 const appStore = useAppStore()
 const loaded = ref(false)
@@ -76,6 +78,18 @@ onMounted(() => {
   nextTick(() => {
     loaded.value = true
   })
+})
+
+// 等级/倍率变更后收藏价需按当前等级重算
+onShow(async () => {
+  const ids = appStore.favorites.map(f => f.id)
+  if (!ids.length) return
+  try {
+    const fresh = await getProductPrices(ids)
+    appStore.updateFavoritePrices(fresh)
+  } catch (e) {
+    console.error('刷新收藏价格失败:', e)
+  }
 })
 
 const selectedCount = computed(() => selectedIds.value.length)

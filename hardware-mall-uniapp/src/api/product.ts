@@ -26,6 +26,10 @@ export const getRecommendProducts = () => {
   return request.get<ProductListVO[]>('/user/product/recommend')
 }
 
+export const getProductPrices = (ids: number[]) => {
+  return request.get<ProductListVO[]>('/user/product/prices', { ids: ids.join(',') })
+}
+
 export const getProductDetail = (id: number) => {
   return request.get<ProductDetail>(`/user/product/${id}`)
 }
