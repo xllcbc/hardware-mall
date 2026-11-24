@@ -1,1147 +1,153 @@
 package com.example.mystore.service.impl;
 
-import com.alibaba.fastjson2.JSON;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.toolkit.IdWorker;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.example.mystore.common.constant.DiscountConstants;
 import com.example.mystore.common.constant.StatusConstants;
-import com.example.mystore.common.constant.WechatConstants;
-import com.example.mystore.common.exception.BusinessException;
-import com.example.mystore.common.exception.IdempotencyConflictException;
-import com.example.mystore.common.exception.PriceChangedException;
-import com.example.mystore.entity.db.Order;
-import com.example.mystore.entity.db.OrderIdempotency;
-import com.example.mystore.entity.db.OrderItem;
-import com.example.mystore.entity.db.Sku;
-import com.example.mystore.entity.db.Spu;
-import com.example.mystore.entity.db.Address;
-import com.example.mystore.entity.db.Logistics;
-import com.example.mystore.entity.db.Cart;
-import com.example.mystore.entity.db.PaymentRecord;
-import com.example.mystore.entity.vo.OrderVO;
-import com.example.mystore.entity.vo.OrderItemVO;
-import com.example.mystore.entity.vo.CheckoutItemVO;
-import com.example.mystore.entity.vo.CheckoutPreviewVO;
-import com.example.mystore.entity.vo.DashboardStatsVO;
-import com.example.mystore.entity.dto.LevelPricing;
-import com.example.mystore.entity.dto.ProductPricingFacts;
-import com.example.mystore.entity.vo.RecentOrderVO;
 import com.example.mystore.entity.dto.CheckoutPreviewRequest;
 import com.example.mystore.entity.dto.CreateOrderRequest;
-import com.example.mystore.entity.vo.SpecVO;
-import com.example.mystore.event.StockCacheEvent;
-import com.example.mystore.mapper.*;
-import com.example.mystore.service.CartService;
-import com.example.mystore.service.LevelPricingService;
-import com.example.mystore.service.OrderIdempotencyService;
+import com.example.mystore.entity.vo.CheckoutPreviewVO;
+import com.example.mystore.entity.vo.DashboardStatsVO;
+import com.example.mystore.entity.vo.OrderVO;
+import com.example.mystore.entity.vo.RecentOrderVO;
+import com.example.mystore.service.OrderIntakeService;
+import com.example.mystore.service.OrderLifecycleService;
+import com.example.mystore.service.OrderQueryService;
 import com.example.mystore.service.OrderService;
 import com.example.mystore.service.PayService;
-import com.example.mystore.service.RefundResult;
-import com.example.mystore.service.SkuService;
-import com.example.mystore.service.UserLevelService;
-import com.example.mystore.service.WechatOrderShippingService;
-import com.example.mystore.util.MoneyUtil;
-import com.example.mystore.util.OrderRequestFingerprint;
-import com.example.mystore.util.RedisUtil;
-import com.example.mystore.util.UserContext;
-import com.wechat.pay.java.service.payments.model.Transaction;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.util.StringUtils;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
-import java.util.*;
-import java.util.concurrent.TimeUnit;
+import java.util.List;
+import java.util.Map;
 
+/**
+ * 订单门面：HTTP 适配器，委托订单接入、生命周期与查询三个协作者，不注入任何 Mapper。
+ *
+ * <p>唯一编排是打开用户订单详情时，待付款订单先触发支付模块的支付状态同步，再由查询模块组装视图。
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class OrderServiceImpl implements OrderService {
 
-    private final OrderMapper orderMapper;
-    private final OrderItemMapper orderItemMapper;
-    private final SkuMapper skuMapper;
-    private final SpuMapper spuMapper;
-    private final AddressMapper addressMapper;
-    private final LogisticsMapper logisticsMapper;
-    private final CartMapper cartMapper;
-    private final CartService cartService;
-    private final SkuService skuService;
+    private final OrderIntakeService orderIntakeService;
+    private final OrderLifecycleService orderLifecycleService;
+    private final OrderQueryService orderQueryService;
+
     @Autowired(required = false)
     private PayService payService;
-    private final RedisUtil redisUtil;
-    private final ApplicationEventPublisher applicationEventPublisher;
-    private final PlatformTransactionManager transactionManager;
-    private final WechatOrderShippingService wechatOrderShippingService;
-    private final PaymentRecordMapper paymentRecordMapper;
-    private final LevelPricingService levelPricingService;
-    private final UserLevelService userLevelService;
-    private final OrderIdempotencyService orderIdempotencyService;
-
-    @Value("${wechat.pay.mch-id:}")
-    private String mchId;
-    private final DingTalkAlertService dingTalkAlertService;
 
     @Override
     public CheckoutPreviewVO previewOrder(CheckoutPreviewRequest request) {
-        SettlementSnapshot snapshot = buildSettlementSnapshot(request.getItems());
-        return toCheckoutPreview(snapshot);
+        return orderIntakeService.previewOrder(request);
     }
 
     @Override
     public OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey) {
-        log.info("创建订单开始, userId={}, idemKey={}, request={}", userId, idempotencyKey, request);
-
-        String idemKey = requireIdempotencyKey(idempotencyKey);
-        String requestHash = OrderRequestFingerprint.fingerprint(request);
-        OrderIdempotencyService.ClaimOutcome claim =
-                orderIdempotencyService.claim(userId, idemKey, requestHash);
-        switch (claim.kind()) {
-            case SUCCEEDED -> {
-                // 订单已提交但上次 VO 组装失败时，同 key 同指纹重试直接返回原订单
-                return getOrderVO(claim.orderId(), userId);
-            }
-            case PROCESSING -> throw new BusinessException("订单处理中，请稍后重试");
-            case CONFLICT -> throw new IdempotencyConflictException();
-            case ACQUIRED -> {
-                // 继续创建订单
-            }
-        }
-
-        Long orderId;
-        try {
-            // ① 事务外：只读校验 + 构建订单明细快照（不占用 DB 连接事务）
-            Address address = requireAddress(userId, request.getAddressId());
-            Logistics logistics = requireLogistics(request.getLogisticsId());
-            SettlementSnapshot settlement = buildSettlementSnapshot(request.getItems());
-            requireConfirmedAmount(request.getExpectedPayAmount(), settlement);
-
-            // ② 事务内：扣减库存 + 建单 + 明细 + 删购物车 + 幂等记录置成功 + 发布事件
-            orderId = new TransactionTemplate(transactionManager)
-                    .execute(status -> persistOrder(
-                            userId, address.getId(), logistics.getId(),
-                            request.getBuyerRemark(), settlement, claim));
-        } catch (RuntimeException e) {
-            // 提交前失败：独立事务置失败，允许同一幂等键立即重试
-            orderIdempotencyService.markFailed(claim.recordId(), claim.ownerToken());
-            orderIdempotencyService.releaseLock(
-                    userId, idemKey, claim.ownerToken(), claim.lockAcquired());
-            throw e;
-        }
-
-        orderIdempotencyService.releaseLock(userId, idemKey, claim.ownerToken(), claim.lockAcquired());
-        // ③ 事务外：组装返回 VO；VO 失败不得把已成功的幂等记录置失败或删除
-        return getOrderVO(orderId, userId);
-    }
-
-    private String requireIdempotencyKey(String idempotencyKey) {
-        if (!StringUtils.hasText(idempotencyKey)) {
-            throw new BusinessException("缺少幂等键，请刷新后重试");
-        }
-        String idemKey = idempotencyKey.trim();
-        if (idemKey.length() > OrderIdempotency.IDEMPOTENCY_KEY_MAX_LENGTH) {
-            throw new BusinessException("幂等键过长，请刷新后重试");
-        }
-        return idemKey;
-    }
-
-    private Address requireAddress(Long userId, Long addressId) {
-        Address address = addressMapper.selectById(addressId);
-        if (address == null || !address.getUserId().equals(userId)) {
-            throw new BusinessException("收货地址不存在");
-        }
-        log.info("地址验证通过, addressId={}", address.getId());
-        return address;
-    }
-
-    private Logistics requireLogistics(Long logisticsId) {
-        Logistics logistics = logisticsMapper.selectById(logisticsId);
-        log.info("物流查询结果, logistics={}", logistics);
-        if (logistics == null || logistics.getStatus() != StatusConstants.LOGISTICS_STATUS_ENABLED) {
-            throw new BusinessException("物流方式不存在或不可用");
-        }
-        return logistics;
-    }
-
-    private SettlementSnapshot buildSettlementSnapshot(List<CreateOrderRequest.CartItem> requestedItems) {
-        if (requestedItems == null || requestedItems.isEmpty()) {
-            throw new BusinessException("结算商品不能为空");
-        }
-        // ① 逐项校验 SKU 并收集（校验顺序与异常语义保持不变）
-        List<Long> requestedSkuIds = requestedItems.stream()
-                .map(CreateOrderRequest.CartItem::getSkuId)
-                .distinct()
-                .toList();
-        Map<Long, Sku> skuMap = skuService.getSkuMapByIds(requestedSkuIds);
-        List<Sku> skus = new ArrayList<>();
-        for (CreateOrderRequest.CartItem cartItem : requestedItems) {
-            Sku sku = skuMap.get(cartItem.getSkuId());
-            log.info("SKU查询结果, skuId={}, sku={}", cartItem.getSkuId(), sku);
-            if (sku == null || sku.getStatus() != 1) {
-                throw new BusinessException("商品不存在或已下架: " + cartItem.getSkuId());
-            }
-            // 【库存软检查】getSkuById 已返回新鲜库存(读 sku:stock 缓存, miss 回源 DB)
-            if (sku.getStock() == null || sku.getStock() < cartItem.getQuantity()) {
-                throw new BusinessException("库存不足: " + sku.getId());
-            }
-            skus.add(sku);
-        }
-
-        // ② 一次性批量查询 SPU（N 次 selectById → 1 次 IN 查询，distinct 去重）
-        List<Long> spuIds = skus.stream().map(Sku::getSpuId).distinct().toList();
-        Map<Long, Spu> spuMap = spuIds.isEmpty() ? Map.of()
-                : spuMapper.selectBatchIds(spuIds).stream()
-                        .collect(java.util.stream.Collectors.toMap(Spu::getId, spu -> spu));
-
-        // ③ 一次批量报价：订单预览与创建共用同一份等级定价结果
-        List<Spu> spus = new ArrayList<>(requestedItems.size());
-        List<ProductPricingFacts> facts = new ArrayList<>(requestedItems.size());
-        for (int i = 0; i < requestedItems.size(); i++) {
-            CreateOrderRequest.CartItem cartItem = requestedItems.get(i);
-            Sku sku = skus.get(i);
-            Spu spu = spuMap.get(sku.getSpuId());
-            if (spu == null) {
-                throw new BusinessException("商品不存在或已下架: " + cartItem.getSkuId());
-            }
-            spus.add(spu);
-            facts.add(ProductPricingFacts.of(
-                    spu.getCategoryId(),
-                    sku.getPrice(),
-                    DiscountConstants.isExcluded(spu.getExcludeDiscount())));
-        }
-        List<LevelPricing> pricings = levelPricingService.priceAll(UserContext.getLevelId(), facts);
-        for (int i = 0; i < pricings.size(); i++) {
-            if (!pricings.get(i).sellable()) {
-                throw new BusinessException(
-                        "商品暂不可售: " + spus.get(i).getName() + "（SKU " + skus.get(i).getId() + "）");
-            }
-        }
-        Map<Long, String> levelNames = userLevelService.getNames(
-                pricings.stream().map(LevelPricing::levelId).toList());
-
-        // ④ 组装订单明细快照：等级 ID、名称、倍率与单价都取自同一报价结果
-        List<OrderItem> orderItems = new ArrayList<>();
-        BigDecimal goodsAmount = BigDecimal.ZERO;
-        for (int i = 0; i < requestedItems.size(); i++) {
-            CreateOrderRequest.CartItem cartItem = requestedItems.get(i);
-            Sku sku = skus.get(i);
-            Spu spu = spus.get(i);
-            LevelPricing pricing = pricings.get(i);
-            // 订单事实以单个 SKU 批发基价构建，报价的 min/max 必为同一等级结算价
-            BigDecimal unitPrice = pricing.minPrice();
-            BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
-            goodsAmount = goodsAmount.add(subtotal);
-
-            OrderItem item = new OrderItem();
-            item.setSkuId(sku.getId());
-            item.setSpuId(sku.getSpuId());
-            item.setProductName(spu.getName());
-
-            List<SpecVO> specVOList = sku.getSpecs();
-
-            StringBuilder specStr = new StringBuilder();
-            if (specVOList != null) {
-                for (SpecVO specVO : specVOList) {
-                    if (specVO.getValue() != null) {
-                        specStr.append(specVO.getValue()).append(" ");
-                    }
-                }
-            }
-
-            item.setProductSpec(specStr.length() > 0 ? specStr.toString().trim() : "");
-
-            item.setProductImage(sku.getImage() != null ? sku.getImage() : getFirstImage(spu.getImages()));
-            item.setPrice(unitPrice);
-            item.setLevelId(pricing.levelId());
-            item.setLevelName(levelNames.get(pricing.levelId()));
-            item.setPricingRate(pricing.rate());
-            item.setQuantity(cartItem.getQuantity());
-            item.setSubtotal(subtotal);
-            item.setCreateTime(LocalDateTime.now());
-            orderItems.add(item);
-        }
-
-        BigDecimal freightAmount = BigDecimal.ZERO.setScale(2);
-        BigDecimal payAmount = goodsAmount.add(freightAmount);
-        requirePayableAmount(payAmount);
-        return new SettlementSnapshot(
-                orderItems, goodsAmount.setScale(2), freightAmount, payAmount.setScale(2));
-    }
-
-    /**
-     * 结算金额下限：低于 1 分（含取整为 0 元）时直接拒绝下单，
-     * 不创建订单与支付记录，避免跳到支付页后才被微信网关拒绝。
-     */
-    private void requirePayableAmount(BigDecimal payAmount) {
-        long cents;
-        try {
-            cents = MoneyUtil.yuanToCents(payAmount);
-        } catch (BusinessException e) {
-            throw new BusinessException("订单金额非法，无法下单：" + e.getMessage());
-        }
-        if (cents < MoneyUtil.MIN_PAYABLE_CENTS) {
-            throw new BusinessException("订单金额低于 0.01 元，无法下单");
-        }
-    }
-
-    private void requireConfirmedAmount(BigDecimal expectedPayAmount, SettlementSnapshot settlement) {
-        if (expectedPayAmount == null) {
-            throw new BusinessException("请先确认应付金额");
-        }
-        if (expectedPayAmount.compareTo(settlement.payAmount()) != 0) {
-            throw new PriceChangedException(expectedPayAmount, toCheckoutPreview(settlement));
-        }
-    }
-
-    private CheckoutPreviewVO toCheckoutPreview(SettlementSnapshot settlement) {
-        CheckoutPreviewVO preview = new CheckoutPreviewVO();
-        preview.setItems(settlement.items().stream().map(this::toCheckoutItem).toList());
-        preview.setGoodsAmount(settlement.goodsAmount());
-        preview.setFreightAmount(settlement.freightAmount());
-        preview.setPayAmount(settlement.payAmount());
-        return preview;
-    }
-
-    private CheckoutItemVO toCheckoutItem(OrderItem item) {
-        CheckoutItemVO vo = new CheckoutItemVO();
-        vo.setSkuId(item.getSkuId());
-        vo.setProductId(item.getSpuId());
-        vo.setProductName(item.getProductName());
-        vo.setProductImage(item.getProductImage());
-        vo.setSpec(item.getProductSpec());
-        vo.setPrice(item.getPrice());
-        vo.setQuantity(item.getQuantity());
-        vo.setSubtotal(item.getSubtotal());
-        return vo;
-    }
-
-    private Long persistOrder(
-            Long userId, Long addressId, Long logisticsId,
-            String buyerRemark, SettlementSnapshot settlement,
-            OrderIdempotencyService.ClaimOutcome idempotencyClaim) {
-        // 【事务内】只扣 DB 库存 + 销量自增
-        for (OrderItem item : settlement.items()) {
-            boolean deducted = skuService.deductStock(item.getSkuId(), item.getQuantity());
-            if (!deducted) {
-                throw new BusinessException("库存扣减失败: " + item.getSkuId());
-            }
-            spuMapper.incrementSalesCount(item.getSpuId(), item.getQuantity());
-        }
-
-        String orderNo = generateOrderNo();
-        log.info("生成订单号: {}", orderNo);
-
-        Order order = new Order();
-        order.setOrderNo(orderNo);
-        order.setUserId(userId);
-        order.setAddressId(addressId);
-        order.setLogisticsId(logisticsId);
-        order.setStatus(StatusConstants.ORDER_PENDING_PAYMENT);
-        order.setTotalAmount(settlement.goodsAmount());
-        order.setFreightAmount(settlement.freightAmount());
-        order.setPayAmount(settlement.payAmount());
-        order.setBuyerRemark(buyerRemark);
-        order.setCreateTime(LocalDateTime.now());
-        order.setUpdateTime(LocalDateTime.now());
-        orderMapper.insert(order);
-        log.info("订单插入成功, orderId={}", order.getId());
-
-        for (OrderItem item : settlement.items()) {
-            item.setOrderId(order.getId());
-        }
-        orderItemMapper.insertBatch(settlement.items());
-        log.info("订单明细插入成功");
-
-        List<Long> cartSkuIds = settlement.items().stream()
-                .map(OrderItem::getSkuId)
-                .collect(java.util.stream.Collectors.toList());
-        LambdaUpdateWrapper<Cart> cartWrapper = new LambdaUpdateWrapper<>();
-        cartWrapper.eq(Cart::getUserId, userId)
-                   .in(Cart::getSkuId, cartSkuIds)
-                   .set(Cart::getDeleteTime, System.currentTimeMillis());
-        cartMapper.update(null, cartWrapper);
-        log.info("删除购物车商品, userId={}, skuIds={}", userId, cartSkuIds);
-
-        // 幂等记录置成功必须与订单创建同事务；更新失败会回滚订单
-        orderIdempotencyService.markSucceeded(
-                idempotencyClaim.recordId(), idempotencyClaim.ownerToken(), order.getId());
-
-        // 发布库存同步事件，事务提交后由监听器异步执行
-        List<Long> skuIds = settlement.items().stream()
-                .map(OrderItem::getSkuId)
-                .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
-
-        return order.getId();
-    }
-
-    private record SettlementSnapshot(
-            List<OrderItem> items,
-            BigDecimal goodsAmount,
-            BigDecimal freightAmount,
-            BigDecimal payAmount) {
+        return orderIntakeService.createOrder(userId, request, idempotencyKey);
     }
 
     @Override
     public Page<OrderVO> getOrderPage(Long userId, Integer status, Integer page, Integer limit) {
-        Page<Order> pageParam = new Page<>(page, limit);
-        LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(w -> w.isNull(Order::getUserDeleteTime).or().eq(Order::getUserDeleteTime, 0));
-        if (userId != null) {
-            wrapper.eq(Order::getUserId, userId);
-        }
-
-        if (status != null) {
-            wrapper.eq(Order::getStatus, status);
-        }
-        wrapper.orderByDesc(Order::getCreateTime);
-        Page<Order> orderPage = orderMapper.selectPage(pageParam, wrapper);
-
-        Page<OrderVO> voPage = new Page<>(orderPage.getCurrent(), orderPage.getSize(), orderPage.getTotal());
-        List<OrderVO> voList = new ArrayList<>();
-        for (Order order : orderPage.getRecords()) {
-            voList.add(getOrderVO(order.getId(), userId));
-        }
-        voPage.setRecords(voList);
-        return voPage;
+        return orderQueryService.getOrderPage(userId, status, page, limit);
     }
 
     @Override
     public Page<OrderVO> getAdminOrderPage(Long userId, Integer status, String orderNo, String startDate, String endDate, Integer page, Integer limit) {
-        Page<Order> pageParam = new Page<>(page, limit);
-        LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(w -> w.isNull(Order::getAdminDeleteTime).or().eq(Order::getAdminDeleteTime, 0));
-        if (userId != null) {
-            wrapper.eq(Order::getUserId, userId);
-        }
-
-        if (status != null) {
-            wrapper.eq(Order::getStatus, status);
-        }
-        // M9: 管理端搜索参数补齐 —— orderNo 精确匹配, 日期按 createTime 区间(含 endDate 当天)
-        if (StringUtils.hasText(orderNo)) {
-            wrapper.eq(Order::getOrderNo, orderNo.trim());
-        }
-        if (StringUtils.hasText(startDate)) {
-            wrapper.ge(Order::getCreateTime, parseDate(startDate));
-        }
-        if (StringUtils.hasText(endDate)) {
-            wrapper.lt(Order::getCreateTime, parseDate(endDate).plusDays(1));
-        }
-        wrapper.orderByDesc(Order::getCreateTime);
-        Page<Order> orderPage = orderMapper.selectPage(pageParam, wrapper);
-
-        Page<OrderVO> voPage = new Page<>(orderPage.getCurrent(), orderPage.getSize(), orderPage.getTotal());
-        List<OrderVO> voList = new ArrayList<>();
-        Map<Long, PaymentRecord> latestPayments = loadLatestPaymentRecords(orderPage.getRecords());
-        for (Order order : orderPage.getRecords()) {
-            voList.add(buildOrderVO(order, null, latestPayments));
-        }
-        voPage.setRecords(voList);
-        return voPage;
-    }
-
-    private Map<Long, PaymentRecord> loadLatestPaymentRecords(List<Order> orders) {
-        if (orders.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        List<Long> orderIds = orders.stream().map(Order::getId).toList();
-        List<PaymentRecord> records = paymentRecordMapper.selectList(
-                new LambdaQueryWrapper<PaymentRecord>()
-                        .in(PaymentRecord::getOrderId, orderIds)
-                        .orderByDesc(PaymentRecord::getCreateTime)
-                        .orderByDesc(PaymentRecord::getId));
-        Map<Long, PaymentRecord> latestByOrderId = new HashMap<>();
-        for (PaymentRecord record : records) {
-            latestByOrderId.putIfAbsent(record.getOrderId(), record);
-        }
-        return latestByOrderId;
+        return orderQueryService.getAdminOrderPage(userId, status, orderNo, startDate, endDate, page, limit);
     }
 
     @Override
     public OrderVO getOrderById(Long userId, Long orderId) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new BusinessException("订单不存在");
-        }
+        // 读请求先做归属校验与状态判断, 不写库
+        Integer status = orderQueryService.getUserOrderStatus(userId, orderId);
 
-        // ⑦ lazy sync: 用户打开待付款订单详情时自动核查支付状态, 兜底回调丢失
-        // O3 Redis 节流: 同一订单 30s 内最多查一次微信, 防刷 API 限频
-        if (order.getStatus() == StatusConstants.ORDER_PENDING_PAYMENT && payService != null) {
+        // 打开待付款订单详情时触发支付状态同步（去抖、修复与查单由支付模块负责）
+        // 同步异常不影响详情返回
+        if (status == StatusConstants.ORDER_PENDING_PAYMENT && payService != null) {
             try {
-                boolean debounced = redisUtil.setIfAbsent("lazysync:order:" + orderId, "1", 30, TimeUnit.SECONDS);
-                if (debounced) {
-                    PaymentRecord record = payService.queryByOrderId(orderId);
-                    if (record != null && record.getStatus() == PaymentRecord.STATUS_PAID) {
-                        // DB 不一致修复: payment_record 已 PAID 但 order 还是待付款 → 直接推进
-                        orderMapper.update(null,
-                                new LambdaUpdateWrapper<Order>()
-                                        .eq(Order::getId, orderId)
-                                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
-                                        .set(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
-                                        .set(Order::getUpdateTime, LocalDateTime.now()));
-                        log.info("⑦ lazy sync DB不一致修复, orderId={}", orderId);
-                    } else if (record != null && record.getStatus() == PaymentRecord.STATUS_PENDING) {
-                        Transaction txn = payService.queryWechatOrder(record.getOutTradeNo());
-                        if (Transaction.TradeStateEnum.SUCCESS.equals(txn.getTradeState())) {
-                            payService.processPaymentSuccess(record.getOutTradeNo(), txn.getTransactionId());
-                            log.info("⑦ lazy sync 微信查单补单成功, orderId={}", orderId);
-                        }
-                    }
-                }
+                payService.syncPaymentStatus(orderId);
             } catch (Exception e) {
                 log.warn("⑦ lazy sync 异常, 不影响详情返回, orderId={}: {}", orderId, e.getMessage());
             }
         }
 
-        return getOrderVO(orderId, userId);
+        return orderQueryService.getOrderView(userId, orderId);
     }
 
     @Override
     public OrderVO getOrderByOrderNo(String orderNo) {
-        LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Order::getOrderNo, orderNo);
-        Order order = orderMapper.selectOne(wrapper);
-        if (order == null) {
-            throw new BusinessException("订单不存在");
-        }
-        return getOrderVO(order.getId(), order.getUserId());
+        return orderQueryService.getOrderByOrderNo(orderNo);
     }
 
     @Override
-    @Transactional
     public void cancelOrder(Long userId, Long orderId, String reason) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_PAYMENT) {
-            throw new BusinessException("只能取消待付款的订单");
-        }
-
-        // 先恢复库存
-        LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
-        itemWrapper.eq(OrderItem::getOrderId, orderId);
-        List<OrderItem> items = orderItemMapper.selectList(itemWrapper);
-        for (OrderItem item : items) {
-            skuService.restoreStock(item.getSkuId(), item.getQuantity());
-        }
-
-        // CAS 最终确认：仅当状态仍为待付款时置为已取消，防与并发支付回调(1→2)互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
-                        .set(Order::getStatus, StatusConstants.ORDER_CANCELLED)
-                        .set(Order::getCancelReason, reason)
-                        .set(Order::getCancelTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
-
-        // 发布库存同步事件，事务提交后由监听器异步执行
-        List<Long> skuIds = items.stream()
-                .map(OrderItem::getSkuId)
-                .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
+        orderLifecycleService.cancelOrder(userId, orderId, reason);
     }
 
     @Override
-    @Transactional
     public void confirmReceive(Long userId, Long orderId) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() != StatusConstants.ORDER_SHIPPED) {
-            throw new BusinessException("只能确认收货已发货的订单");
-        }
-
-        // CAS 条件更新: 仅当仍为已发货时置为已完成, 防与并发退款(3→6)互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_SHIPPED)
-                        .set(Order::getStatus, StatusConstants.ORDER_COMPLETED)
-                        .set(Order::getReceiveTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
+        orderLifecycleService.confirmReceive(userId, orderId);
     }
 
     @Override
     public void confirmReceiveByWechat(Long userId, Long orderId) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() == StatusConstants.ORDER_COMPLETED) {
-            return; // 已完成, 幂等
-        }
-        if (order.getStatus() != StatusConstants.ORDER_SHIPPED) {
-            throw new BusinessException("当前订单状态不支持确认收货");
-        }
-        // 以微信 order_state 为准: 仅 确认收货/交易完成 才算数
-        Integer state = wechatOrderShippingService.queryOrderState(orderId);
-        if (state == null
-                || (state != WechatConstants.OrderState.CONFIRMED
-                    && state != WechatConstants.OrderState.COMPLETED)) {
-            throw new BusinessException("微信未确认收货，请稍后重试");
-        }
-        orderMapper.update(null, new LambdaUpdateWrapper<Order>()
-                .eq(Order::getId, orderId)
-                .set(Order::getWechatOrderState, state)
-                .set(Order::getUpdateTime, LocalDateTime.now()));
-        confirmReceive(userId, orderId);
+        orderLifecycleService.confirmReceiveByWechat(userId, orderId);
     }
 
     @Override
     public void deleteOrder(Long userId, Long orderId) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() != StatusConstants.ORDER_COMPLETED
-            && order.getStatus() != StatusConstants.ORDER_CANCELLED) {
-            throw new BusinessException("该订单不可删除");
-        }
-
-        order.setUserDeleteTime(System.currentTimeMillis());
-        orderMapper.updateById(order);
+        orderLifecycleService.deleteOrder(userId, orderId);
     }
 
     @Override
     public Map<String, Object> getOrderStats() {
-        Map<String, Object> stats = new HashMap<>();
-
-        LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT);
-        long pendingPay = orderMapper.selectCount(wrapper);
-
-        wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT);
-        long pendingShip = orderMapper.selectCount(wrapper);
-
-        wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Order::getStatus, StatusConstants.ORDER_SHIPPED);
-        long shipped = orderMapper.selectCount(wrapper);
-
-        // 待管理员审核的退款申请数, 管理后台据此显示红点/快捷筛选
-        wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Order::getStatus, StatusConstants.ORDER_REFUND_REQUESTED);
-        long refundRequested = orderMapper.selectCount(wrapper);
-
-        // 退款失败待处理数, 管理后台据此显示提示条/快捷筛选/重试入口
-        wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Order::getStatus, StatusConstants.ORDER_REFUND_FAILED);
-        long refundFailed = orderMapper.selectCount(wrapper);
-
-        stats.put("pendingPay", pendingPay);
-        stats.put("pendingShip", pendingShip);
-        stats.put("shipped", shipped);
-        stats.put("refundRequested", refundRequested);
-        stats.put("refundFailed", refundFailed);
-
-        return stats;
+        return orderQueryService.getOrderStats();
     }
 
     @Override
     public DashboardStatsVO getDashboardStats() {
-        DashboardStatsVO stats = new DashboardStatsVO();
-
-        LocalDateTime todayStart = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0).withNano(0);
-        LocalDateTime yesterdayStart = todayStart.minusDays(1);
-
-        long todayOrders = nvl(orderMapper.countTodayPaidOrders(todayStart));
-        stats.setTodayOrders(todayOrders);
-        stats.setTodaySales(orderMapper.sumTodaySales(todayStart));
-
-        LambdaQueryWrapper<Order> shipWrapper = new LambdaQueryWrapper<>();
-        shipWrapper.eq(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT);
-        stats.setPendingShip(orderMapper.selectCount(shipWrapper));
-
-        // M11: 涨幅 = 今日 vs 昨日, 口径与今日统计一致
-        DashboardStatsVO.Trend trend = new DashboardStatsVO.Trend();
-        trend.setOrdersTrend(DashboardStatsVO.percentTrend(todayOrders, nvl(orderMapper.countPaidOrdersBetween(yesterdayStart, todayStart))));
-        trend.setSalesTrend(DashboardStatsVO.percentTrend(
-                toCents(stats.getTodaySales()), toCents(orderMapper.sumSalesBetween(yesterdayStart, todayStart))));
-        trend.setShipTrend(DashboardStatsVO.percentTrend(
-                nvl(orderMapper.countShippedBetween(todayStart, todayStart.plusDays(1))),
-                nvl(orderMapper.countShippedBetween(yesterdayStart, todayStart))));
-        stats.setTrend(trend);
-
-        return stats;
-    }
-
-    private static long nvl(Long value) {
-        return value == null ? 0L : value;
-    }
-
-    private static long toCents(BigDecimal amount) {
-        return amount == null ? 0L : MoneyUtil.yuanToCents(amount);
+        return orderQueryService.getDashboardStats();
     }
 
     @Override
     public List<RecentOrderVO> getRecentOrders(Integer limit) {
-        LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
-        wrapper.orderByDesc(Order::getCreateTime);
-        wrapper.last("LIMIT " + limit);
-        List<Order> orders = orderMapper.selectList(wrapper);
-
-        List<RecentOrderVO> result = new ArrayList<>();
-        for (Order order : orders) {
-            RecentOrderVO vo = new RecentOrderVO();
-            vo.setId(order.getId());
-            vo.setOrderNo(order.getOrderNo());
-            vo.setUserId(order.getUserId());
-            vo.setTotalAmount(order.getTotalAmount());
-            vo.setStatus(order.getStatus());
-            vo.setStatusText(getStatusText(order.getStatus()));
-            vo.setCreateTime(order.getCreateTime());
-            result.add(vo);
-        }
-        return result;
+        return orderQueryService.getRecentOrders(limit);
     }
 
     @Override
     public void shipOrder(Long orderId, Integer deliveryType, Long logisticsId) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT) {
-            throw new BusinessException("只能发货待发货的订单");
-        }
-
-        Long finalLogisticsId;
-        String logisticsNo;
-        if (deliveryType == StatusConstants.DELIVERY_TYPE_PICKUP) {
-            // 用户自提: 无物流、无单号
-            finalLogisticsId = null;
-            logisticsNo = null;
-        } else if (deliveryType == StatusConstants.DELIVERY_TYPE_LOCAL) {
-            // 同城配送: 物流取自 admin 物流管理(仅校验存在且启用), 配送单号后端自动生成
-            Logistics logistics = logisticsMapper.selectById(logisticsId);
-            if (logistics == null || logistics.getStatus() != StatusConstants.LOGISTICS_STATUS_ENABLED) {
-                throw new BusinessException("物流公司不存在或已停用");
-            }
-            finalLogisticsId = logisticsId;
-            logisticsNo = generateDeliveryNo();
-        } else {
-            throw new BusinessException("不支持的发货方式");
-        }
-
-        // CAS 条件更新: 仅当状态仍为待发货时置为已发货, 防与并发申请退款(2→8)/直退(2→6)/重复发货互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT)
-                        .set(Order::getStatus, StatusConstants.ORDER_SHIPPED)
-                        .set(Order::getDeliveryType, deliveryType)
-                        .set(Order::getLogisticsId, finalLogisticsId)
-                        .set(Order::getLogisticsNo, logisticsNo)
-                        .set(Order::getShipTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
-
-        // 发货成功后上报微信发货信息; 失败不影响发货结果, 由 WechatShippingRetryJob 兜底
-        try {
-            wechatOrderShippingService.uploadShippingInfo(orderId);
-        } catch (Exception e) {
-            log.warn("发货后微信上报失败, 待重试任务兜底, orderId={}: {}", orderId, e.getMessage());
-        }
-    }
-
-    /** 同城配送单号: 后端自动生成, 前缀 PS + 雪花ID */
-    String generateDeliveryNo() {
-        return "PS" + IdWorker.getIdStr();
+        orderLifecycleService.shipOrder(orderId, deliveryType, logisticsId);
     }
 
     @Override
     public void refundOrder(Long orderId, String reason) {
-        // null 守卫必须在 CAS claim 之前: claim 是单条 UPDATE 自动提交, 事后报错回滚不了"退款中"状态
-        if (payService == null) {
-            throw new BusinessException("支付服务未启用，无法退款");
-        }
-        Order order = orderMapper.selectById(orderId);
-        if (order == null) {
-            throw new BusinessException("订单不存在");
-        }
-        // 已取消订单的迟到支付: 只校验最新支付记录已支付后直接退款, 订单保持 5
-        if (order.getStatus() == StatusConstants.ORDER_CANCELLED) {
-            retryCancelledOrderRefund(orderId, reason);
-            return;
-        }
-        // 预检: 明显错状态直接报错 (CAS 才是权威并发守卫, 预检仅为友好提示)
-        // 8(退款申请中) 视为管理员审核通过; 9(退款失败) 允许管理员重试: 沿用同一 CAS 占位链路 →6→微信退款→回调→7
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT
-                && order.getStatus() != StatusConstants.ORDER_SHIPPED
-                && order.getStatus() != StatusConstants.ORDER_REFUND_REQUESTED
-                && order.getStatus() != StatusConstants.ORDER_REFUND_FAILED) {
-            throw new BusinessException("该订单状态不支持退款");
-        }
-
-        // claim-first: 先 CAS 占位 6(退款中), 命中 0 行说明状态被并发改走, 中止 (不退款不还库存)
-        // 此处不加 @Transactional: claim 是本方法唯一 DB 写(库存恢复已迁至退款回调), 单条 UPDATE 自动提交;
-        // 事务外的微信退款调用失败时 claim 已提交, status 保持 6 等回调自愈或人工对账
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .in(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT,
-                                StatusConstants.ORDER_SHIPPED, StatusConstants.ORDER_REFUND_REQUESTED,
-                                StatusConstants.ORDER_REFUND_FAILED)
-                        .set(Order::getStatus, StatusConstants.ORDER_REFUNDING)
-                        .set(Order::getCancelReason, reason)
-                        .set(Order::getCancelTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
-        log.info("订单置退款中, orderId={}, 等待微信退款回调确认", orderId);
-
-        handleRefundResult(orderId, payService.refund(orderId, reason));
-    }
-
-    private void retryCancelledOrderRefund(Long orderId, String reason) {
-        PaymentRecord latest = payService.queryByOrderId(orderId);
-        if (latest == null || latest.getStatus() != PaymentRecord.STATUS_PAID) {
-            throw new BusinessException("已取消订单的最新支付记录不是已支付状态，无法重试退款");
-        }
-        RefundResult result = payService.refund(orderId, reason);
-        log.info("已取消订单重试退款, orderId={}, result={}", orderId, result);
-        handleRefundResult(orderId, result);
-    }
-
-    private void handleRefundResult(Long orderId, RefundResult result) {
-        if (result == RefundResult.DEFINITE_FAILED) {
-            throw new BusinessException("退款确定失败：微信明确拒绝，支付记录已回退，请稍后重试");
-        }
-        if (result == RefundResult.UNKNOWN) {
-            log.warn("退款结果未知, 等待退款回调或对账确认, orderId={}", orderId);
-        }
+        orderLifecycleService.refundOrder(orderId, reason);
     }
 
     @Override
     public void applyRefund(Long userId, Long orderId, String reason) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new BusinessException("订单不存在");
-        }
-        // 预检: 明显错状态直接报错 (CAS 才是权威并发守卫, 预检仅为友好提示)
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_SHIPMENT
-                && order.getStatus() != StatusConstants.ORDER_SHIPPED) {
-            throw new BusinessException("当前订单状态不支持申请退款");
-        }
-
-        // claim-first: 先 CAS 占位 8(退款申请中), 命中 0 行说明状态被并发改走, 中止
-        // 单条 UPDATE 自动提交, 不加 @Transactional; 管理员审核通过后走 refundOrder 调微信退款
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .in(Order::getStatus, StatusConstants.ORDER_PENDING_SHIPMENT, StatusConstants.ORDER_SHIPPED)
-                        .set(Order::getStatus, StatusConstants.ORDER_REFUND_REQUESTED)
-                        .set(Order::getCancelReason, reason)
-                        .set(Order::getCancelTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
-        log.info("用户申请退款, orderId={}, orderNo={}, 等待管理员审核", orderId, order.getOrderNo());
-
-        // 通知管理员审核(防抖 key 含订单 ID, 每笔申请都独立送达)
-        dingTalkAlertService.notify("REFUND_REQUEST:" + orderId,
-                "用户申请退款\n订单号: " + order.getOrderNo() + "\n申请原因: " + reason);
+        orderLifecycleService.applyRefund(userId, orderId, reason);
     }
 
     @Override
     public void rejectRefund(Long orderId, String rejectReason) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null) {
-            throw new BusinessException("订单不存在");
-        }
-        if (order.getStatus() != StatusConstants.ORDER_REFUND_REQUESTED) {
-            throw new BusinessException("该订单不是待审核的退款申请");
-        }
-
-        // 回退目标: 申请前是什么状态就回什么状态 — 按是否已有发货时间判断, 无需额外字段
-        int targetStatus = order.getShipTime() == null
-                ? StatusConstants.ORDER_PENDING_SHIPMENT
-                : StatusConstants.ORDER_SHIPPED;
-
-        // CAS: 仅当仍为退款申请中时回退, 防与并发审核互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_REFUND_REQUESTED)
-                        .set(Order::getStatus, targetStatus)
-                        .set(Order::getAdminRemark, rejectReason)
-                        .set(Order::getCancelTime, null)
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            throw new BusinessException("订单状态已变更，请刷新后重试");
-        }
-        log.info("管理员拒绝退款申请, orderId={}, 回退至状态{}, 原因: {}", orderId, targetStatus, rejectReason);
+        orderLifecycleService.rejectRefund(orderId, rejectReason);
     }
 
     @Override
     public OrderVO getAdminOrderById(Long orderId) {
-        return buildOrderVO(orderMapper.selectById(orderId), null, null);
+        return orderQueryService.getAdminOrderById(orderId);
     }
 
     @Override
-    @Transactional
     public boolean autoCancelOrder(Long orderId, String cancelReason) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null) {
-            log.warn("订单不存在, orderId={}", orderId);
-            return false;
-        }
-        // 幂等性检查：只有待付款状态的订单才需要取消
-        if (order.getStatus() != StatusConstants.ORDER_PENDING_PAYMENT) {
-            log.info("订单已处理，无需取消, orderId={}, status={}", orderId, order.getStatus());
-            return false;
-        }
-
-        // 先恢复库存
-        LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
-        itemWrapper.eq(OrderItem::getOrderId, orderId);
-        List<OrderItem> items = orderItemMapper.selectList(itemWrapper);
-        for (OrderItem item : items) {
-            skuService.restoreStock(item.getSkuId(), item.getQuantity());
-            log.info("恢复DB库存, orderId={}, skuId={}, quantity={}", orderId, item.getSkuId(), item.getQuantity());
-        }
-
-        // CAS 最终确认：仅当状态仍为待付款时置为已取消，防与并发支付回调(1→2)互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_PENDING_PAYMENT)
-                        .set(Order::getStatus, StatusConstants.ORDER_CANCELLED)
-                        .set(Order::getCancelReason, cancelReason)
-                        .set(Order::getCancelTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected == 0) {
-            // 抛异常触发事务回滚, 撤销上方已执行的恢复库存; 对齐 cancelOrder 的 CAS-失败-回滚模式
-            log.info("自动取消跳过（CAS 未命中，订单状态已变更）, orderId={}", orderId);
-            throw new BusinessException("订单状态已变更，跳过取消");
-        }
-
-        log.info("订单自动取消成功, orderId={}", orderId);
-
-        // 发布库存同步事件，事务提交后由监听器异步执行
-        List<Long> skuIds = items.stream()
-                .map(OrderItem::getSkuId)
-                .collect(java.util.stream.Collectors.toList());
-        applicationEventPublisher.publishEvent(new StockCacheEvent(skuIds));
-
-        return true;
+        return orderLifecycleService.autoCancelOrder(orderId, cancelReason);
     }
 
     @Override
-    @Transactional
     public boolean autoConfirmReceive(Long orderId) {
-        Order order = orderMapper.selectById(orderId);
-        if (order == null) {
-            log.warn("订单不存在, orderId={}", orderId);
-            return false;
-        }
-        // 幂等性检查：只有已发货状态的订单才需要自动收货
-        if (order.getStatus() != StatusConstants.ORDER_SHIPPED) {
-            log.info("订单已处理，无需自动收货, orderId={}, status={}", orderId, order.getStatus());
-            return false;
-        }
-        // CAS 条件更新：仅当状态仍为已发货时置为已完成，避免与并发退款(3→6)互相覆盖
-        int affected = orderMapper.update(null,
-                new LambdaUpdateWrapper<Order>()
-                        .eq(Order::getId, orderId)
-                        .eq(Order::getStatus, StatusConstants.ORDER_SHIPPED)
-                        .set(Order::getStatus, StatusConstants.ORDER_COMPLETED)
-                        .set(Order::getReceiveTime, LocalDateTime.now())
-                        .set(Order::getUpdateTime, LocalDateTime.now()));
-        if (affected > 0) {
-            log.info("订单自动收货成功, orderId={}", orderId);
-            return true;
-        }
-        log.info("自动收货跳过（CAS 未命中，订单状态已变更）, orderId={}", orderId);
-        return false;
+        return orderLifecycleService.autoConfirmReceive(orderId);
     }
-
-    private OrderVO getOrderVO(Long orderId, Long userId) {
-        return buildOrderVO(orderMapper.selectById(orderId), userId, null);
-    }
-
-    private OrderVO buildOrderVO(Order order, Long userId, Map<Long, PaymentRecord> latestPayments) {
-        Address address = addressMapper.selectById(order.getAddressId());
-        Logistics logistics = logisticsMapper.selectById(order.getLogisticsId());
-
-        LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
-        itemWrapper.eq(OrderItem::getOrderId, order.getId());
-        List<OrderItem> items = orderItemMapper.selectList(itemWrapper);
-
-        OrderVO vo = new OrderVO();
-        vo.setId(order.getId());
-        vo.setOrderNo(order.getOrderNo());
-        vo.setStatus(order.getStatus());
-        vo.setStatusText(getStatusText(order.getStatus()));
-        vo.setTotalAmount(order.getTotalAmount());
-        vo.setFreightAmount(order.getFreightAmount());
-        vo.setPayAmount(order.getPayAmount());
-        vo.setLogisticsName(logistics != null ? logistics.getName() : null);
-        vo.setLogisticsNo(order.getLogisticsNo());
-        vo.setDeliveryType(order.getDeliveryType());
-        vo.setDeliveryTypeText(getDeliveryTypeText(order.getDeliveryType()));
-        vo.setReceiverName(address != null ? address.getConsignee() : null);
-        vo.setReceiverPhone(address != null ? address.getPhone() : null);
-        vo.setReceiverAddress(address != null ? address.getProvince() + address.getCity() + address.getDistrict() + address.getDetail() : null);
-        vo.setBuyerRemark(order.getBuyerRemark());
-        vo.setCancelReason(order.getCancelReason());
-        vo.setAdminRemark(order.getAdminRemark());
-        vo.setPayTime(order.getPayTime());
-        vo.setShipTime(order.getShipTime());
-        vo.setReceiveTime(order.getReceiveTime());
-        vo.setCreateTime(order.getCreateTime());
-        vo.setItems(items.stream().map(item -> toOrderItemVO(item, userId == null)).toList());
-
-        // 微信确认收货组件所需参数(商户单号=订单号; 交易单号支付成功后回填)
-        PaymentRecord payRecord = latestPayments != null
-                ? latestPayments.get(order.getId())
-                : paymentRecordMapper.selectOne(new LambdaQueryWrapper<PaymentRecord>()
-                        .eq(PaymentRecord::getOrderId, order.getId())
-                        .orderByDesc(PaymentRecord::getCreateTime)
-                        .orderByDesc(PaymentRecord::getId)
-                        .last("LIMIT 1"));
-        vo.setMerchantId(mchId);
-        vo.setMerchantTradeNo(payRecord != null ? payRecord.getOutTradeNo() : null);
-        vo.setTransactionId(payRecord != null ? payRecord.getTransactionId() : null);
-        vo.setPaymentStatus(payRecord != null ? payRecord.getStatus() : null);
-        vo.setPaymentStatusText(getPaymentStatusText(payRecord));
-
-        return vo;
-    }
-
-    private String getPaymentStatusText(PaymentRecord record) {
-        if (record == null) {
-            return "未支付";
-        }
-        return switch (record.getStatus()) {
-            case PaymentRecord.STATUS_PENDING -> "待支付";
-            case PaymentRecord.STATUS_PAID -> "已支付";
-            case PaymentRecord.STATUS_CLOSED -> "已关闭";
-            case PaymentRecord.STATUS_REFUNDED -> "已退款";
-            case PaymentRecord.STATUS_REFUNDING -> "退款中";
-            default -> "未知";
-        };
-    }
-
-    private OrderItemVO toOrderItemVO(OrderItem item, boolean includePricingSnapshot) {
-        OrderItemVO vo = new OrderItemVO();
-        vo.setId(item.getId());
-        vo.setOrderId(item.getOrderId());
-        vo.setSkuId(item.getSkuId());
-        vo.setSpuId(item.getSpuId());
-        vo.setProductName(item.getProductName());
-        vo.setProductSpec(item.getProductSpec());
-        vo.setProductImage(item.getProductImage());
-        vo.setPrice(item.getPrice());
-        vo.setQuantity(item.getQuantity());
-        vo.setSubtotal(item.getSubtotal());
-        vo.setCreateTime(item.getCreateTime());
-        if (includePricingSnapshot) {
-            vo.setLevelId(item.getLevelId());
-            vo.setLevelName(item.getLevelName());
-            vo.setPricingRate(item.getPricingRate());
-        }
-        return vo;
-    }
-
-    private String getStatusText(Integer status) {
-        return switch (status) {
-            case StatusConstants.ORDER_PENDING_PAYMENT -> "待付款";
-            case StatusConstants.ORDER_PENDING_SHIPMENT -> "待发货";
-            case StatusConstants.ORDER_SHIPPED -> "已发货";
-            case StatusConstants.ORDER_COMPLETED -> "已完成";
-            case StatusConstants.ORDER_CANCELLED -> "已取消";
-            case StatusConstants.ORDER_REFUNDING -> "退款中";
-            case StatusConstants.ORDER_REFUNDED -> "已退款";
-            case StatusConstants.ORDER_REFUND_FAILED -> "退款失败";
-            case StatusConstants.ORDER_REFUND_REQUESTED -> "退款申请中";
-            default -> "未知";
-        };
-    }
-
-    private String getDeliveryTypeText(Integer deliveryType) {
-        if (deliveryType == null) {
-            return null;
-        }
-        return switch (deliveryType) {
-            case StatusConstants.DELIVERY_TYPE_LOCAL -> "同城配送";
-            case StatusConstants.DELIVERY_TYPE_PICKUP -> "用户自提";
-            default -> "未知";
-        };
-    }
-
-    /**
-     * M9: 管理端订单搜索的日期参数解析, 统一取当天 00:00
-     */
-    private LocalDateTime parseDate(String date) {
-        try {
-            return LocalDate.parse(date, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay();
-        } catch (DateTimeParseException e) {
-            throw new BusinessException("日期格式应为 yyyy-MM-dd");
-        }
-    }
-
-    String generateOrderNo() {
-        return "SO" + IdWorker.getIdStr();
-    }
-
-    private String getFirstImage(List<String> images) {
-        if (images == null || images.isEmpty()) {
-            return null;
-        }
-        return images.get(0);
-    }
-
-    //    private List<SpecVO> toSpecVOList(Object specs) {
-//        if (specs == null) return null;
-//        List<SpecVO> result = new ArrayList<>();
-//        for (Object item : (List<?>) specs) {
-//            if (item instanceof SpecVO) {
-//                result.add((SpecVO) item);
-//            } else if (item instanceof Map) {
-//                Map<?, ?> map = (Map<?, ?>) item;
-//                SpecVO vo = new SpecVO();
-//                vo.setTemplateId(toLong(map.get("templateId")));
-//                vo.setItemId(toLong(map.get("itemId")));
-//                vo.setName((String) map.get("name"));
-//                vo.setValue((String) map.get("value"));
-//                result.add(vo);
-//            }
-//        }
-//        return result;
-//    }
-//
-//    private Long toLong(Object value) {
-//        if (value == null) return null;
-//        if (value instanceof Long) return (Long) value;
-//        if (value instanceof Number) return ((Number) value).longValue();
-//        return Long.parseLong(value.toString());
-//    }
 }
