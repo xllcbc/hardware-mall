@@ -17,10 +17,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class DingTalkAlertServiceTest {
@@ -35,7 +35,10 @@ class DingTalkAlertServiceTest {
         service = new DingTalkAlertService(redisUtil);
         ReflectionTestUtils.setField(service, "webhook", "http://127.0.0.1:1/dingtalk");
         ReflectionTestUtils.setField(service, "secret", "test-secret");
-        lenient().when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+    }
+
+    private void stubDebounce() {
+        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
     }
 
     @Test
@@ -52,6 +55,7 @@ class DingTalkAlertServiceTest {
 
     @Test
     void orderScopedAlerts_shouldUseDistinctDebounceKeys() {
+        stubDebounce();
         service.alert("REFUND_RESULT_UNKNOWN", 101L, "订单 101 结果未知");
         service.alert("REFUND_RESULT_UNKNOWN", 102L, "订单 102 结果未知");
 
@@ -64,6 +68,7 @@ class DingTalkAlertServiceTest {
 
     @Test
     void aggregateAlert_shouldKeepTypeScopedKey() {
+        stubDebounce();
         service.alert("PAY_CALLBACK_FAIL", "支付回调异常");
 
         verify(redisUtil).setIfAbsent(eq("alert:dingtalk:PAY_CALLBACK_FAIL"), any(), eq(5L), eq(TimeUnit.MINUTES));

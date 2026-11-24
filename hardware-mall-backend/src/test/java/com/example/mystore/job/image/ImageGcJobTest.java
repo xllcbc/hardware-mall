@@ -1,5 +1,6 @@
 package com.example.mystore.job.image;
 
+import com.example.mystore.common.constant.ImageGcConstants;
 import com.example.mystore.entity.vo.ImageGcReport;
 import com.example.mystore.service.ImageGcService;
 import com.example.mystore.service.impl.DingTalkAlertService;
@@ -35,63 +36,63 @@ class ImageGcJobTest {
 
     @Test
     void runWeeklyReport_skipsWhenAnotherInstanceHoldsTheLock() {
-        when(redisLockUtil.tryLock("job:image-gc")).thenReturn(false);
+        when(redisLockUtil.tryLock(ImageGcJob.LOCK_KEY)).thenReturn(false);
 
         job.runWeeklyReport();
 
         verifyNoInteractions(imageGcService);
-        verify(redisLockUtil, never()).unlock("job:image-gc");
+        verify(redisLockUtil, never()).unlock(ImageGcJob.LOCK_KEY);
     }
 
     @Test
     void runWeeklyReport_runsOnceAndReleasesTheLock() {
-        when(redisLockUtil.tryLock("job:image-gc")).thenReturn(true);
+        when(redisLockUtil.tryLock(ImageGcJob.LOCK_KEY)).thenReturn(true);
         when(imageGcService.runOnce()).thenReturn(report(true, false, null));
 
         job.runWeeklyReport();
 
         verify(imageGcService).runOnce();
-        verify(redisLockUtil).unlock("job:image-gc");
+        verify(redisLockUtil).unlock(ImageGcJob.LOCK_KEY);
         verifyNoInteractions(dingTalkAlertService);
     }
 
     @Test
     void runWeeklyReport_doesNotAlertWhenGcIsDisabled() {
-        when(redisLockUtil.tryLock("job:image-gc")).thenReturn(true);
+        when(redisLockUtil.tryLock(ImageGcJob.LOCK_KEY)).thenReturn(true);
         when(imageGcService.runOnce()).thenReturn(report(false, false, null));
 
         job.runWeeklyReport();
 
-        verify(redisLockUtil).unlock("job:image-gc");
+        verify(redisLockUtil).unlock(ImageGcJob.LOCK_KEY);
         verifyNoInteractions(dingTalkAlertService);
     }
 
     @Test
     void runWeeklyReport_alertsAndDoesNotThrowWhenServiceFails() {
-        when(redisLockUtil.tryLock("job:image-gc")).thenReturn(true);
+        when(redisLockUtil.tryLock(ImageGcJob.LOCK_KEY)).thenReturn(true);
         when(imageGcService.runOnce()).thenThrow(new RuntimeException("bucket unreachable"));
 
         assertThatCode(() -> job.runWeeklyReport()).doesNotThrowAnyException();
 
-        verify(dingTalkAlertService).alert(eq("IMAGE_GC_FAILED"), contains("bucket unreachable"));
-        verify(redisLockUtil).unlock("job:image-gc");
+        verify(dingTalkAlertService).alert(eq(ImageGcConstants.Alert.FAILED), contains("bucket unreachable"));
+        verify(redisLockUtil).unlock(ImageGcJob.LOCK_KEY);
     }
 
     @Test
     void runWeeklyReport_alertsWhenReportAborts() {
-        when(redisLockUtil.tryLock("job:image-gc")).thenReturn(true);
+        when(redisLockUtil.tryLock(ImageGcJob.LOCK_KEY)).thenReturn(true);
         when(imageGcService.runOnce()).thenReturn(report(true, true, "列目录失败，已中止"));
 
         assertThatCode(() -> job.runWeeklyReport()).doesNotThrowAnyException();
 
-        verify(dingTalkAlertService).alert(eq("IMAGE_GC_ABORTED"), contains("列目录失败"));
-        verify(redisLockUtil).unlock("job:image-gc");
+        verify(dingTalkAlertService).alert(eq(ImageGcConstants.Alert.ABORTED), contains("列目录失败"));
+        verify(redisLockUtil).unlock(ImageGcJob.LOCK_KEY);
     }
 
     private static ImageGcReport report(boolean executed, boolean aborted, String abortReason) {
         return ImageGcReport.builder()
                 .executed(executed)
-                .mode("report")
+                .mode(ImageGcConstants.Mode.REPORT)
                 .aborted(aborted)
                 .abortReason(abortReason)
                 .scannedObjectCount(5)

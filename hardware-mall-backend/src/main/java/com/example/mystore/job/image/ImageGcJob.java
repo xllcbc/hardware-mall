@@ -1,9 +1,12 @@
 package com.example.mystore.job.image;
 
+import com.example.mystore.common.constant.ImageGcConstants;
 import com.example.mystore.entity.vo.ImageGcReport;
 import com.example.mystore.service.ImageGcService;
 import com.example.mystore.service.impl.DingTalkAlertService;
 import com.example.mystore.util.RedisLockUtil;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -19,12 +22,11 @@ import org.springframework.stereotype.Component;
 public class ImageGcJob {
 
     static final String LOCK_KEY = "job:image-gc";
-    static final String ALERT_ABORTED = "IMAGE_GC_ABORTED";
-    static final String ALERT_FAILED = "IMAGE_GC_FAILED";
 
     private final ImageGcService imageGcService;
     private final RedisLockUtil redisLockUtil;
     private final DingTalkAlertService dingTalkAlertService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Scheduled(cron = "${image.gc.report-cron:0 0 3 * * MON}")
     public void runWeeklyReport() {
@@ -36,7 +38,7 @@ public class ImageGcJob {
             ImageGcReport report = imageGcService.runOnce();
             if (report.isAborted()) {
                 log.error("图片回收报告中止: reason={}, {}", report.getAbortReason(), summary(report));
-                dingTalkAlertService.alert(ALERT_ABORTED,
+                dingTalkAlertService.alert(ImageGcConstants.Alert.ABORTED,
                         "原因: " + report.getAbortReason() + "\n" + summary(report));
                 return;
             }
@@ -47,20 +49,19 @@ public class ImageGcJob {
             log.info("图片回收报告: {}", summary(report));
         } catch (Exception e) {
             log.error("图片回收任务执行失败", e);
-            dingTalkAlertService.alert(ALERT_FAILED, "图片回收任务执行失败: " + e.getMessage());
+            dingTalkAlertService.alert(ImageGcConstants.Alert.FAILED,
+                    "图片回收任务执行失败: " + e.getMessage());
         } finally {
             redisLockUtil.unlock(LOCK_KEY);
         }
     }
 
-    private static String summary(ImageGcReport report) {
-        return "mode=" + report.getMode()
-                + ", scanned=" + report.getScannedObjectCount()
-                + ", mappedReferences=" + report.getMappedReferenceCount()
-                + ", referenced=" + report.getReferencedObjectCount()
-                + ", unreferenced=" + report.getUnreferencedObjectCount()
-                + ", candidates=" + report.getCandidateCount()
-                + ", reclaimableBytes=" + report.getReclaimableBytes()
-                + ", samples=" + report.getSampleObjectKeys();
+    private String summary(ImageGcReport report) {
+        try {
+            return objectMapper.writeValueAsString(report);
+        } catch (JsonProcessingException e) {
+            log.warn("图片回收报告 JSON 序列化失败，输出默认格式", e);
+            return String.valueOf(report);
+        }
     }
 }

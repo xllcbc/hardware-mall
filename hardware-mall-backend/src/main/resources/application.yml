@@ -128,7 +128,7 @@ dingtalk:
 
 image:
   gc:
-    # off / report / trash；默认关闭，首次上线先以 report 观察两周
+    # off / report；默认关闭，首次上线先以 report 观察两周
     mode: ${IMAGE_GC_MODE:off}
     # 宽限期：最后修改早于该天数的对象才可能被回收
     grace-days: ${IMAGE_GC_GRACE_DAYS:7}

@@ -1,5 +1,6 @@
 package com.example.mystore.entity.vo;
 
+import com.example.mystore.common.constant.ImageGcConstants;
 import lombok.Builder;
 import lombok.Value;
 
@@ -16,7 +17,7 @@ public class ImageGcReport {
     boolean executed;
 
     /** 本轮模式：off / report / trash。 */
-    String mode;
+    ImageGcConstants.Mode mode;
 
     /** 本轮是否因失败而中止；中止时不复制、不删除任何对象。 */
     boolean aborted;
@@ -45,7 +46,7 @@ public class ImageGcReport {
     /** 候选对象键样例，按对象键排序后截断。 */
     List<String> sampleObjectKeys;
 
-    public static ImageGcReport notExecuted(String mode) {
+    public static ImageGcReport notExecuted(ImageGcConstants.Mode mode) {
         return ImageGcReport.builder()
                 .executed(false)
                 .mode(mode)

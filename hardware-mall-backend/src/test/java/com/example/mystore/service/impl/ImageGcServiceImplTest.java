@@ -4,6 +4,7 @@ import com.aliyun.oss.OSS;
 import com.aliyun.oss.model.ListObjectsRequest;
 import com.aliyun.oss.model.OSSObjectSummary;
 import com.aliyun.oss.model.ObjectListing;
+import com.example.mystore.common.constant.ImageGcConstants;
 import com.example.mystore.config.ImageGcProperties;
 import com.example.mystore.config.OssProperties;
 import com.example.mystore.entity.db.OrderItem;
@@ -62,7 +63,7 @@ class ImageGcServiceImplTest {
         OssProperties ossProperties = new OssProperties();
         ossProperties.setBucketName("test-bucket");
         properties = new ImageGcProperties();
-        properties.setMode(ImageGcProperties.Mode.REPORT);
+        properties.setMode(ImageGcConstants.Mode.REPORT);
         service = new ImageGcServiceImpl(
                 ossClient, ossProperties, spuMapper, skuMapper, orderItemMapper, userMapper, properties);
 
@@ -198,13 +199,48 @@ class ImageGcServiceImplTest {
 
     @Test
     void offMode_doesNotTouchOssOrDatabase() {
-        properties.setMode(ImageGcProperties.Mode.OFF);
+        properties.setMode(ImageGcConstants.Mode.OFF);
 
         ImageGcReport report = service.runOnce();
 
         assertThat(report.isExecuted()).isFalse();
-        assertThat(report.getMode()).isEqualTo("off");
+        assertThat(report.getMode()).isEqualTo(ImageGcConstants.Mode.OFF);
         verifyNoInteractions(ossClient, spuMapper, skuMapper, orderItemMapper, userMapper);
+    }
+
+    @Test
+    void report_countsDuplicateReferencesAsMappedInsteadOfUnmapped() {
+        Instant old = Instant.now().minus(Duration.ofDays(30));
+        stubBucket(Map.of("products/", List.of(object("products/shared.jpg", 10, old))));
+        when(spuMapper.selectList(any())).thenReturn(List.of(
+                spu(DOMAIN + "/products/shared.jpg"),
+                spu(DOMAIN + "/products/shared.jpg")));
+
+        ImageGcReport report = service.runOnce();
+
+        assertThat(report.isAborted()).isFalse();
+        assertThat(report.getMappedReferenceCount()).isEqualTo(2);
+        assertThat(report.getReferencedObjectCount()).isEqualTo(1);
+        assertThat(report.getCandidateCount()).isZero();
+    }
+
+    @Test
+    void report_reconfirmsCandidatesAgainstTheLatestReferenceSnapshot() {
+        Instant old = Instant.now().minus(Duration.ofDays(30));
+        stubBucket(Map.of("products/", List.of(object("products/race.jpg", 700, old))));
+        when(spuMapper.selectList(any()))
+                .thenReturn(List.of(spu(DOMAIN + "/products/other.jpg")))
+                .thenReturn(List.of(
+                        spu(DOMAIN + "/products/other.jpg"),
+                        spu(DOMAIN + "/products/race.jpg")));
+
+        ImageGcReport report = service.runOnce();
+
+        assertThat(report.isAborted()).isFalse();
+        assertThat(report.getReferencedObjectCount()).isEqualTo(1);
+        assertThat(report.getUnreferencedObjectCount()).isZero();
+        assertThat(report.getCandidateCount()).isZero();
+        assertThat(report.getReclaimableBytes()).isZero();
     }
 
     private void stubBucket(Map<String, List<OSSObjectSummary>> objectsByPrefix) {

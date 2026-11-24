@@ -4,6 +4,7 @@ import com.aliyun.oss.OSS;
 import com.aliyun.oss.model.ListObjectsRequest;
 import com.aliyun.oss.model.OSSObjectSummary;
 import com.aliyun.oss.model.ObjectListing;
+import com.example.mystore.common.constant.ImageGcConstants;
 import com.example.mystore.config.ImageGcProperties;
 import com.example.mystore.config.OssProperties;
 import com.example.mystore.entity.db.OrderItem;
@@ -32,16 +33,19 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * 图片回收服务：先列 OSS 对象，再读取数据库引用快照，最后计算孤儿候选。
- * 报告模式只读，不复制、不删除任何对象。
+ * 图片回收服务：先列 OSS 对象，再读取数据库引用快照，最后用最新引用快照再确认一次，
+ * 降低扫描期间新增引用的竞态。报告模式只读，不复制、不删除任何对象。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ImageGcServiceImpl implements ImageGcService {
 
-    /** 白名单前缀：只有这三个目录下的对象参与扫描，trash/ 与其他前缀永不扫描。 */
-    static final List<String> SCAN_PREFIXES = List.of("products/", "avatars/", "banners/");
+    /** 每页列目录大小。 */
+    private static final int LIST_PAGE_SIZE = 1000;
+
+    /** 报告中样例对象键的最大数量。 */
+    private static final int SAMPLE_LIMIT = 20;
 
     private final OSS ossClient;
     private final OssProperties ossProperties;
@@ -53,64 +57,67 @@ public class ImageGcServiceImpl implements ImageGcService {
 
     @Override
     public ImageGcReport runOnce() {
-        String mode = properties.getMode().name().toLowerCase();
-        if (properties.getMode() == ImageGcProperties.Mode.OFF) {
+        ImageGcConstants.Mode mode = properties.getMode();
+        if (mode == ImageGcConstants.Mode.OFF) {
             log.info("图片回收任务已关闭(mode=off)，跳过本轮");
             return ImageGcReport.notExecuted(mode);
-        }
-        if (properties.getMode() == ImageGcProperties.Mode.TRASH) {
-            log.warn("图片回收 trash 模式尚未启用（本版本只提供只读报告），本轮不复制、不删除任何对象");
         }
 
         List<OSSObjectSummary> objects;
         try {
             objects = listWhitelistedObjects();
         } catch (RuntimeException e) {
-            String reason = "列目录失败，已中止: " + e.getMessage();
-            log.error("图片回收中止: {}", reason, e);
-            return abortedReport(mode, reason, 0, 0);
+            return abort(mode, "列目录失败，已中止: " + e.getMessage(), 0, 0, e);
         }
 
         ReferenceSnapshot references;
         try {
             references = loadReferences();
         } catch (RuntimeException e) {
-            String reason = "读取图片引用失败，已中止: " + e.getMessage();
-            log.error("图片回收中止: {}", reason, e);
-            return abortedReport(mode, reason, objects.size(), 0);
+            return abort(mode, "读取图片引用失败，已中止: " + e.getMessage(), objects.size(), 0, e);
+        }
+        if (references.mappedReferenceCount() == 0) {
+            return abort(mode, "本轮映射到的图片引用数为零，已中止（请检查数据库中的图片引用）",
+                    objects.size(), 0, null);
         }
 
-        if (references.mappedReferenceCount() == 0) {
-            String reason = "本轮映射到的图片引用数为零，已中止（请检查图片域名与数据库引用）";
-            log.error("图片回收中止: reason={}, scanned={}", reason, objects.size());
-            return abortedReport(mode, reason, objects.size(), 0);
+        ReferenceSnapshot confirmed;
+        try {
+            confirmed = loadReferences();
+        } catch (RuntimeException e) {
+            return abort(mode, "再次确认图片引用失败，已中止: " + e.getMessage(), objects.size(), 0, e);
+        }
+        if (confirmed.mappedReferenceCount() == 0) {
+            return abort(mode, "再次确认时映射到的图片引用数为零，已中止（请检查数据库中的图片引用）",
+                    objects.size(), 0, null);
         }
 
         Instant cutoff = Instant.now().minus(Duration.ofDays(properties.getGraceDays()));
         int referencedObjects = 0;
         int unreferencedObjects = 0;
-        int candidateCount = 0;
-        long reclaimableBytes = 0;
         List<String> candidateKeys = new ArrayList<>();
 
         for (OSSObjectSummary object : objects) {
             String key = object.getKey();
-            if (references.objectKeys().contains(key)) {
+            if (confirmed.objectKeys().contains(key)) {
                 referencedObjects++;
                 continue;
             }
             unreferencedObjects++;
             Date lastModified = object.getLastModified();
             if (lastModified != null && lastModified.toInstant().isBefore(cutoff)) {
-                candidateCount++;
-                reclaimableBytes += object.getSize();
                 candidateKeys.add(key);
             }
         }
 
         candidateKeys.sort(Comparator.naturalOrder());
+        Set<String> candidateKeySet = Set.copyOf(candidateKeys);
+        long reclaimableBytes = objects.stream()
+                .filter(object -> candidateKeySet.contains(object.getKey()))
+                .mapToLong(OSSObjectSummary::getSize)
+                .sum();
         List<String> samples = candidateKeys.stream()
-                .limit(Math.max(0, properties.getSampleLimit()))
+                .limit(SAMPLE_LIMIT)
                 .toList();
 
         return ImageGcReport.builder()
@@ -118,16 +125,24 @@ public class ImageGcServiceImpl implements ImageGcService {
                 .mode(mode)
                 .aborted(false)
                 .scannedObjectCount(objects.size())
-                .mappedReferenceCount(references.mappedReferenceCount())
+                .mappedReferenceCount(confirmed.mappedReferenceCount())
                 .referencedObjectCount(referencedObjects)
                 .unreferencedObjectCount(unreferencedObjects)
-                .candidateCount(candidateCount)
+                .candidateCount(candidateKeys.size())
                 .reclaimableBytes(reclaimableBytes)
                 .sampleObjectKeys(samples)
                 .build();
     }
 
-    private static ImageGcReport abortedReport(String mode, String reason, int scanned, int mappedReferences) {
+    private ImageGcReport abort(ImageGcConstants.Mode mode, String reason, int scanned,
+                                int mappedReferences, RuntimeException cause) {
+        if (cause == null) {
+            log.error("图片回收中止: reason={}, scanned={}, mappedReferences={}",
+                    reason, scanned, mappedReferences);
+        } else {
+            log.error("图片回收中止: reason={}, scanned={}, mappedReferences={}",
+                    reason, scanned, mappedReferences, cause);
+        }
         return ImageGcReport.builder()
                 .executed(true)
                 .mode(mode)
@@ -139,18 +154,20 @@ public class ImageGcServiceImpl implements ImageGcService {
                 .build();
     }
 
-    private List<OSSObjectSummary> listWhitelistedObjects() {        List<OSSObjectSummary> objects = new ArrayList<>();
-        for (String prefix : SCAN_PREFIXES) {
+    private List<OSSObjectSummary> listWhitelistedObjects() {
+        List<OSSObjectSummary> objects = new ArrayList<>();
+        for (String prefix : ImageGcConstants.Prefix.SCAN) {
             String marker = null;
             do {
                 ListObjectsRequest request = new ListObjectsRequest(ossProperties.getBucketName());
                 request.setPrefix(prefix);
-                request.setMaxKeys(properties.getListPageSize());
+                request.setMaxKeys(LIST_PAGE_SIZE);
                 if (marker != null) {
                     request.setMarker(marker);
                 }
                 ObjectListing listing = ossClient.listObjects(request);
                 for (OSSObjectSummary summary : listing.getObjectSummaries()) {
+                    // 防御性过滤：即便 OSS 返回白名单前缀外的对象，也不纳入统计。
                     if (isWhitelisted(summary.getKey())) {
                         objects.add(summary);
                     }
@@ -165,62 +182,34 @@ public class ImageGcServiceImpl implements ImageGcService {
         if (key == null) {
             return false;
         }
-        return SCAN_PREFIXES.stream().anyMatch(key::startsWith);
+        return ImageGcConstants.Prefix.SCAN.stream().anyMatch(key::startsWith);
     }
 
     /**
      * 取全表、不排除软删除记录：软删除的商品/规格图片仍可能被历史订单展示，且保守保留不会造成误删。
      */
     private ReferenceSnapshot loadReferences() {
-        Set<String> objectKeys = new HashSet<>();
-        int mapped = 0;
-        int unmapped = 0;
+        ReferenceAccumulator accumulator = new ReferenceAccumulator();
 
         for (Spu spu : spuMapper.selectList(null)) {
-            if (spu.getImages() == null) {
-                continue;
-            }
-            for (String url : spu.getImages()) {
-                if (addReference(url, objectKeys)) {
-                    mapped++;
-                } else if (hasText(url)) {
-                    unmapped++;
-                }
+            if (spu.getImages() != null) {
+                spu.getImages().forEach(accumulator::add);
             }
         }
-
         for (Sku sku : skuMapper.selectList(null)) {
-            if (addReference(sku.getImage(), objectKeys)) {
-                mapped++;
-            } else if (hasText(sku.getImage())) {
-                unmapped++;
-            }
+            accumulator.add(sku.getImage());
         }
-
         for (OrderItem item : orderItemMapper.selectList(null)) {
-            if (addReference(item.getProductImage(), objectKeys)) {
-                mapped++;
-            } else if (hasText(item.getProductImage())) {
-                unmapped++;
-            }
+            accumulator.add(item.getProductImage());
         }
-
         for (User user : userMapper.selectList(null)) {
-            if (addReference(user.getAvatarUrl(), objectKeys)) {
-                mapped++;
-            } else if (hasText(user.getAvatarUrl())) {
-                unmapped++;
-            }
+            accumulator.add(user.getAvatarUrl());
         }
 
-        if (unmapped > 0) {
-            log.warn("图片回收：{} 条图片 URL 无法换算为对象键，已忽略", unmapped);
+        if (accumulator.unmapped > 0) {
+            log.warn("图片回收：{} 条图片 URL 无法换算为对象键，已忽略", accumulator.unmapped);
         }
-        return new ReferenceSnapshot(Set.copyOf(objectKeys), mapped);
-    }
-
-    private static boolean addReference(String url, Set<String> objectKeys) {
-        return toObjectKey(url).map(objectKeys::add).orElse(false);
+        return new ReferenceSnapshot(Set.copyOf(accumulator.objectKeys), accumulator.mapped);
     }
 
     /**
@@ -251,6 +240,23 @@ public class ImageGcServiceImpl implements ImageGcService {
 
     private static boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private static final class ReferenceAccumulator {
+
+        private final Set<String> objectKeys = new HashSet<>();
+        private int mapped;
+        private int unmapped;
+
+        private void add(String url) {
+            Optional<String> key = toObjectKey(url);
+            if (key.isPresent()) {
+                objectKeys.add(key.get());
+                mapped++;
+            } else if (hasText(url)) {
+                unmapped++;
+            }
+        }
     }
 
     private record ReferenceSnapshot(Set<String> objectKeys, int mappedReferenceCount) {
