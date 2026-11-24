@@ -4,6 +4,8 @@ WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm config set registry https://registry.npmmirror.com && npm ci
 COPY . .
+ARG VITE_OSS_HOSTS=""
+ENV VITE_OSS_HOSTS=$VITE_OSS_HOSTS
 RUN npm run build
 
 FROM nginx:alpine
