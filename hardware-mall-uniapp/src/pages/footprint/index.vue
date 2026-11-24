@@ -66,8 +66,10 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { useAppStore, type FootprintItem } from '@/stores/app'
+import { getProductPrices } from '@/api/product'
 
 const appStore = useAppStore()
 const loaded = ref(false)
@@ -78,6 +80,18 @@ onMounted(() => {
   nextTick(() => {
     loaded.value = true
   })
+})
+
+// 等级/倍率变更后足迹价需按当前等级重算
+onShow(async () => {
+  const ids = appStore.footprint.map(f => f.id)
+  if (!ids.length) return
+  try {
+    const fresh = await getProductPrices(ids)
+    appStore.updateFootprintPrices(fresh)
+  } catch (e) {
+    console.error('刷新足迹价格失败:', e)
+  }
 })
 
 const selectedCount = computed(() => selectedIds.value.length)

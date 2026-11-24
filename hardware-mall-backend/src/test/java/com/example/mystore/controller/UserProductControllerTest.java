@@ -199,6 +199,20 @@ class UserProductControllerTest {
     }
 
     @Test
+    void pricesEndpointResolvesLevelPriceAndFiltersMissingIds() throws Exception {
+        String token = userToken(2L, "level-prices-token");
+        mvc.perform(get("/api/user/product/prices")
+                        .param("ids", "9001,99999")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].id").value(9001))
+                .andExpect(jsonPath("$.data[0].minPrice").value(20.00))
+                .andExpect(jsonPath("$.data[0].maxPrice").value(24.00))
+                .andExpect(content().string(not(containsString("wholesale"))));
+    }
+
+    @Test
     void detailRateGapMarksUnsellableAndHidesWholesaleBasePrice() throws Exception {
         Category gapCategory = new Category();
         gapCategory.setId(3L);

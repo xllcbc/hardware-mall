@@ -196,6 +196,35 @@ class SpuServiceImplTest {
     }
 
     @Test
+    void priceListPricesBatchByIdsUsingCurrentLevel() {
+        Spu spu1 = spu(1L, 1L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        Spu spu2 = spu(2L, 2L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
+        when(spuMapper.selectList(any())).thenReturn(List.of(spu1, spu2));
+        when(skuService.getSkusBySpuIds(anyList())).thenReturn(Map.of(
+                1L, List.of(sku(10L, 1L, "100.00")),
+                2L, List.of(sku(20L, 2L, "50.00"))));
+        when(levelPricingService.priceAll(eq(2L), anyList()))
+                .thenReturn(List.of(
+                        LevelPricing.priced(2L, new BigDecimal("0.8000"),
+                                new BigDecimal("80.00"), new BigDecimal("80.00")),
+                        LevelPricing.missing(2L)));
+        UserContext.setLevelId(2L);
+
+        List<ProductListVO> result = spuService.getProductPriceList(List.of(1L, 2L));
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getId()).isEqualTo(1L);
+        assertThat(result.get(0).getMinPrice()).isEqualByComparingTo("80.00");
+        assertThat(result.get(0).isSellable()).isTrue();
+        assertThat(result.get(1).getId()).isEqualTo(2L);
+        assertThat(result.get(1).isSellable()).isFalse();
+        assertThat(result.get(1).getMinPrice()).isNull();
+        verify(levelPricingService, times(1)).priceAll(eq(2L), argThat(facts -> facts.size() == 2
+                && facts.get(0).categoryId().equals(1L)
+                && facts.get(1).categoryId().equals(2L)));
+    }
+
+    @Test
     void productDetail_wiresModulePricingAndReadsFreshStock() {
         Spu spu = spu(1L, 1L, DiscountConstants.DISCOUNT_PARTICIPATION_ENABLED);
         Sku sku = sku(10L, 1L, "10.00");

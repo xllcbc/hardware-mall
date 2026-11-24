@@ -67,6 +67,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import ProductCard from '@/components/common/ProductCard.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -90,12 +91,21 @@ const displayCategories = computed<CategoryItem[]>(() => {
   return cats
 })
 
+let hasLoaded = false
+
 onMounted(async () => {
   await Promise.all([
     loadCategories(),
     loadProducts()
   ])
   loading.value = false
+  hasLoaded = true
+})
+
+// 等级/倍率变更后返回首页需重算推荐商品价(静默刷新, 避免首屏重复请求)
+onShow(() => {
+  if (!hasLoaded) return
+  loadProducts()
 })
 
 const loadCategories = async () => {

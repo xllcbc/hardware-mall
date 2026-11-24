@@ -74,14 +74,20 @@ onMounted(async () => {
 })
 
 onShow(() => {
-  if (!categories.value.length) return
   const store = useAppStore()
   const targetId = store.preselectedCategoryId
-  if (!targetId) return
-  const target = categories.value.find(c => c.id === targetId)
-  if (target) {
-    selectCategory(target)
+  if (categories.value.length && targetId) {
+    const target = categories.value.find(c => c.id === targetId)
+    if (target) {
+      selectCategory(target)
+      store.selectCategory(null)
+      return
+    }
     store.selectCategory(null)
+  }
+  // 等级/倍率变更后返回本页需重算当前分类价格(静默刷新)
+  if (currentCategory.value) {
+    refreshProducts()
   }
 })
 
@@ -114,6 +120,13 @@ const selectCategory = async (cat: Category) => {
   page.value = 1
   noMore.value = false
   products.value = []
+  await loadProducts()
+}
+
+const refreshProducts = async () => {
+  if (!currentCategory.value) return
+  page.value = 1
+  noMore.value = false
   await loadProducts()
 }
 

@@ -292,6 +292,47 @@ public class SpuServiceImpl implements SpuService {
         return userPricingViews;
     }
 
+    @Override
+    public List<ProductListVO> getProductPriceList(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Long> distinctIds = ids.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        if (distinctIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapper<Spu> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Spu::getDeleteTime, 0)
+               .eq(Spu::getStatus, StatusConstants.PRODUCT_STATUS_ON_SHELF)
+               .in(Spu::getId, distinctIds);
+        List<Spu> spus = spuMapper.selectList(wrapper);
+        if (spus.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Long> spuIds = spus.stream().map(Spu::getId).collect(Collectors.toList());
+        Map<Long, List<Sku>> skusBySpu = skuService.getSkusBySpuIds(spuIds);
+
+        List<ProductListCacheItem> items = spus.stream().map(spu -> {
+            ProductListCacheItem item = convertToProductListCacheItem(spu);
+            List<Sku> skus = skusBySpu.getOrDefault(spu.getId(), Collections.emptyList());
+            if (!skus.isEmpty()) {
+                item.setBasePriceMin(skus.stream().map(Sku::getPrice)
+                        .min(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
+                item.setBasePriceMax(skus.stream().map(Sku::getPrice)
+                        .max(BigDecimal::compareTo).orElse(spu.getOriginalPrice()));
+            } else {
+                item.setBasePriceMin(spu.getOriginalPrice());
+                item.setBasePriceMax(spu.getOriginalPrice());
+            }
+            return item;
+        }).collect(Collectors.toList());
+
+        return toUserLevelPricingViews(items);
+    }
+
     private ProductListResult buildRecommendResult(Integer limit) {
         List<Spu> spus = getRecommendSpus();
         if (spus.isEmpty()) {
