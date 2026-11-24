@@ -53,6 +53,7 @@ class OssServiceImplTest {
         assertThat(request.getInputStream()).isNotNull();
         assertThat(request.getMetadata().getContentLength()).isEqualTo(content.length);
         assertThat(request.getMetadata().getContentType()).isEqualTo("image/jpeg");
+        assertThat(request.getMetadata().getCacheControl()).isEqualTo("public, max-age=2592000");
         assertThat(url).startsWith("https://cdn.example.com/products/");
     }
 

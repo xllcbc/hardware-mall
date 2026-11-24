@@ -21,6 +21,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class OssServiceImpl implements OssService {
 
+    /** 30 天公共缓存：对象键含时间戳与 UUID，不会覆盖，长缓存安全。 */
+    private static final String CACHE_CONTROL_30_DAYS = "public, max-age=2592000";
+
     private final OSS ossClient;
     private final OssProperties ossProperties;
 
@@ -47,6 +50,7 @@ public class OssServiceImpl implements OssService {
             if (file.getContentType() != null && !file.getContentType().isBlank()) {
                 metadata.setContentType(file.getContentType());
             }
+            metadata.setCacheControl(CACHE_CONTROL_30_DAYS);
             ossClient.putObject(new PutObjectRequest(
                     ossProperties.getBucketName(),
                     objectName,
