@@ -23,7 +23,6 @@ import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpecItemMapper;
 import com.example.mystore.mapper.SpecTemplateMapper;
 import com.example.mystore.mapper.SpuMapper;
-import com.example.mystore.service.OssService;
 import com.example.mystore.service.ProductCacheService;
 import com.example.mystore.service.SkuService;
 import com.example.mystore.service.SpecItemService;
@@ -65,7 +64,6 @@ public class SkuServiceImpl implements SkuService {
     private final SpecItemMapper specItemMapper;
     private final SpecTemplateService specTemplateService;
     private final SpecItemService specItemService;
-    private final OssService ossService;
     private final RedisUtil redisUtil;
     private final ProductCacheService productCacheService;
     private final BatchCacheLoader batchCacheLoader;
@@ -359,13 +357,6 @@ public class SkuServiceImpl implements SkuService {
         Long spuId = sku.getSpuId();
         sku.setDeleteTime(System.currentTimeMillis());
         skuMapper.updateById(sku);
-        if (sku.getImage() != null) {
-            try {
-                ossService.deleteFile(sku.getImage());
-            } catch (RuntimeException e) {
-                log.warn("SKU 图片清理失败, skuId={}, image={}", id, sku.getImage(), e);
-            }
-        }
         publishSkuChanged(spuId, id);
         publishStockEvict(id);
     }

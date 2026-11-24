@@ -64,24 +64,6 @@ public class OssServiceImpl implements OssService {
         return ossProperties.getDomain() + "/" + objectName;
     }
 
-    @Override
-    public void deleteFile(String url) {
-        if (url == null || url.isBlank()) {
-            return;
-        }
-        String prefix = ossProperties.getDomain() + "/";
-        if (!url.startsWith(prefix)) {
-            log.warn("OSS 删除跳过：URL 不属于当前域名, url={}", url);
-            return;
-        }
-        String objectName = url.substring(prefix.length());
-        try {
-            ossClient.deleteObject(ossProperties.getBucketName(), objectName);
-        } catch (Exception e) {
-            log.warn("OSS 删除失败, objectName={}, error={}", objectName, e.getMessage());
-        }
-    }
-
     private long elapsedMillis(long startedAt) {
         return (System.nanoTime() - startedAt) / 1_000_000;
     }

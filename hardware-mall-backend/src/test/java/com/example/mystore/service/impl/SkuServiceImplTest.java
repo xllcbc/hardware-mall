@@ -30,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -685,17 +686,24 @@ class SkuServiceImplTest {
     }
 
     @Test
-    void deleteSku_fileCleanupFailureDoesNotSkipCacheInvalidation() {
+    void deleteSku_neverTouchesOssAndKeepsSoftDeleteThenCacheInvalidationOrder() {
         sku1.setImage("https://example.test/sku.png");
         when(skuMapper.selectById(1L)).thenReturn(sku1);
-        doThrow(new RuntimeException("oss unavailable")).when(ossService).deleteFile(sku1.getImage());
 
         assertThatCode(() -> skuService.deleteSku(1L)).doesNotThrowAnyException();
 
-        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku -> sku.getDeleteTime() > 0));
-        verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
+        verifyNoInteractions(ossService);
+        InOrder order = inOrder(skuMapper, eventPublisher);
+        order.verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku -> sku.getDeleteTime() > 0));
+        order.verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
                 ProductCacheInvalidationEvent.Type.SKU_CHANGED, 1L, 1L, false));
-        verify(eventPublisher).publishEvent(new StockCacheEvent(List.of(1L)));
+        order.verify(eventPublisher).publishEvent(new StockCacheEvent(List.of(1L)));
+    }
+
+    @Test
+    void skuService_hasNoOssDependency() {
+        assertThat(Arrays.stream(SkuServiceImpl.class.getDeclaredFields()))
+                .noneMatch(field -> OssService.class.isAssignableFrom(field.getType()));
     }
 
     @Test

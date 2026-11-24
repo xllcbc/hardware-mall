@@ -4,6 +4,7 @@ import com.aliyun.oss.OSS;
 import com.aliyun.oss.model.PutObjectRequest;
 import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.config.OssProperties;
+import com.example.mystore.service.OssService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -54,6 +56,12 @@ class OssServiceImplTest {
         assertThat(request.getMetadata().getContentLength()).isEqualTo(content.length);
         assertThat(request.getMetadata().getContentType()).isEqualTo("image/jpeg");
         assertThat(url).startsWith("https://cdn.example.com/products/");
+    }
+
+    @Test
+    void serviceContract_exposesNoDeleteByUrlOperation() {
+        assertThat(Arrays.stream(OssService.class.getDeclaredMethods()))
+                .noneMatch(method -> "deleteFile".equals(method.getName()));
     }
 
     @Test
