@@ -173,7 +173,7 @@ public class OrderIntakeServiceImpl implements OrderIntakeService {
         for (CreateOrderRequest.CartItem cartItem : requestedItems) {
             Sku sku = skuMap.get(cartItem.getSkuId());
             log.info("SKU查询结果, skuId={}, sku={}", cartItem.getSkuId(), sku);
-            if (sku == null || sku.getStatus() != 1) {
+            if (sku == null || sku.getStatus() != StatusConstants.PRODUCT_STATUS_ON_SHELF) {
                 throw new BusinessException("商品不存在或已下架: " + cartItem.getSkuId());
             }
             // 【库存软检查】getSkuById 已返回新鲜库存(读 sku:stock 缓存, miss 回源 DB)

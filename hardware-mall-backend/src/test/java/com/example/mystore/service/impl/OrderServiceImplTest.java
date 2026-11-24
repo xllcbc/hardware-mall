@@ -73,26 +73,20 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void previewOrder_delegatesToIntakeModule() {
-        CheckoutPreviewRequest request = new CheckoutPreviewRequest();
+    void orderEntry_delegatesToIntakeModule() {
+        CheckoutPreviewRequest previewRequest = new CheckoutPreviewRequest();
         CheckoutPreviewVO preview = new CheckoutPreviewVO();
-        when(orderIntakeService.previewOrder(request)).thenReturn(preview);
+        when(orderIntakeService.previewOrder(previewRequest)).thenReturn(preview);
 
-        assertThat(orderService.previewOrder(request)).isSameAs(preview);
-
-        verify(orderIntakeService).previewOrder(request);
-        verifyNoInteractions(orderQueryService, orderLifecycleService);
-    }
-
-    @Test
-    void createOrder_delegatesToIntakeModule() {
-        CreateOrderRequest request = new CreateOrderRequest();
+        CreateOrderRequest createRequest = new CreateOrderRequest();
         OrderVO created = new OrderVO();
-        when(orderIntakeService.createOrder(2L, request, "k1")).thenReturn(created);
+        when(orderIntakeService.createOrder(2L, createRequest, "k1")).thenReturn(created);
 
-        assertThat(orderService.createOrder(2L, request, "k1")).isSameAs(created);
+        assertThat(orderService.previewOrder(previewRequest)).isSameAs(preview);
+        assertThat(orderService.createOrder(2L, createRequest, "k1")).isSameAs(created);
 
-        verify(orderIntakeService).createOrder(2L, request, "k1");
+        verify(orderIntakeService).previewOrder(previewRequest);
+        verify(orderIntakeService).createOrder(2L, createRequest, "k1");
         verifyNoInteractions(orderQueryService, orderLifecycleService);
     }
 
@@ -181,56 +175,31 @@ class OrderServiceImplTest {
     // ==================== 生命周期门面接线 ====================
 
     @Test
-    void cancelOrder_delegatesToLifecycleModule() {
-        orderService.cancelOrder(2L, 1L, "不想要了");
-
-        verify(orderLifecycleService).cancelOrder(2L, 1L, "不想要了");
-        verifyNoInteractions(orderIntakeService, orderQueryService);
-    }
-
-    @Test
-    void autoCancelOrder_delegatesToLifecycleModule() {
-        when(orderLifecycleService.autoCancelOrder(1L, "超时未支付")).thenReturn(true);
-
-        assertThat(orderService.autoCancelOrder(1L, "超时未支付")).isTrue();
-
-        verify(orderLifecycleService).autoCancelOrder(1L, "超时未支付");
-        verifyNoInteractions(orderIntakeService, orderQueryService);
-    }
-
-    @Test
-    void shipOrder_delegatesToLifecycleModule() {
-        orderService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 2L);
-
-        verify(orderLifecycleService).shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 2L);
-        verifyNoInteractions(orderIntakeService, orderQueryService);
-    }
-
-    @Test
     void lifecycleCommands_delegateToLifecycleModule() {
+        when(orderLifecycleService.autoCancelOrder(1L, "超时未支付")).thenReturn(true);
         when(orderLifecycleService.autoConfirmReceive(1L)).thenReturn(true);
 
+        orderService.cancelOrder(2L, 1L, "不想要了");
+        assertThat(orderService.autoCancelOrder(1L, "超时未支付")).isTrue();
+        orderService.shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 2L);
         orderService.confirmReceive(2L, 1L);
         assertThat(orderService.autoConfirmReceive(1L)).isTrue();
+        orderService.confirmReceiveByWechat(2L, 1L);
         orderService.refundOrder(1L, "质量问题");
         orderService.applyRefund(2L, 1L, "不想要了");
         orderService.rejectRefund(1L, "凭证不足");
         orderService.deleteOrder(2L, 1L);
 
+        verify(orderLifecycleService).cancelOrder(2L, 1L, "不想要了");
+        verify(orderLifecycleService).autoCancelOrder(1L, "超时未支付");
+        verify(orderLifecycleService).shipOrder(1L, StatusConstants.DELIVERY_TYPE_LOCAL, 2L);
         verify(orderLifecycleService).confirmReceive(2L, 1L);
         verify(orderLifecycleService).autoConfirmReceive(1L);
+        verify(orderLifecycleService).confirmReceiveByWechat(2L, 1L);
         verify(orderLifecycleService).refundOrder(1L, "质量问题");
         verify(orderLifecycleService).applyRefund(2L, 1L, "不想要了");
         verify(orderLifecycleService).rejectRefund(1L, "凭证不足");
         verify(orderLifecycleService).deleteOrder(2L, 1L);
-        verifyNoInteractions(orderIntakeService, orderQueryService);
-    }
-
-    @Test
-    void confirmReceiveByWechat_delegatesToLifecycleModule() {
-        orderService.confirmReceiveByWechat(2L, 1L);
-
-        verify(orderLifecycleService).confirmReceiveByWechat(2L, 1L);
         verifyNoInteractions(orderIntakeService, orderQueryService);
     }
 }

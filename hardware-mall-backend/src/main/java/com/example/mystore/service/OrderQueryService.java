@@ -21,7 +21,10 @@ public interface OrderQueryService {
     Page<OrderVO> getOrderPage(Long userId, Integer status, Integer page, Integer limit);
 
     /**
-     * 组装用户端订单详情视图（归属校验与支付同步由门面完成）。
+     * 组装用户端订单详情视图。
+     *
+     * <p>归属校验由详情路径先经 {@link #getUserOrderStatus(Long, Long)} 完成；
+     * 支付同步由门面在调用本方法前触发。本方法只读、不再重复校验归属。
      */
     OrderVO getOrderView(Long orderId);
 
