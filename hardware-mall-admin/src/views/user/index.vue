@@ -48,7 +48,7 @@
         <el-table-column label="用户" min-width="180">
           <template #default="{ row }">
             <div class="user-info-cell">
-              <el-avatar :size="40" class="user-avatar" :src="row.avatarUrl">
+              <el-avatar :size="40" class="user-avatar" :src="thumb(row.avatarUrl, THUMB_WIDTHS.userAvatar)">
                 <el-icon><User /></el-icon>
               </el-avatar>
               <div class="user-detail">
@@ -219,6 +219,7 @@ import { provinceCityOptions } from '@/utils/regions'
 import { getUserList, updateUserStatus, updateUserRegion, updateUserLevel } from '@/api/admin/user'
 import { getUserLevelList, type UserLevel } from '@/api/admin/userLevel'
 import { USER_ROLE, USER_ROLE_TEXT, USER_STATUS, USER_STATUS_TEXT } from '@/constants/status'
+import { THUMB_WIDTHS, thumb } from '@/utils/thumb'
 
 const router = useRouter()
 const route = useRoute()

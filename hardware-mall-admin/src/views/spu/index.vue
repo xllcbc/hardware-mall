@@ -107,9 +107,10 @@
             <div class="product-image-wrapper">
               <el-image
                 v-if="row.images && row.images.length > 0"
-                :src="row.images[0]"
+                :src="thumb(row.images[0], THUMB_WIDTHS.productList)"
                 class="product-image"
                 fit="cover"
+                lazy
                 @click="previewImage(row.images, 0)"
               />
               <div v-else class="no-image">
@@ -318,7 +319,7 @@
                 class="image-item"
               >
                 <el-image
-                  :src="img"
+                  :src="thumb(img, THUMB_WIDTHS.productDialog)"
                   :preview-src-list="form.images"
                   :initial-index="index"
                   fit="cover"
@@ -564,9 +565,10 @@
                 >
                   <el-image
                     v-if="row.image"
-                    :src="row.image"
+                    :src="thumb(row.image, THUMB_WIDTHS.productDialog)"
                     class="sku-image"
                     fit="cover"
+                    lazy
                   />
                   <div v-else class="sku-image-placeholder">
                     <el-icon><Plus /></el-icon>
@@ -765,6 +767,7 @@ import {
   toPriceViewLevelId,
   type PriceView
 } from '@/utils/pricingView'
+import { THUMB_WIDTHS, thumb } from '@/utils/thumb'
 
 type ProductPricingRow = AdminProductPricing & { categoryName: string }
 
