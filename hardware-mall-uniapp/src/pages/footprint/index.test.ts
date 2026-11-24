@@ -38,6 +38,8 @@ const freshPrice = (id: number, minPrice: number): ProductListVO => ({
   status: 1
 })
 
+const OSS_IMAGE = 'https://java0251014.oss-cn-beijing.aliyuncs.com/products/footprint.jpg'
+
 describe('footprint page refreshes prices on show', () => {
   beforeEach(() => {
     showHandlers.length = 0
@@ -62,5 +64,23 @@ describe('footprint page refreshes prices on show', () => {
 
     expect(vi.mocked(getProductPrices)).toHaveBeenCalledWith([1])
     expect(appStore.footprint[0].price).toBe(20)
+  })
+
+  it('renders footprint images as 200px thumbnails', async () => {
+    const appStore = useAppStore()
+    appStore.footprint.push({
+      id: 1,
+      name: '商品1',
+      image: OSS_IMAGE,
+      price: 10,
+      viewTime: Date.now()
+    })
+
+    const wrapper = mount(FootprintPage, { global: { stubs: { EmptyState: true } } })
+    await flushPromises()
+
+    expect(wrapper.find('.item-image').attributes('src')).toBe(
+      `${OSS_IMAGE}?x-oss-process=image/resize,w_200/format,webp/quality,q_80`
+    )
   })
 })

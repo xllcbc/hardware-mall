@@ -1,7 +1,7 @@
 <template>
   <view class="product-card" @tap="onClick">
     <view class="image-wrapper">
-      <image class="product-image" :src="image || '/static/images/placeholder.svg'" mode="aspectFill" lazy-load />
+      <image class="product-image" :src="thumb(image, THUMB_WIDTHS.productCard) || '/static/images/placeholder.svg'" mode="aspectFill" lazy-load />
     </view>
     <view class="product-info">
       <text class="product-name">{{ name }}</text>
@@ -19,6 +19,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { THUMB_WIDTHS, thumb } from '@/utils/thumb'
 
 interface Props {
   id?: number | string

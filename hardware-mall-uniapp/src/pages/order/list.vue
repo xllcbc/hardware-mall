@@ -30,7 +30,7 @@
 
           <view class="order-products">
             <view class="product-item" v-for="item in order.items" :key="item.id" @tap.stop="goProductDetail(item.spuId)">
-              <image class="product-image" :src="item.productImage || '/static/images/default.png'" mode="aspectFill" lazy-load />
+              <image class="product-image" :src="thumb(item.productImage, THUMB_WIDTHS.listItem) || '/static/images/default.png'" mode="aspectFill" lazy-load />
               <view class="product-info">
                 <text class="product-name">{{ item.productName }}</text>
                 <text class="product-spec" v-if="item.productSpec">{{ item.productSpec }}</text>
@@ -67,6 +67,7 @@ import { onShow } from '@dcloudio/uni-app'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import type { Order } from '@/types'
+import { THUMB_WIDTHS, thumb } from '@/utils/thumb'
 import { cancelOrder as cancelOrderApi, confirmReceiveVerify, deleteOrder as deleteOrderApi, getOrderList, applyRefund as applyRefundApi } from '@/api/order'
 
 const tabs = reactive([
