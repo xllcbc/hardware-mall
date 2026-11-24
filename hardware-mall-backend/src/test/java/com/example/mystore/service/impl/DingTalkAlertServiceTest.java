@@ -12,13 +12,15 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class DingTalkAlertServiceTest {
@@ -33,7 +35,19 @@ class DingTalkAlertServiceTest {
         service = new DingTalkAlertService(redisUtil);
         ReflectionTestUtils.setField(service, "webhook", "http://127.0.0.1:1/dingtalk");
         ReflectionTestUtils.setField(service, "secret", "test-secret");
-        when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+        lenient().when(redisUtil.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+    }
+
+    @Test
+    void alert_withoutWebhook_isSilentNoOp() {
+        DingTalkAlertService unconfigured = new DingTalkAlertService(redisUtil);
+        ReflectionTestUtils.setField(unconfigured, "webhook", "");
+        ReflectionTestUtils.setField(unconfigured, "secret", "");
+
+        assertThatCode(() -> unconfigured.alert("IMAGE_GC_FAILED", "图片回收任务失败"))
+                .doesNotThrowAnyException();
+
+        verifyNoInteractions(redisUtil);
     }
 
     @Test
