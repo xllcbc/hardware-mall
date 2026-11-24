@@ -1,6 +1,6 @@
 # 图片回收运维手册
 
-> 适用对象：运维、后端值班。关联决策：[ADR-0009 图片对象回收以数据库引用为真相源，延迟回收并保留回收站](https://github.com/xllcbc/hardware-mall/blob/main/docs/adr/0009-image-object-reclamation.md)。
+> 适用对象：运维、后端值班。关联决策：ADR-0009「图片对象回收以数据库引用为真相源，延迟回收并保留回收站」（ADR 尚未合入本仓库，决策背景见图片生命周期治理 spec 与 `CONTEXT.md` 的「图片回收」「回收站」词条）。
 > 相关代码：`ImageGcJob`（每周回收）、`ImageTrashPurgeJob`（每日回收站清理）、`ImageTrashRestoreRunner`（单张恢复）。
 
 图片回收以数据库为唯一真相源，只处理 `products/`、`avatars/`、`banners/` 三个白名单前缀下、超过宽限期且零引用的孤儿对象。业务写入路径不再删除图片对象，图片回收是唯一的删除入口。
@@ -87,6 +87,8 @@ products/2026/11/a.jpg  ->  trash/20261124/products/2026/11/a.jpg
 - 路径不符合 `trash/<yyyyMMdd>/...` 布局或日期非法：跳过并记 `warn`，永不删除。
 
 是否过期**不看对象最后修改时间**，复制动作改变 `Last-Modified` 不会延长或缩短保留期。
+
+清理只在 `trash` 模式执行：`report` 模式保持只读、不做任何物理删除，`off` 模式作为一键止损也不删除。因此从 `trash` 切走期间已过期的副本会暂存，切回 `trash` 后的下一轮按同一日期规则补删。
 
 日志：
 

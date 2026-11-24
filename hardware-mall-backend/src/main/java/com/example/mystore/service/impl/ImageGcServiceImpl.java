@@ -1,9 +1,7 @@
 package com.example.mystore.service.impl;
 
 import com.aliyun.oss.OSS;
-import com.aliyun.oss.model.ListObjectsRequest;
 import com.aliyun.oss.model.OSSObjectSummary;
-import com.aliyun.oss.model.ObjectListing;
 import com.example.mystore.common.constant.ImageGcConstants;
 import com.example.mystore.config.ImageGcProperties;
 import com.example.mystore.config.OssProperties;
@@ -17,6 +15,8 @@ import com.example.mystore.mapper.SkuMapper;
 import com.example.mystore.mapper.SpuMapper;
 import com.example.mystore.mapper.UserMapper;
 import com.example.mystore.service.ImageGcService;
+import com.example.mystore.util.ImageObjectKeyUtil;
+import com.example.mystore.util.OssListUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,10 +29,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -44,9 +42,6 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class ImageGcServiceImpl implements ImageGcService {
-
-    /** 每页列目录大小。 */
-    private static final int LIST_PAGE_SIZE = 1000;
 
     /** 报告中样例对象键的最大数量。 */
     private static final int SAMPLE_LIMIT = 20;
@@ -113,8 +108,7 @@ public class ImageGcServiceImpl implements ImageGcService {
         Instant cutoff = Instant.now().minus(Duration.ofDays(properties.getGraceDays()));
         int referencedObjects = 0;
         int unreferencedObjects = 0;
-        List<String> candidateKeys = new ArrayList<>();
-        Map<String, Long> candidateBytesByKey = new HashMap<>();
+        List<Candidate> candidates = new ArrayList<>();
 
         for (OSSObjectSummary object : objects) {
             String key = object.getKey();
@@ -125,23 +119,19 @@ public class ImageGcServiceImpl implements ImageGcService {
             unreferencedObjects++;
             Date lastModified = object.getLastModified();
             if (lastModified != null && lastModified.toInstant().isBefore(cutoff)) {
-                candidateKeys.add(key);
-                candidateBytesByKey.put(key, object.getSize());
+                candidates.add(new Candidate(key, object.getSize()));
             }
         }
 
-        candidateKeys.sort(Comparator.naturalOrder());
-        Set<String> candidateKeySet = Set.copyOf(candidateKeys);
-        long reclaimableBytes = objects.stream()
-                .filter(object -> candidateKeySet.contains(object.getKey()))
-                .mapToLong(OSSObjectSummary::getSize)
-                .sum();
-        List<String> samples = candidateKeys.stream()
+        candidates.sort(Comparator.comparing(Candidate::key));
+        long reclaimableBytes = candidates.stream().mapToLong(Candidate::size).sum();
+        List<String> samples = candidates.stream()
+                .map(Candidate::key)
                 .limit(SAMPLE_LIMIT)
                 .toList();
 
         TrashOutcome trashOutcome = mode == ImageGcConstants.Mode.TRASH
-                ? moveCandidatesToTrash(candidateKeys, candidateBytesByKey)
+                ? moveCandidatesToTrash(candidates)
                 : TrashOutcome.NOT_EXECUTED;
 
         if (trashOutcome.abortReason() != null) {
@@ -156,7 +146,7 @@ public class ImageGcServiceImpl implements ImageGcService {
                 .mappedReferenceCount(confirmed.mappedReferenceCount())
                 .referencedObjectCount(referencedObjects)
                 .unreferencedObjectCount(unreferencedObjects)
-                .candidateCount(candidateKeys.size())
+                .candidateCount(candidates.size())
                 .reclaimableBytes(reclaimableBytes)
                 .sampleObjectKeys(samples)
                 .trashedObjectCount(trashOutcome.trashedCount())
@@ -169,13 +159,14 @@ public class ImageGcServiceImpl implements ImageGcService {
      * 逐个候选先复制到 {@code trash/<批次日期>/<原对象键>}，复制成功后才删除原对象。
      * 复制或删除失败即中止本轮且不再处理后续候选，失败对象和后续候选的原对象全部保留（失败关闭）。
      */
-    private TrashOutcome moveCandidatesToTrash(List<String> candidateKeys, Map<String, Long> candidateBytesByKey) {
+    private TrashOutcome moveCandidatesToTrash(List<Candidate> candidates) {
         String batchDate = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
         String bucket = ossProperties.getBucketName();
         int trashed = 0;
         int failed = 0;
         long trashedBytes = 0;
-        for (String key : candidateKeys) {
+        for (Candidate candidate : candidates) {
+            String key = candidate.key();
             String trashKey = ImageGcConstants.Trash.PREFIX + batchDate + "/" + key;
             try {
                 ossClient.copyObject(bucket, key, bucket, trashKey);
@@ -188,7 +179,7 @@ public class ImageGcServiceImpl implements ImageGcService {
             try {
                 ossClient.deleteObject(bucket, key);
                 trashed++;
-                trashedBytes += candidateBytesByKey.getOrDefault(key, 0L);
+                trashedBytes += candidate.size();
             } catch (RuntimeException e) {
                 log.error("图片回收：回收站副本已写入，但删除原对象失败，中止本轮。key={}, trashKey={}",
                         key, trashKey, e);
@@ -206,9 +197,13 @@ public class ImageGcServiceImpl implements ImageGcService {
         private static final TrashOutcome NOT_EXECUTED = new TrashOutcome(0, 0, 0, null);
     }
 
+    /** 一个超过宽限期且零引用的候选对象。 */
+    private record Candidate(String key, long size) {
+    }
+
     @Override
     public boolean restoreFromTrash(String trashObjectKey) {
-        Optional<String> originalKey = toOriginalKey(trashObjectKey);
+        Optional<String> originalKey = ImageObjectKeyUtil.originalKeyFromTrash(trashObjectKey);
         if (originalKey.isEmpty()) {
             log.warn("从回收站恢复图片失败：对象键必须是 trash/<yyyyMMdd>/<白名单前缀下的原对象键>。key={}",
                     trashObjectKey);
@@ -254,29 +249,6 @@ public class ImageGcServiceImpl implements ImageGcService {
         return true;
     }
 
-    /**
-     * 解析回收站对象键：前缀必须是 {@code trash/}，紧随其后的日期段必须是 {@code yyyyMMdd}，
-     * 日期之后必须还有白名单前缀（{@code products/}、{@code avatars/}、{@code banners/}）下的原对象键。
-     */
-    private static Optional<String> toOriginalKey(String trashObjectKey) {
-        if (trashObjectKey == null
-                || !trashObjectKey.startsWith(ImageGcConstants.Trash.PREFIX)) {
-            return Optional.empty();
-        }
-        String rest = trashObjectKey.substring(ImageGcConstants.Trash.PREFIX.length());
-        int separator = rest.indexOf('/');
-        if (separator <= 0 || separator == rest.length() - 1) {
-            return Optional.empty();
-        }
-        try {
-            LocalDate.parse(rest.substring(0, separator), DateTimeFormatter.BASIC_ISO_DATE);
-        } catch (RuntimeException e) {
-            return Optional.empty();
-        }
-        String originalKey = rest.substring(separator + 1);
-        return isWhitelisted(originalKey) ? Optional.of(originalKey) : Optional.empty();
-    }
-
     private ImageGcReport abort(ImageGcConstants.Mode mode, String reason, int scanned,
                                 int mappedReferences, RuntimeException cause) {
         if (cause == null) {
@@ -300,32 +272,15 @@ public class ImageGcServiceImpl implements ImageGcService {
     private List<OSSObjectSummary> listWhitelistedObjects() {
         List<OSSObjectSummary> objects = new ArrayList<>();
         for (String prefix : ImageGcConstants.Prefix.SCAN) {
-            String marker = null;
-            do {
-                ListObjectsRequest request = new ListObjectsRequest(ossProperties.getBucketName());
-                request.setPrefix(prefix);
-                request.setMaxKeys(LIST_PAGE_SIZE);
-                if (marker != null) {
-                    request.setMarker(marker);
+            for (OSSObjectSummary summary : OssListUtil.listAll(
+                    ossClient, ossProperties.getBucketName(), prefix)) {
+                // 防御性过滤：即便 OSS 返回白名单前缀外的对象，也不纳入统计。
+                if (ImageObjectKeyUtil.isWhitelisted(summary.getKey())) {
+                    objects.add(summary);
                 }
-                ObjectListing listing = ossClient.listObjects(request);
-                for (OSSObjectSummary summary : listing.getObjectSummaries()) {
-                    // 防御性过滤：即便 OSS 返回白名单前缀外的对象，也不纳入统计。
-                    if (isWhitelisted(summary.getKey())) {
-                        objects.add(summary);
-                    }
-                }
-                marker = listing.isTruncated() ? listing.getNextMarker() : null;
-            } while (marker != null);
+            }
         }
         return objects;
-    }
-
-    private static boolean isWhitelisted(String key) {
-        if (key == null) {
-            return false;
-        }
-        return ImageGcConstants.Prefix.SCAN.stream().anyMatch(key::startsWith);
     }
 
     /**

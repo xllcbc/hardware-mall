@@ -123,6 +123,27 @@ class ImageGcJobTest {
     }
 
     @Test
+    void runWeeklyReport_alertsWhenReportCandidatesExceedThreshold() {
+        properties.setAlertMaxBytes(1_000);
+        properties.setAlertMaxCount(100);
+        when(redisLockUtil.tryLock(ImageGcJob.LOCK_KEY)).thenReturn(true);
+        ImageGcReport report = ImageGcReport.builder()
+                .executed(true)
+                .mode(ImageGcConstants.Mode.REPORT)
+                .aborted(false)
+                .candidateCount(2)
+                .reclaimableBytes(2_000)
+                .sampleObjectKeys(List.of())
+                .build();
+        when(imageGcService.runOnce()).thenReturn(report);
+
+        job.runWeeklyReport();
+
+        verify(dingTalkAlertService).alert(eq(ImageGcConstants.Alert.THRESHOLD), contains("未删除任何对象"));
+        verify(redisLockUtil).unlock(ImageGcJob.LOCK_KEY);
+    }
+
+    @Test
     void runWeeklyReport_doesNotAlertWhenTrashVolumeIsBelowThreshold() {
         properties.setAlertMaxBytes(1_000_000);
         properties.setAlertMaxCount(100);
