@@ -228,11 +228,11 @@ class ImageGcServiceImplTest {
     }
 
     @Test
-    void trash_keepsOriginalWhenCopyToTrashFailsAndStillMovesOtherCandidates() {
+    void trash_abortsRoundAndKeepsOriginalWhenCopyToTrashFails() {
         Instant old = Instant.now().minus(Duration.ofDays(30));
         stubBucket(Map.of("products/", List.of(
                 object("products/fails.jpg", 500, old),
-                object("products/moves.jpg", 600, old))));
+                object("products/untouched.jpg", 600, old))));
         when(spuMapper.selectList(any()))
                 .thenReturn(List.of(spu(DOMAIN + "/products/kept.jpg")));
         properties.setMode(ImageGcConstants.Mode.TRASH);
@@ -243,12 +243,62 @@ class ImageGcServiceImplTest {
 
         ImageGcReport report = service.runOnce();
 
-        verify(ossClient, never()).deleteObject("test-bucket", "products/fails.jpg");
-        verify(ossClient).deleteObject("test-bucket", "products/moves.jpg");
-        assertThat(report.isAborted()).isFalse();
+        assertThat(report.isAborted()).isTrue();
+        assertThat(report.getAbortReason()).contains("复制到回收站失败");
         assertThat(report.getCandidateCount()).isEqualTo(2);
-        assertThat(report.getTrashedObjectCount()).isEqualTo(1);
+        assertThat(report.getTrashedObjectCount()).isZero();
         assertThat(report.getTrashFailedObjectCount()).isEqualTo(1);
+        verify(ossClient, never()).deleteObject(anyString(), anyString());
+        verify(ossClient, never()).copyObject("test-bucket", "products/untouched.jpg", "test-bucket",
+                "trash/" + batch + "/products/untouched.jpg");
+    }
+
+    @Test
+    void trash_abortsRoundAndKeepsOriginalWhenDeletingOriginalFails() {
+        Instant old = Instant.now().minus(Duration.ofDays(30));
+        stubBucket(Map.of("products/", List.of(
+                object("products/a.jpg", 500, old),
+                object("products/b.jpg", 600, old))));
+        when(spuMapper.selectList(any()))
+                .thenReturn(List.of(spu(DOMAIN + "/products/kept.jpg")));
+        properties.setMode(ImageGcConstants.Mode.TRASH);
+        String batch = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
+        when(ossClient.deleteObject("test-bucket", "products/a.jpg"))
+                .thenThrow(new RuntimeException("delete failed"));
+
+        ImageGcReport report = service.runOnce();
+
+        assertThat(report.isAborted()).isTrue();
+        assertThat(report.getAbortReason()).contains("删除原对象失败");
+        assertThat(report.getTrashedObjectCount()).isZero();
+        assertThat(report.getTrashFailedObjectCount()).isEqualTo(1);
+        verify(ossClient).copyObject("test-bucket", "products/a.jpg", "test-bucket",
+                "trash/" + batch + "/products/a.jpg");
+        verify(ossClient, never()).copyObject("test-bucket", "products/b.jpg", "test-bucket",
+                "trash/" + batch + "/products/b.jpg");
+        verify(ossClient, never()).deleteObject("test-bucket", "products/b.jpg");
+    }
+
+    @Test
+    void trash_reconfirmsReferencesImmediatelyBeforeMoving() {
+        Instant old = Instant.now().minus(Duration.ofDays(30));
+        stubBucket(Map.of("products/", List.of(object("products/race.jpg", 700, old))));
+        when(spuMapper.selectList(any()))
+                .thenReturn(List.of(spu(DOMAIN + "/products/other.jpg")))
+                .thenReturn(List.of(spu(DOMAIN + "/products/other.jpg")))
+                .thenReturn(List.of(
+                        spu(DOMAIN + "/products/other.jpg"),
+                        spu(DOMAIN + "/products/race.jpg")));
+        properties.setMode(ImageGcConstants.Mode.TRASH);
+
+        ImageGcReport report = service.runOnce();
+
+        assertThat(report.isAborted()).isFalse();
+        assertThat(report.getReferencedObjectCount()).isEqualTo(1);
+        assertThat(report.getCandidateCount()).isZero();
+        assertThat(report.getTrashedObjectCount()).isZero();
+        verify(ossClient, never()).copyObject(anyString(), anyString(), anyString(), anyString());
+        verify(ossClient, never()).deleteObject(anyString(), anyString());
     }
 
     @Test
@@ -279,12 +329,14 @@ class ImageGcServiceImplTest {
 
     @Test
     void restore_copiesTrashObjectBackVerifiesAccessAndRemovesTrashCopy() {
+        when(ossClient.doesObjectExist("test-bucket", "trash/20260101/products/a.jpg")).thenReturn(true);
         when(ossClient.doesObjectExist("test-bucket", "products/a.jpg")).thenReturn(true);
 
         boolean restored = service.restoreFromTrash("trash/20260101/products/a.jpg");
 
         assertThat(restored).isTrue();
         InOrder inOrder = inOrder(ossClient);
+        inOrder.verify(ossClient).doesObjectExist("test-bucket", "trash/20260101/products/a.jpg");
         inOrder.verify(ossClient).copyObject(
                 "test-bucket", "trash/20260101/products/a.jpg", "test-bucket", "products/a.jpg");
         inOrder.verify(ossClient).doesObjectExist("test-bucket", "products/a.jpg");
@@ -292,7 +344,19 @@ class ImageGcServiceImplTest {
     }
 
     @Test
+    void restore_skipsQuietlyWhenTrashCopyNoLongerExists() {
+        when(ossClient.doesObjectExist("test-bucket", "trash/20260101/products/a.jpg")).thenReturn(false);
+
+        boolean restored = service.restoreFromTrash("trash/20260101/products/a.jpg");
+
+        assertThat(restored).isFalse();
+        verify(ossClient, never()).copyObject(anyString(), anyString(), anyString(), anyString());
+        verify(ossClient, never()).deleteObject(anyString(), anyString());
+    }
+
+    @Test
     void restore_keepsTrashCopyWhenCopyBackFails() {
+        when(ossClient.doesObjectExist("test-bucket", "trash/20260101/products/a.jpg")).thenReturn(true);
         when(ossClient.copyObject("test-bucket", "trash/20260101/products/a.jpg",
                 "test-bucket", "products/a.jpg"))
                 .thenThrow(new RuntimeException("copy failed"));
@@ -300,12 +364,12 @@ class ImageGcServiceImplTest {
         boolean restored = service.restoreFromTrash("trash/20260101/products/a.jpg");
 
         assertThat(restored).isFalse();
-        verify(ossClient, never()).doesObjectExist(anyString(), anyString());
         verify(ossClient, never()).deleteObject(anyString(), anyString());
     }
 
     @Test
     void restore_keepsTrashCopyWhenRestoredObjectIsNotAccessible() {
+        when(ossClient.doesObjectExist("test-bucket", "trash/20260101/products/a.jpg")).thenReturn(true);
         when(ossClient.doesObjectExist("test-bucket", "products/a.jpg")).thenReturn(false);
 
         boolean restored = service.restoreFromTrash("trash/20260101/products/a.jpg");
@@ -315,10 +379,12 @@ class ImageGcServiceImplTest {
     }
 
     @Test
-    void restore_rejectsKeysOutsideTrashPrefixOrWithoutDatedBatch() {
+    void restore_rejectsKeysOutsideTrashPrefixDatedBatchOrWhitelistedPrefixes() {
         assertThat(service.restoreFromTrash("products/a.jpg")).isFalse();
         assertThat(service.restoreFromTrash("trash/not-a-date/products/a.jpg")).isFalse();
         assertThat(service.restoreFromTrash("trash/20260101/")).isFalse();
+        assertThat(service.restoreFromTrash("trash/20260101/backups/database.zip")).isFalse();
+        assertThat(service.restoreFromTrash("trash/20260101/trash/20260101/products/a.jpg")).isFalse();
         assertThat(service.restoreFromTrash(null)).isFalse();
         verifyNoInteractions(ossClient);
     }

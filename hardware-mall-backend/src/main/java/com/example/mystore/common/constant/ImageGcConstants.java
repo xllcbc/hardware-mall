@@ -38,8 +38,6 @@ public final class ImageGcConstants {
         }
 
         public static final String PREFIX = "trash/";
-        /** 路径中的批次日期格式，用于保留期清理。 */
-        public static final String DATE_PATTERN = "yyyyMMdd";
     }
 
     /** 运行模式 */

@@ -94,6 +94,20 @@ public class ImageGcServiceImpl implements ImageGcService {
                     objects.size(), 0, null);
         }
 
+        if (mode == ImageGcConstants.Mode.TRASH) {
+            // 回收模式在动手前再取一次引用快照，尽量缩小“确认引用”和“复制/删除”之间的竞态窗口。
+            try {
+                confirmed = loadReferences();
+            } catch (RuntimeException e) {
+                return abort(mode, "回收前再次确认图片引用失败，已中止: " + e.getMessage(),
+                        objects.size(), 0, e);
+            }
+            if (confirmed.mappedReferenceCount() == 0) {
+                return abort(mode, "回收前再次确认时映射到的图片引用数为零，已中止（请检查数据库中的图片引用）",
+                        objects.size(), 0, null);
+            }
+        }
+
         Instant cutoff = Instant.now().minus(Duration.ofDays(properties.getGraceDays()));
         int referencedObjects = 0;
         int unreferencedObjects = 0;
@@ -126,10 +140,14 @@ public class ImageGcServiceImpl implements ImageGcService {
                 ? moveCandidatesToTrash(candidateKeys)
                 : TrashOutcome.NOT_EXECUTED;
 
+        if (trashOutcome.abortReason() != null) {
+            log.error("图片回收(trash)中止: {}", trashOutcome.abortReason());
+        }
         return ImageGcReport.builder()
                 .executed(true)
                 .mode(mode)
-                .aborted(false)
+                .aborted(trashOutcome.abortReason() != null)
+                .abortReason(trashOutcome.abortReason())
                 .scannedObjectCount(objects.size())
                 .mappedReferenceCount(confirmed.mappedReferenceCount())
                 .referencedObjectCount(referencedObjects)
@@ -137,14 +155,14 @@ public class ImageGcServiceImpl implements ImageGcService {
                 .candidateCount(candidateKeys.size())
                 .reclaimableBytes(reclaimableBytes)
                 .sampleObjectKeys(samples)
-                .trashedObjectCount(trashOutcome.trashed())
-                .trashFailedObjectCount(trashOutcome.failed())
+                .trashedObjectCount(trashOutcome.trashedCount())
+                .trashFailedObjectCount(trashOutcome.failedCount())
                 .build();
     }
 
     /**
      * 逐个候选先复制到 {@code trash/<批次日期>/<原对象键>}，复制成功后才删除原对象。
-     * 复制失败时跳过该对象并保留原对象；删除失败时原对象同样保留（回收站副本留下，下次可幂等重试）。
+     * 复制或删除失败即中止本轮且不再处理后续候选，失败对象和后续候选的原对象全部保留（失败关闭）。
      */
     private TrashOutcome moveCandidatesToTrash(List<String> candidateKeys) {
         String batchDate = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
@@ -156,37 +174,51 @@ public class ImageGcServiceImpl implements ImageGcService {
             try {
                 ossClient.copyObject(bucket, key, bucket, trashKey);
             } catch (RuntimeException e) {
-                failed++;
-                log.warn("图片回收：复制到回收站失败，保留原对象。key={}, trashKey={}", key, trashKey, e);
-                continue;
+                log.error("图片回收：复制到回收站失败，中止本轮，后续候选不再删除。key={}, trashKey={}",
+                        key, trashKey, e);
+                return new TrashOutcome(trashed, failed + 1,
+                        "复制到回收站失败，已中止本轮且不再删除后续对象: " + e.getMessage());
             }
             try {
                 ossClient.deleteObject(bucket, key);
                 trashed++;
             } catch (RuntimeException e) {
-                failed++;
-                log.warn("图片回收：回收站副本已写入，但删除原对象失败，原对象保留。key={}, trashKey={}",
+                log.error("图片回收：回收站副本已写入，但删除原对象失败，中止本轮。key={}, trashKey={}",
                         key, trashKey, e);
+                return new TrashOutcome(trashed, failed + 1,
+                        "删除原对象失败，已中止本轮且不再删除后续对象: " + e.getMessage());
             }
         }
-        log.info("图片回收(trash)：已移入回收站 {} 个对象，失败保留 {} 个对象，批次={}",
+        log.info("图片回收(trash)：已移入回收站 {} 个对象，失败 {} 个对象，批次={}",
                 trashed, failed, batchDate);
-        return new TrashOutcome(trashed, failed);
+        return new TrashOutcome(trashed, failed, null);
     }
 
-    private record TrashOutcome(int trashed, int failed) {
+    private record TrashOutcome(int trashedCount, int failedCount, String abortReason) {
 
-        private static final TrashOutcome NOT_EXECUTED = new TrashOutcome(0, 0);
+        private static final TrashOutcome NOT_EXECUTED = new TrashOutcome(0, 0, null);
     }
 
     @Override
     public boolean restoreFromTrash(String trashObjectKey) {
         Optional<String> originalKey = toOriginalKey(trashObjectKey);
         if (originalKey.isEmpty()) {
-            log.warn("从回收站恢复图片失败：对象键不是 trash/<yyyyMMdd>/<原对象键> 形式。key={}", trashObjectKey);
+            log.warn("从回收站恢复图片失败：对象键必须是 trash/<yyyyMMdd>/<白名单前缀下的原对象键>。key={}",
+                    trashObjectKey);
             return false;
         }
         String bucket = ossProperties.getBucketName();
+        boolean trashCopyExists;
+        try {
+            trashCopyExists = ossClient.doesObjectExist(bucket, trashObjectKey);
+        } catch (RuntimeException e) {
+            log.error("从回收站恢复图片失败：检查回收站副本是否存在时出错。key={}", trashObjectKey, e);
+            return false;
+        }
+        if (!trashCopyExists) {
+            log.warn("从回收站恢复图片跳过：回收站副本不存在，可能已恢复过。key={}", trashObjectKey);
+            return false;
+        }
         try {
             ossClient.copyObject(bucket, trashObjectKey, bucket, originalKey.get());
         } catch (RuntimeException e) {
@@ -217,7 +249,7 @@ public class ImageGcServiceImpl implements ImageGcService {
 
     /**
      * 解析回收站对象键：前缀必须是 {@code trash/}，紧随其后的日期段必须是 {@code yyyyMMdd}，
-     * 日期之后必须还有非空的原对象键。
+     * 日期之后必须还有白名单前缀（{@code products/}、{@code avatars/}、{@code banners/}）下的原对象键。
      */
     private static Optional<String> toOriginalKey(String trashObjectKey) {
         if (trashObjectKey == null
@@ -234,7 +266,8 @@ public class ImageGcServiceImpl implements ImageGcService {
         } catch (RuntimeException e) {
             return Optional.empty();
         }
-        return Optional.of(rest.substring(separator + 1));
+        String originalKey = rest.substring(separator + 1);
+        return isWhitelisted(originalKey) ? Optional.of(originalKey) : Optional.empty();
     }
 
     private ImageGcReport abort(ImageGcConstants.Mode mode, String reason, int scanned,

@@ -34,7 +34,7 @@ public class ImageTrashRestoreRunner implements CommandLineRunner {
             if (imageGcService.restoreFromTrash(key)) {
                 log.info("回收站恢复完成: {}", key);
             } else {
-                log.error("回收站恢复失败，请检查日志并确认对象键: {}", key);
+                log.warn("回收站恢复未完成（可能已恢复过或对象键不正确），请检查服务日志: {}", key);
             }
         } catch (Exception e) {
             log.error("回收站恢复异常: {}", key, e);
