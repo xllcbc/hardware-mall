@@ -29,7 +29,6 @@ import com.example.mystore.service.SpecItemService;
 import com.example.mystore.service.SpecTemplateService;
 import com.example.mystore.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -55,7 +54,6 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class SkuServiceImpl implements SkuService {
 
     private final SkuMapper skuMapper;

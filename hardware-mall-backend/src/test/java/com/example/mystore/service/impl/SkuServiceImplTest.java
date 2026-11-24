@@ -73,9 +73,6 @@ class SkuServiceImplTest {
     private SpecItemService specItemService;
 
     @Mock
-    private OssService ossService;
-
-    @Mock
     private RedisUtil redisUtil;
 
     @Mock
@@ -674,25 +671,12 @@ class SkuServiceImplTest {
     }
 
     @Test
-    void testDeleteSku() {
-        when(skuMapper.selectById(1L)).thenReturn(sku1);
-
-        skuService.deleteSku(1L);
-
-        verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku -> sku.getDeleteTime() > 0));
-        verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
-                ProductCacheInvalidationEvent.Type.SKU_CHANGED, 1L, 1L, false));
-        verify(eventPublisher).publishEvent(new StockCacheEvent(List.of(1L)));
-    }
-
-    @Test
-    void deleteSku_neverTouchesOssAndKeepsSoftDeleteThenCacheInvalidationOrder() {
+    void deleteSku_keepsSoftDeleteThenCacheInvalidationOrder() {
         sku1.setImage("https://example.test/sku.png");
         when(skuMapper.selectById(1L)).thenReturn(sku1);
 
         assertThatCode(() -> skuService.deleteSku(1L)).doesNotThrowAnyException();
 
-        verifyNoInteractions(ossService);
         InOrder order = inOrder(skuMapper, eventPublisher);
         order.verify(skuMapper).updateById(org.mockito.Mockito.<Sku>argThat(sku -> sku.getDeleteTime() > 0));
         order.verify(eventPublisher).publishEvent(new ProductCacheInvalidationEvent(
