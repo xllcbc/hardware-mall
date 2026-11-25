@@ -86,7 +86,7 @@ public class SpuServiceImpl implements SpuService {
             wrapper.like(Spu::getName, searchPattern);
         }
 
-        wrapper.orderByDesc(Spu::getSalesCount, Spu::getCreateTime);
+        wrapper.orderByDesc(Spu::getSalesCount, Spu::getCreateTime, Spu::getId);
         return spuMapper.selectPage(pageParam, wrapper);
     }
 
