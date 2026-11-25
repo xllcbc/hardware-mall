@@ -48,12 +48,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class SpuServiceImpl implements SpuService {
+
+    private static final Pattern KEYWORD_WHITESPACE = Pattern.compile("\\s+", Pattern.UNICODE_CHARACTER_CLASS);
+    private static final Pattern HAN_SEARCH_BOUNDARY = Pattern.compile("(?<!^)(?=[\\p{IsHan}])|(?<=[\\p{IsHan}])(?!$)");
 
     private final SpuMapper spuMapper;
     private final SkuService skuService;
@@ -77,12 +81,9 @@ public class SpuServiceImpl implements SpuService {
         }
 
         if (StringUtils.hasText(keyword)) {
-            if (keyword.matches("[\u4e00-\u9fa5]+")) {
-                wrapper.apply("name LIKE CONCAT('%', {0}, '%')",
-                        String.join("%", keyword.split("")));
-            } else {
-                wrapper.like(Spu::getName, keyword);
-            }
+            String compactKeyword = KEYWORD_WHITESPACE.matcher(keyword).replaceAll("");
+            String searchPattern = HAN_SEARCH_BOUNDARY.matcher(compactKeyword).replaceAll("%");
+            wrapper.like(Spu::getName, searchPattern);
         }
 
         wrapper.orderByDesc(Spu::getSalesCount, Spu::getCreateTime);
