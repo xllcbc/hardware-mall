@@ -26,7 +26,6 @@ public class RedisConstants {
     public static final String PREFIX_STOCK_EVICT_FAILED = "stock:cache:evict:failed";
     public static final String PREFIX_ALERT_CACHE_REBUILD = "alert:cache:rebuild:";
     public static final String PREFIX_RATE_LIMIT = "rate:limit:";
-    public static final String PREFIX_ORDER_IDEMPOTENCY = "order:idem:";
     public static final String PREFIX_ORDER_LAZY_SYNC = "lazysync:order:";
     public static final String PREFIX_CACHE_LOCK = "lock:";
 
@@ -39,7 +38,6 @@ public class RedisConstants {
     public static final long SKU_STOCK_JITTER_SECONDS = 0L;
     public static final long WECHAT_SESSION_TTL = 7200L;
     public static final long RATE_LIMIT_TTL = 60L;
-    public static final long IDEMPOTENCY_TTL = 300L;
     public static final long ORDER_LAZY_SYNC_TTL = 30L;
 
     public static final String CACHE_NULL = "NULL";
