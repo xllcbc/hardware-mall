@@ -176,7 +176,7 @@ class OrderIntakeServiceImplTest {
         });
         lenient().when(orderIdempotencyService.claim(anyLong(), anyString(), anyString()))
                 .thenReturn(new ClaimOutcome(
-                        ClaimOutcome.Kind.ACQUIRED, 10L, "owner-token", null, true));
+                        ClaimOutcome.Kind.ACQUIRED, 10L, "owner-token", null));
         lenient().when(orderQueryService.getOrderView(anyLong(), anyLong()))
                 .thenReturn(new OrderVO());
     }
@@ -258,7 +258,7 @@ class OrderIntakeServiceImplTest {
     void createOrder_succeededSameFingerprint_returnsOriginalOrder() {
         when(orderIdempotencyService.claim(eq(2L), eq("k1"), anyString()))
                 .thenReturn(new ClaimOutcome(
-                        ClaimOutcome.Kind.SUCCEEDED, 10L, "owner-token", 77L, false));
+                        ClaimOutcome.Kind.SUCCEEDED, 10L, "owner-token", 77L));
         OrderVO original = new OrderVO();
         original.setId(77L);
         original.setOrderNo("SO-ORIGINAL");
@@ -278,7 +278,7 @@ class OrderIntakeServiceImplTest {
     void createOrder_processing_throwsProcessingWithoutInsert() {
         when(orderIdempotencyService.claim(eq(2L), eq("k1"), anyString()))
                 .thenReturn(new ClaimOutcome(
-                        ClaimOutcome.Kind.PROCESSING, 10L, "other-owner", null, false));
+                        ClaimOutcome.Kind.PROCESSING, 10L, "other-owner", null));
 
         assertThatThrownBy(() -> intakeService.createOrder(2L, stubValidRequest(), "k1"))
                 .isInstanceOf(BusinessException.class)
@@ -292,7 +292,7 @@ class OrderIntakeServiceImplTest {
     void createOrder_conflictingFingerprint_throwsConflict() {
         when(orderIdempotencyService.claim(eq(2L), eq("k1"), anyString()))
                 .thenReturn(new ClaimOutcome(
-                        ClaimOutcome.Kind.CONFLICT, 10L, "owner-token", null, false));
+                        ClaimOutcome.Kind.CONFLICT, 10L, "owner-token", null));
 
         assertThatThrownBy(() -> intakeService.createOrder(2L, stubValidRequest(), "k1"))
                 .isInstanceOfSatisfying(IdempotencyConflictException.class, e -> {
@@ -326,7 +326,6 @@ class OrderIntakeServiceImplTest {
 
         verify(orderMapper).insert(any(Order.class));
         verify(orderIdempotencyService).markSucceeded(10L, "owner-token", 100L);
-        verify(orderIdempotencyService).releaseLock(2L, "success-key", "owner-token", true);
         verify(orderIdempotencyService, never()).markFailed(any(), any());
     }
 
@@ -369,11 +368,10 @@ class OrderIntakeServiceImplTest {
                 .hasMessage("幂等记录状态已变更，请重试");
 
         verify(orderIdempotencyService).markFailed(10L, "owner-token");
-        verify(orderIdempotencyService).releaseLock(2L, "fail-key", "owner-token", true);
     }
 
     @Test
-    void createOrder_voAssemblyFails_doesNotFailOrReleaseRecord() {
+    void createOrder_voAssemblyFails_doesNotFailSucceededRecord() {
         stubSuccessfulOrderCreation();
         when(orderQueryService.getOrderView(2L, 100L)).thenThrow(new RuntimeException("vo assembly failed"));
 
@@ -386,8 +384,8 @@ class OrderIntakeServiceImplTest {
     }
 
     @Test
-    void createOrder_validationFails_releasesIdempotencyKey() {
-        // M8: 业务失败(库存不足) = 意图未达成, 必须释放幂等坑, 允许用户立即重试
+    void createOrder_validationFails_marksRecordFailedForRetry() {
+        // 业务失败（库存不足）时置为失败，允许用户立即重试
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
         when(skuService.getSkuMapByIds(any())).thenReturn(Map.of(5L, sku));
@@ -405,12 +403,11 @@ class OrderIntakeServiceImplTest {
                 .hasMessageContaining("库存不足");
 
         verify(orderIdempotencyService).markFailed(10L, "owner-token");
-        verify(orderIdempotencyService).releaseLock(2L, "stock-key", "owner-token", true);
         verify(orderIdempotencyService, never()).markSucceeded(any(), any(), any());
     }
 
     @Test
-    void createOrder_stockDeductionFailure_abortsBeforeOrderAndReleasesIdempotencyKey() {
+    void createOrder_stockDeductionFailure_abortsBeforeOrderAndMarksRecordFailed() {
         when(addressMapper.selectById(1L)).thenReturn(address);
         when(logisticsMapper.selectById(1L)).thenReturn(logistics);
 
@@ -443,7 +440,6 @@ class OrderIntakeServiceImplTest {
                 .hasMessageContaining("库存扣减失败");
 
         verify(orderIdempotencyService).markFailed(10L, "owner-token");
-        verify(orderIdempotencyService).releaseLock(2L, "rollback-key", "owner-token", true);
         verify(orderMapper, never()).insert(any(Order.class));
         verify(cartMapper, never()).update(any(), any());
     }
@@ -493,7 +489,6 @@ class OrderIntakeServiceImplTest {
         verify(orderMapper, never()).insert(any(Order.class));
         verify(skuService, never()).deductStock(anyLong(), anyInt());
         verify(orderIdempotencyService).markFailed(10L, "owner-token");
-        verify(orderIdempotencyService).releaseLock(2L, "zero-key", "owner-token", true);
     }
 
     @Test
@@ -520,14 +515,13 @@ class OrderIntakeServiceImplTest {
             verify(orderMapper, never()).insert(any(Order.class));
             verify(skuService, never()).deductStock(anyLong(), anyInt());
             verify(orderIdempotencyService).markFailed(10L, "owner-token");
-            verify(orderIdempotencyService).releaseLock(2L, "gap-key", "owner-token", true);
         } finally {
             UserContext.clear();
         }
     }
 
     @Test
-    void createOrder_priceChanged_returnsLatestPreviewAndReleasesIdempotencyKey() {
+    void createOrder_priceChanged_returnsLatestPreviewAndMarksRecordFailed() {
         UserContext.setLevelId(2L);
         try {
             when(levelPricingService.priceAll(eq(2L), anyList()))
@@ -556,7 +550,6 @@ class OrderIntakeServiceImplTest {
                     });
 
             verify(orderIdempotencyService).markFailed(10L, "owner-token");
-            verify(orderIdempotencyService).releaseLock(2L, "changed-key", "owner-token", true);
             verify(skuService, never()).deductStock(anyLong(), anyInt());
             verify(orderMapper, never()).insert(any(Order.class));
             verify(cartMapper, never()).update(any(), any());

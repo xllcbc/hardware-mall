@@ -3,7 +3,7 @@ package com.example.mystore.service;
 import java.time.LocalDateTime;
 
 /**
- * 下单幂等记录：数据库是权威，Redis 仅作短时快锁。
+ * 下单幂等记录：数据库唯一键与状态机是唯一权威。
  */
 public interface OrderIdempotencyService {
 
@@ -22,16 +22,11 @@ public interface OrderIdempotencyService {
      */
     void markFailed(Long recordId, String ownerToken);
 
-    /**
-     * 仅当本次请求实际持有 Redis 快锁且值仍是自己的 ownerToken 时才删除。
-     */
-    void releaseLock(Long userId, String idemKey, String ownerToken, boolean lockAcquired);
-
     int reclaimExpiredProcessing(LocalDateTime cutoff);
 
     int cleanupSettledBefore(LocalDateTime cutoff);
 
-    record ClaimOutcome(Kind kind, Long recordId, String ownerToken, Long orderId, boolean lockAcquired) {
+    record ClaimOutcome(Kind kind, Long recordId, String ownerToken, Long orderId) {
 
         public enum Kind {
             /** 本次请求获得处理权，可继续创建订单 */
