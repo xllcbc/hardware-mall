@@ -184,11 +184,9 @@ const onGetPhoneNumber = async (e: any) => {
       uni.removeStorageSync('LOGIN_REDIRECT')
       const route = redirect.split('?')[0]
       const tabBarPages = ['pages/index/index', 'pages/category/index', 'pages/cart/index', 'pages/user/index']
-      if (tabBarPages.includes(route)) {
-        uni.switchTab({ url: '/' + route })
-      } else {
-        uni.reLaunch({ url: '/' + redirect })
-      }
+      // 统一 reLaunch 强制重建目标页，确保用新 token 重新拉取(switchTab 回已存在的 tab 页不会重新挂载)
+      // tabBar 页不接受 query 参数，故对 tabBar 页只取 route
+      uni.reLaunch({ url: '/' + (tabBarPages.includes(route) ? route : redirect) })
     } else {
       uni.setStorageSync('LOGIN_RESULT', JSON.stringify({
         token: result.token,

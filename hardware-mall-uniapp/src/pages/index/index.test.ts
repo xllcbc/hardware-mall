@@ -68,6 +68,24 @@ describe('index page refreshes prices on show', () => {
     expect(wrapper.text()).toContain('20.00')
   })
 
+  it('keeps existing products when the onShow refresh fails', async () => {
+    vi.mocked(getRecommendProducts)
+      .mockResolvedValueOnce([product(1, 10)])
+      .mockRejectedValueOnce(new Error('登录已过期'))
+
+    const wrapper = mount(IndexPage, {
+      global: { stubs: { LoadingState: true, EmptyState: true } }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('10.00')
+
+    // 静默刷新失败(如 token 过期 401)时，不应把已有列表清空成空白
+    showHandlers.forEach(h => h())
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('10.00')
+  })
+
   it('renders recommend cards as 400px thumbnails', async () => {
     const withImage = product(1, 10)
     withImage.images = [OSS_IMAGE]

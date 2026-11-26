@@ -115,7 +115,7 @@ const loadCategories = async () => {
     categories.value = data || []
   } catch (e) {
     console.error('Failed to load categories:', e)
-    categories.value = []
+    // 失败时保留已有分类，避免把正常显示的分类刷成空白
   }
 }
 
@@ -125,7 +125,7 @@ const loadProducts = async () => {
     products.value = data || []
   } catch (e) {
     console.error('Failed to load products:', e)
-    products.value = []
+    // 失败时保留已有列表，避免把正常显示的商品刷成空白
   }
 }
 
