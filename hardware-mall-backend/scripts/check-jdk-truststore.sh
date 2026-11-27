@@ -13,21 +13,6 @@
 
 set -eu
 
-# 主机门禁使用稀疏工作树，.sandcastle 不在检出集合内；Maven 命令固定从该路径读取设置。
-# 因此在执行校验前，从受版本控制的模板补齐门禁所需的 Maven 设置。
-script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
-repo_root=$(CDPATH= cd "$script_dir/../.." && pwd)
-settings_file="$repo_root/.sandcastle/maven-settings.xml"
-settings_template="$script_dir/maven-settings.xml"
-if [ ! -f "$settings_file" ]; then
-    if [ ! -f "$settings_template" ]; then
-        echo "ERROR: 缺少 Maven 设置模板：$settings_template" >&2
-        exit 1
-    fi
-    mkdir -p "$repo_root/.sandcastle"
-    cp "$settings_template" "$settings_file"
-fi
-
 COMPROMISED_ROOTS='comodoaaaca|emsigneccrootcag3'
 
 if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/keytool" ]; then
