@@ -4,27 +4,22 @@ import com.example.mystore.common.exception.BusinessException;
 import com.example.mystore.entity.db.OrderIdempotency;
 import com.example.mystore.mapper.OrderIdempotencyMapper;
 import com.example.mystore.service.OrderIdempotencyService.ClaimOutcome;
-import com.example.mystore.util.RedisUtil;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.time.LocalDateTime;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -36,17 +31,17 @@ class OrderIdempotencyServiceImplTest {
     @Mock
     private OrderIdempotencyMapper idempotencyMapper;
     @Mock
-    private RedisUtil redisUtil;
-    @Mock
     private PlatformTransactionManager transactionManager;
 
-    @InjectMocks
     private OrderIdempotencyServiceImpl service;
+
+    @BeforeEach
+    void setUp() {
+        service = new OrderIdempotencyServiceImpl(idempotencyMapper, transactionManager);
+    }
 
     @Test
     void claim_newRecord_acquiresAndStoresProcessing() {
-        when(redisUtil.setIfAbsentRaw(anyString(), anyString(), anyLong(), any(TimeUnit.class)))
-                .thenReturn(true);
         when(idempotencyMapper.selectByUserAndKey(7L, "k")).thenReturn(null);
         when(idempotencyMapper.insert(any(OrderIdempotency.class))).thenAnswer(invocation -> {
             invocation.getArgument(0, OrderIdempotency.class).setId(1L);
@@ -58,7 +53,6 @@ class OrderIdempotencyServiceImplTest {
         assertThat(outcome.kind()).isEqualTo(ClaimOutcome.Kind.ACQUIRED);
         assertThat(outcome.recordId()).isEqualTo(1L);
         assertThat(outcome.ownerToken()).isNotBlank();
-        assertThat(outcome.lockAcquired()).isTrue();
 
         ArgumentCaptor<OrderIdempotency> captor = ArgumentCaptor.forClass(OrderIdempotency.class);
         verify(idempotencyMapper).insert(captor.capture());
@@ -75,8 +69,6 @@ class OrderIdempotencyServiceImplTest {
     @Test
     void claim_duplicateInsertReadsExistingProcessing() {
         OrderIdempotency processing = record(OrderIdempotency.STATE_PROCESSING, "other", LocalDateTime.now(), null);
-        when(redisUtil.setIfAbsentRaw(anyString(), anyString(), anyLong(), any(TimeUnit.class)))
-                .thenReturn(true);
         when(idempotencyMapper.selectByUserAndKey(7L, "k")).thenReturn(null, processing);
         when(idempotencyMapper.insert(any(OrderIdempotency.class)))
                 .thenThrow(new DuplicateKeyException("dup"));
@@ -84,8 +76,6 @@ class OrderIdempotencyServiceImplTest {
         ClaimOutcome outcome = service.claim(7L, "k", HASH);
 
         assertThat(outcome.kind()).isEqualTo(ClaimOutcome.Kind.PROCESSING);
-        assertThat(outcome.lockAcquired()).isFalse();
-        verify(redisUtil).deleteIfValueMatches(eq("order:idem:7:k"), eq(outcome.ownerToken()));
     }
 
     @Test
@@ -148,40 +138,6 @@ class OrderIdempotencyServiceImplTest {
     }
 
     @Test
-    void claim_redisUnavailable_stillUsesDatabase() {
-        when(redisUtil.setIfAbsentRaw(anyString(), anyString(), anyLong(), any(TimeUnit.class)))
-                .thenThrow(new RuntimeException("redis down"));
-        when(idempotencyMapper.selectByUserAndKey(7L, "k")).thenReturn(null);
-        when(idempotencyMapper.insert(any(OrderIdempotency.class))).thenAnswer(invocation -> {
-            invocation.getArgument(0, OrderIdempotency.class).setId(2L);
-            return 1;
-        });
-
-        ClaimOutcome outcome = service.claim(7L, "k", HASH);
-
-        assertThat(outcome.kind()).isEqualTo(ClaimOutcome.Kind.ACQUIRED);
-        assertThat(outcome.lockAcquired()).isFalse();
-        verify(redisUtil, never()).deleteIfValueMatches(anyString(), anyString());
-    }
-
-    @Test
-    void claim_lockHeldByOther_stillUsesDatabase() {
-        when(redisUtil.setIfAbsentRaw(anyString(), anyString(), anyLong(), any(TimeUnit.class)))
-                .thenReturn(false);
-        when(idempotencyMapper.selectByUserAndKey(7L, "k")).thenReturn(null);
-        when(idempotencyMapper.insert(any(OrderIdempotency.class))).thenAnswer(invocation -> {
-            invocation.getArgument(0, OrderIdempotency.class).setId(3L);
-            return 1;
-        });
-
-        ClaimOutcome outcome = service.claim(7L, "k", HASH);
-
-        assertThat(outcome.kind()).isEqualTo(ClaimOutcome.Kind.ACQUIRED);
-        assertThat(outcome.lockAcquired()).isFalse();
-        verify(redisUtil, never()).deleteIfValueMatches(anyString(), anyString());
-    }
-
-    @Test
     void markSucceeded_staleOwner_throwsForRollback() {
         when(idempotencyMapper.markSucceeded(eq(1L), eq("old-owner"), eq(99L), any())).thenReturn(0);
 
@@ -197,14 +153,6 @@ class OrderIdempotencyServiceImplTest {
         service.markFailed(1L, "owner");
 
         verify(idempotencyMapper).markFailed(eq(1L), eq("owner"), any());
-    }
-
-    @Test
-    void releaseLock_onlyReleasesAcquiredOwnerToken() {
-        service.releaseLock(7L, "k", "token", true);
-        service.releaseLock(7L, "k", "token", false);
-
-        verify(redisUtil, times(1)).deleteIfValueMatches("order:idem:7:k", "token");
     }
 
     private OrderIdempotency record(String state, String ownerToken,

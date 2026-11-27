@@ -472,7 +472,6 @@ class PricingIdentityHttpTest {
         redisUtil.deleteByPattern(RedisConstants.PREFIX_WECHAT_SESSION + "*");
         redisUtil.deleteByPattern(RedisConstants.PREFIX_RATE_LIMIT + "user:login*");
         redisUtil.delete(RedisConstants.PREFIX_PRICING_RETAIL_LEVEL_ID);
-        redisUtil.deleteByPattern(RedisConstants.PREFIX_ORDER_IDEMPOTENCY + "*");
     }
 
     private void cleanupDatabase() {

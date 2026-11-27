@@ -120,13 +120,10 @@ public class OrderIntakeServiceImpl implements OrderIntakeService {
         } catch (RuntimeException e) {
             // 提交前失败：独立事务置失败，允许同一幂等键立即重试
             orderIdempotencyService.markFailed(claim.recordId(), claim.ownerToken());
-            orderIdempotencyService.releaseLock(
-                    userId, idemKey, claim.ownerToken(), claim.lockAcquired());
             throw e;
         }
 
-        orderIdempotencyService.releaseLock(userId, idemKey, claim.ownerToken(), claim.lockAcquired());
-        // ③ 事务外：组装返回 VO；VO 失败不得把已成功的幂等记录置失败或删除
+        // ③ 事务外：组装返回 VO；VO 失败不得改写已成功的幂等记录
         return orderQueryService.getOrderView(userId, orderId);
     }
 
