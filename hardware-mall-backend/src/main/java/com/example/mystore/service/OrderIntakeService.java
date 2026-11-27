@@ -22,9 +22,9 @@ public interface OrderIntakeService {
     CheckoutPreviewVO previewOrder(CheckoutPreviewRequest request);
 
     /**
-     * 创建订单：幂等认领 → 地址/物流校验 → 定价快照 → 应付金额校验 → 事务内落库 → 释放快锁 → 组装视图。
+     * 创建订单：幂等认领 → 地址/物流校验 → 定价快照 → 应付金额校验 → 事务内落库并置幂等记录成功 → 组装视图。
      *
-     * <p>提交前失败会把幂等记录置失败并释放快锁; 提交后组装视图失败不回滚已成功的订单与幂等记录。
+     * <p>提交前失败会把幂等记录置失败; 提交后组装视图失败不回滚已成功的订单与幂等记录。
      */
     OrderVO createOrder(Long userId, CreateOrderRequest request, String idempotencyKey);
 }

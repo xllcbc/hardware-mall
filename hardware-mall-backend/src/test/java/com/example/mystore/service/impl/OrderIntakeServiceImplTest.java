@@ -258,7 +258,7 @@ class OrderIntakeServiceImplTest {
     void createOrder_succeededSameFingerprint_returnsOriginalOrder() {
         when(orderIdempotencyService.claim(eq(2L), eq("k1"), anyString()))
                 .thenReturn(new ClaimOutcome(
-                        ClaimOutcome.Kind.SUCCEEDED, 10L, "owner-token", 77L));
+                        ClaimOutcome.Kind.SUCCEEDED, 10L, null, 77L));
         OrderVO original = new OrderVO();
         original.setId(77L);
         original.setOrderNo("SO-ORIGINAL");
@@ -278,7 +278,7 @@ class OrderIntakeServiceImplTest {
     void createOrder_processing_throwsProcessingWithoutInsert() {
         when(orderIdempotencyService.claim(eq(2L), eq("k1"), anyString()))
                 .thenReturn(new ClaimOutcome(
-                        ClaimOutcome.Kind.PROCESSING, 10L, "other-owner", null));
+                        ClaimOutcome.Kind.PROCESSING, 10L, null, null));
 
         assertThatThrownBy(() -> intakeService.createOrder(2L, stubValidRequest(), "k1"))
                 .isInstanceOf(BusinessException.class)
@@ -292,7 +292,7 @@ class OrderIntakeServiceImplTest {
     void createOrder_conflictingFingerprint_throwsConflict() {
         when(orderIdempotencyService.claim(eq(2L), eq("k1"), anyString()))
                 .thenReturn(new ClaimOutcome(
-                        ClaimOutcome.Kind.CONFLICT, 10L, "owner-token", null));
+                        ClaimOutcome.Kind.CONFLICT, 10L, null, null));
 
         assertThatThrownBy(() -> intakeService.createOrder(2L, stubValidRequest(), "k1"))
                 .isInstanceOfSatisfying(IdempotencyConflictException.class, e -> {
