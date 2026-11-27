@@ -1,4 +1,4 @@
-# ADR-0011：先上线后升级 Spring Boot 至 4.1.3
+# ADR-0010：先上线后升级 Spring Boot 至 4.1.3
 
 - 状态：Accepted
 - 日期：2026-11-23
