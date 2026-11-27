@@ -60,10 +60,10 @@ public class OrderIdempotencyServiceImpl implements OrderIdempotencyService {
                 case OrderIdempotency.STATE_SUCCEEDED -> {
                     if (Objects.equals(record.getRequestHash(), requestHash)) {
                         return new ClaimOutcome(ClaimOutcome.Kind.SUCCEEDED, record.getId(),
-                                ownerToken, record.getOrderId());
+                                null, record.getOrderId());
                     }
                     return new ClaimOutcome(ClaimOutcome.Kind.CONFLICT, record.getId(),
-                            ownerToken, null);
+                            null, null);
                 }
                 case OrderIdempotency.STATE_FAILED -> {
                     int updated = idempotencyMapper.claimFailedRecord(
@@ -87,7 +87,7 @@ public class OrderIdempotencyServiceImpl implements OrderIdempotencyService {
                         continue;
                     }
                     return new ClaimOutcome(ClaimOutcome.Kind.PROCESSING, record.getId(),
-                            ownerToken, null);
+                            null, null);
                 }
                 default -> throw new BusinessException("幂等记录状态异常，请刷新后重试");
             }

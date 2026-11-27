@@ -26,6 +26,7 @@ public interface OrderIdempotencyService {
 
     int cleanupSettledBefore(LocalDateTime cutoff);
 
+    /** ownerToken 仅在 ACQUIRED 时非空，用于收尾时 markSucceeded / markFailed 的数据库 CAS。 */
     record ClaimOutcome(Kind kind, Long recordId, String ownerToken, Long orderId) {
 
         public enum Kind {
